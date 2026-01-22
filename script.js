@@ -6,13 +6,15 @@ const backBtn = document.getElementById('back-btn');
 const mainPanel = document.getElementById('main-panel');
 const requestBtn = document.getElementById('request-btn');
 const userMarker = document.getElementById('user-marker');
+const profileBtn = document.getElementById('profile-btn');
 
 // Sections
 const sections = {
     destination: document.getElementById('state-destination'),
     rideSelect: document.getElementById('state-ride-select'),
     loading: document.getElementById('state-loading'),
-    driver: document.getElementById('state-driver')
+    driver: document.getElementById('state-driver'),
+    profile: document.getElementById('state-profile')
 };
 
 let currentCarType = null;
@@ -103,6 +105,12 @@ backBtn.addEventListener('click', () => {
     resetApp();
 });
 
+// 5. Profile Handler
+profileBtn.addEventListener('click', () => {
+    switchSection('profile');
+    backBtn.classList.remove('hidden');
+});
+
 window.resetApp = function() {
     // Reset UI
     destInput.value = '';
@@ -127,20 +135,24 @@ window.resetApp = function() {
 function switchSection(name) {
     // Hide all first
     Object.values(sections).forEach(sec => {
-        sec.classList.add('hidden');
-        sec.classList.remove('slide-up-enter-active');
+        if(sec) {
+            sec.classList.add('hidden');
+            sec.classList.remove('slide-up-enter-active');
+        }
     });
     
     // Show target
     const target = sections[name];
-    target.classList.remove('hidden');
-    target.classList.add('slide-up-enter');
-    
-    // Trigger reflow for animation
-    void target.offsetWidth;
-    
-    target.classList.add('slide-up-enter-active');
-    target.classList.remove('slide-up-enter');
+    if(target) {
+        target.classList.remove('hidden');
+        target.classList.add('slide-up-enter');
+        
+        // Trigger reflow for animation
+        void target.offsetWidth;
+        
+        target.classList.add('slide-up-enter-active');
+        target.classList.remove('slide-up-enter');
+    }
 }
 
 // Ambient Animations
