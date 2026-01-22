@@ -10,23 +10,36 @@
     <style>
       body {
         font-family: 'Cairo', sans-serif;
+        overscroll-behavior: none;
       }
       
-      /* Map Pattern Simulation */
-      .map-bg {
-        background-color: #e5e7eb;
+      /* Interactive Map Styles */
+      .map-pattern {
+        background-color: #f3f4f6;
         background-image: 
-          linear-gradient(90deg, rgba(255,255,255,.5) 50%, transparent 50%),
-          linear-gradient(rgba(255,255,255,.5) 50%, transparent 50%);
-        background-size: 50px 50px;
-        position: relative;
-      }
-      .map-road {
-        position: absolute;
-        background: #cbd5e1;
-        border-radius: 999px;
+          linear-gradient(#e5e7eb 4px, transparent 4px),
+          linear-gradient(90deg, #e5e7eb 4px, transparent 4px);
+        background-size: 80px 80px;
       }
       
+      .city-block {
+        position: absolute;
+        background-color: #e2e8f0;
+        border-radius: 4px;
+      }
+      
+      .water-body {
+        position: absolute;
+        background-color: #bfdbfe;
+        border-radius: 20px;
+      }
+
+      .green-park {
+        position: absolute;
+        background-color: #dcfce7;
+        border-radius: 16px;
+      }
+
       /* Custom Animations */
       @keyframes pulse-ring {
         0% { transform: scale(0.33); opacity: 1; }
@@ -35,12 +48,23 @@
       .marker-pulse::before {
         content: '';
         position: absolute;
-        left: -10px; top: -10px;
-        right: -10px; bottom: -10px;
+        left: -12px; top: -12px;
+        right: -12px; bottom: -12px;
         border-radius: 50%;
-        background-color: rgba(99, 102, 241, 0.5);
-        animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        background-color: rgba(99, 102, 241, 0.4);
+        animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
         z-index: -1;
+      }
+
+      /* Pin Drop Animation */
+      @keyframes pin-drop {
+        0% { transform: translate(-50%, -150%) scale(1.5); opacity: 0; }
+        60% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+        80% { transform: translate(-50%, -15%) scale(1); }
+        100% { transform: translate(-50%, 0) scale(1); }
+      }
+      .pin-anim {
+        animation: pin-drop 0.4s ease-out forwards;
       }
 
       .slide-up-enter {
@@ -58,7 +82,6 @@
         background-color: #eef2ff;
       }
       
-      /* Scrollbar Hide */
       .no-scrollbar::-webkit-scrollbar {
         display: none;
       }
@@ -67,7 +90,6 @@
         scrollbar-width: none;
       }
 
-      /* Sidebar Transitions */
       .sidebar-open {
           transform: translateX(0) !important;
       }
@@ -75,39 +97,93 @@
           opacity: 1 !important;
           pointer-events: auto !important;
       }
+
+      /* Draggable Cursor States */
+      .grab-cursor { cursor: grab; }
+      .grabbing-cursor { cursor: grabbing; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
     
-    <!-- Map Layer (Visual Simulation) -->
-    <div id="map-container" class="absolute inset-0 z-0 map-bg overflow-hidden">
-        <!-- Simulated Roads -->
-        <div class="map-road w-[200%] h-8 top-1/3 -left-1/2 rotate-12"></div>
-        <div class="map-road w-8 h-[200%] top-0 left-1/3"></div>
-        <div class="map-road w-[150%] h-6 bottom-1/4 -left-10 -rotate-6"></div>
-        
-        <!-- Map Markers -->
-        <div id="user-marker" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 transition-all duration-700">
-            <div class="marker-pulse relative w-6 h-6 bg-indigo-600 rounded-full border-4 border-white shadow-lg">
-                 <div class="absolute -top-10 left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded whitespace-nowrap opacity-0 transition-opacity duration-300" id="pickup-label">موقعك الحالي</div>
+    <!-- Map Container (Interactive) -->
+    <div id="map-container" class="absolute inset-0 z-0 overflow-hidden grab-cursor bg-gray-100">
+        <!-- The Draggable World Layer -->
+        <div id="map-world" class="absolute top-0 left-0 w-[3000px] h-[3000px] origin-center map-pattern transition-transform duration-75 will-change-transform">
+            
+            <!-- Decorative City Elements -->
+            <!-- Parks -->
+            <div class="green-park w-64 h-64 top-[500px] left-[500px]"></div>
+            <div class="green-park w-96 h-48 top-[1200px] left-[1800px]"></div>
+            <div class="green-park w-32 h-32 top-[200px] left-[1500px]"></div>
+            
+            <!-- Water -->
+            <div class="water-body w-[800px] h-32 top-[1500px] left-[200px] rotate-3"></div>
+            <div class="water-body w-48 h-48 rounded-full top-[800px] left-[2200px]"></div>
+
+            <!-- Random Buildings/Blocks -->
+            <div class="city-block w-20 h-20 top-[400px] left-[800px]"></div>
+            <div class="city-block w-40 h-20 top-[600px] left-[900px]"></div>
+            <div class="city-block w-20 h-60 top-[1000px] left-[1200px]"></div>
+            
+            <!-- Street Names (Simulated) -->
+            <div class="absolute top-[520px] left-[520px] text-green-700/50 text-xs font-bold">حديقة الملك فهد</div>
+            <div class="absolute top-[1520px] left-[300px] text-blue-700/50 text-xs font-bold">وادي حنيفة</div>
+
+            <!-- Dynamic Moving Cars in World Space -->
+            <div class="absolute transition-all duration-[5000ms] ease-linear z-10" id="car-1" style="top: 1000px; left: 1000px;">
+                 <i class="fas fa-car-side text-gray-700 text-lg transform scale-x-[-1]"></i>
+            </div>
+            <div class="absolute transition-all duration-[6000ms] ease-linear z-10" id="car-2" style="top: 1200px; left: 1400px;">
+                 <i class="fas fa-car-side text-gray-500 text-lg"></i>
+            </div>
+            <div class="absolute transition-all duration-[7000ms] ease-linear z-10" id="car-3" style="top: 800px; left: 600px;">
+                 <i class="fas fa-taxi text-yellow-500 text-lg transform scale-x-[-1]"></i>
+            </div>
+
+            <!-- Destination Marker (Placed on Click) -->
+            <div id="dest-marker" class="absolute hidden z-20">
+                <div class="relative w-8 h-8 pin-anim">
+                    <i class="fas fa-map-marker-alt text-4xl text-red-500 absolute bottom-0 left-1/2 transform -translate-x-1/2 drop-shadow-md"></i>
+                    <div class="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1 w-2 h-1 bg-black/20 rounded-full blur-sm"></div>
+                </div>
             </div>
         </div>
 
-        <!-- Random Cars Moving Animation -->
-        <div class="absolute top-1/3 left-1/4 transition-all duration-[3000ms] ease-linear" id="car-1">
-             <i class="fas fa-car-side text-gray-700 text-xl transform scale-x-[-1]"></i>
+        <!-- User Pickup Marker (Fixed Center Screen) -->
+        <div id="user-marker" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none z-30 flex flex-col items-center justify-center transition-all duration-300">
+            <div class="relative">
+                <div class="marker-pulse w-6 h-6 bg-indigo-600 rounded-full border-4 border-white shadow-xl flex items-center justify-center">
+                    <div class="w-2 h-2 bg-white rounded-full"></div>
+                </div>
+                <div class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-black/80 text-white text-[10px] py-1 px-3 rounded-full whitespace-nowrap backdrop-blur-sm">
+                    موقع الإقلالة
+                </div>
+                <!-- Center Beam -->
+                <div class="absolute top-6 left-1/2 transform -translate-x-1/2 w-0.5 h-8 bg-indigo-600/50"></div>
+                <div class="absolute top-[38px] left-1/2 transform -translate-x-1/2 w-8 h-8 rounded-full bg-indigo-500/10"></div>
+            </div>
         </div>
-        <div class="absolute bottom-1/3 right-1/4 transition-all duration-[4000ms] ease-linear" id="car-2">
-             <i class="fas fa-car-side text-gray-500 text-xl"></i>
+
+        <!-- Map Controls -->
+        <div class="absolute bottom-80 left-4 flex flex-col space-y-2 pointer-events-auto z-20">
+            <button id="zoom-in" class="w-10 h-10 bg-white rounded-full shadow-lg text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-all active:scale-90">
+                <i class="fas fa-plus"></i>
+            </button>
+            <button id="zoom-out" class="w-10 h-10 bg-white rounded-full shadow-lg text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-all active:scale-90">
+                <i class="fas fa-minus"></i>
+            </button>
+            <button id="center-map" class="w-10 h-10 bg-white rounded-full shadow-lg text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-all active:scale-90 mt-4">
+                <i class="fas fa-crosshairs"></i>
+            </button>
         </div>
     </div>
 
     <!-- Top Bar -->
-    <div class="relative z-10 p-4 flex justify-between items-center bg-gradient-to-b from-black/10 to-transparent pointer-events-none">
+    <div class="relative z-10 p-4 flex justify-between items-center bg-gradient-to-b from-black/20 to-transparent pointer-events-none">
         <button id="menu-btn" class="bg-white p-3 rounded-full shadow-lg pointer-events-auto hover:scale-110 transition-transform text-gray-700 hover:text-indigo-600 active:scale-95">
             <i class="fas fa-bars"></i>
         </button>
-        <div class="bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-lg font-bold text-indigo-900 pointer-events-auto cursor-pointer">
+        <div class="bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-lg font-bold text-indigo-900 pointer-events-auto cursor-pointer shadow-indigo-500/20">
             تاكسي أكوادرا
         </div>
         <button id="profile-btn" class="bg-white p-3 rounded-full shadow-lg pointer-events-auto hover:scale-110 transition-transform text-indigo-600 hover:text-indigo-800">
@@ -173,7 +249,7 @@
                  <i class="fas fa-sign-out-alt w-8 text-center ml-2"></i>
                  <span class="font-bold">تسجيل الخروج</span>
              </button>
-             <p class="text-center text-gray-300 text-xs mt-4">الإصدار 1.0.2</p>
+             <p class="text-center text-gray-300 text-xs mt-4">الإصدار 1.1.0 (Map Update)</p>
         </div>
     </div>
 
@@ -186,7 +262,7 @@
         </button>
 
         <!-- Panel Container -->
-        <div class="bg-white rounded-t-3xl shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-hidden transition-all duration-500 ease-in-out" id="main-panel" style="max-height: 85vh;">
+        <div class="bg-white rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.3)] w-full max-w-lg mx-auto pointer-events-auto overflow-hidden transition-all duration-500 ease-in-out" id="main-panel" style="max-height: 85vh;">
             
             <!-- State 1: Where to? -->
             <div id="state-destination" class="p-6">
@@ -198,14 +274,14 @@
                         <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 ml-3">
                             <i class="fas fa-map-marker-alt"></i>
                         </div>
-                        <input type="text" value="موقعك الحالي" class="bg-transparent w-full outline-none text-gray-700 font-medium" readonly>
+                        <input type="text" id="current-loc-input" value="موقعك الحالي" class="bg-transparent w-full outline-none text-gray-700 font-medium" readonly>
                     </div>
                     
                     <div class="flex items-center bg-gray-50 p-3 rounded-xl border border-gray-100 focus-within:ring-2 ring-indigo-500/50 transition-all shadow-sm">
                         <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 ml-3">
                             <i class="fas fa-search"></i>
                         </div>
-                        <input type="text" id="dest-input" placeholder="ابحث عن وجهة..." class="bg-transparent w-full outline-none text-gray-800">
+                        <input type="text" id="dest-input" placeholder="حدد وجهة على الخريطة أو ابحث..." class="bg-transparent w-full outline-none text-gray-800">
                     </div>
                 </div>
 
@@ -223,24 +299,30 @@
                         </div>
                         <span class="text-sm text-gray-600 font-medium">العمل</span>
                     </button>
+                    <button class="flex flex-col items-center min-w-[80px] group">
+                        <div class="w-14 h-14 bg-gray-50 rounded-full flex items-center justify-center text-gray-600 mb-2 group-hover:bg-gray-100 transition-colors">
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <span class="text-sm text-gray-600 font-medium">المفضلة</span>
+                    </button>
                 </div>
                 
-                <!-- Existing Feature: The Card (Repurposed as Promo) -->
+                <!-- Promo Card -->
                 <div class="mt-6 card group cursor-pointer bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-4 text-white shadow-lg relative overflow-hidden">
                      <div class="absolute top-0 left-0 w-20 h-20 bg-white opacity-10 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
                      <div class="flex justify-between items-center">
                          <div>
-                             <h3 class="font-bold text-lg">مرحباً بك في أكوادرا</h3>
-                             <p class="text-indigo-100 text-sm">اضغط هنا لاكتشاف المزيد</p>
+                             <h3 class="font-bold text-lg">جولة في المدينة؟</h3>
+                             <p class="text-indigo-100 text-sm">خصم 20% على الرحلات الطويلة</p>
                          </div>
                          <div class="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm group-hover:bg-white/30 transition-colors">
-                            <i class="fas fa-gift"></i>
+                            <i class="fas fa-route"></i>
                          </div>
                      </div>
                 </div>
             </div>
 
-            <!-- State 2: Select Car (Hidden) -->
+            <!-- State 2: Select Car -->
             <div id="state-ride-select" class="hidden p-6 bg-white">
                 <div class="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4"></div>
                 <div class="text-center mb-6">
@@ -303,7 +385,7 @@
                 </button>
             </div>
 
-            <!-- State 3: Finding Driver (Hidden) -->
+            <!-- State 3: Finding Driver -->
             <div id="state-loading" class="hidden p-8 text-center bg-white">
                 <div class="relative w-20 h-20 mx-auto mb-6">
                     <div class="absolute inset-0 rounded-full border-4 border-gray-100"></div>
@@ -314,7 +396,7 @@
                 <p class="text-gray-500">نبحث عن أقرب كابتن لك</p>
             </div>
 
-            <!-- State 4: Driver Found (Hidden) -->
+            <!-- State 4: Driver Found -->
             <div id="state-driver" class="hidden p-0 bg-white">
                 <div class="bg-indigo-600 p-4 text-white flex justify-between items-center rounded-t-3xl">
                     <div>
@@ -361,9 +443,8 @@
                 </div>
             </div>
 
-            <!-- State 5: User Profile & History (NEW) -->
+            <!-- State 5: User Profile -->
             <div id="state-profile" class="hidden p-0 bg-white h-full overflow-y-auto no-scrollbar pb-10">
-                <!-- Profile Header -->
                 <div class="bg-gradient-to-br from-indigo-600 to-purple-700 p-8 rounded-b-[2.5rem] shadow-xl relative text-white text-center">
                     <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
                     <div class="relative z-10">
@@ -377,8 +458,6 @@
                          </div>
                     </div>
                 </div>
-
-                <!-- Stats Cards -->
                 <div class="grid grid-cols-2 gap-4 px-6 -mt-8 relative z-20 mb-6">
                     <div class="bg-white p-4 rounded-2xl shadow-lg border border-gray-100 text-center hover:transform hover:-translate-y-1 transition-transform">
                          <div class="text-gray-400 text-sm mb-1">المحفظة</div>
@@ -389,15 +468,11 @@
                          <div class="text-xl font-bold text-purple-600">450</div>
                     </div>
                 </div>
-
-                <!-- Ride History List -->
                 <div class="px-6">
                     <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
                         <i class="fas fa-history ml-2 text-indigo-500"></i> سجل الرحلات الأخيرة
                     </h3>
-                    
                     <div class="space-y-4">
-                        <!-- History Item 1 -->
                         <div class="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-indigo-50 hover:border-indigo-100 transition-colors cursor-pointer group">
                              <div class="flex items-center">
                                  <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-gray-500 shadow-sm group-hover:scale-110 transition-transform">
@@ -413,50 +488,11 @@
                                  <span class="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded-full">مكتملة</span>
                              </div>
                         </div>
-
-                        <!-- History Item 2 -->
-                        <div class="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-indigo-50 hover:border-indigo-100 transition-colors cursor-pointer group">
-                             <div class="flex items-center">
-                                 <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-gray-500 shadow-sm group-hover:scale-110 transition-transform">
-                                     <i class="fas fa-shopping-bag"></i>
-                                 </div>
-                                 <div class="mr-3">
-                                     <h4 class="font-bold text-gray-800 text-sm">مول الرياض <i class="fas fa-arrow-left text-xs mx-1 text-gray-400"></i> فندق النرجس</h4>
-                                     <p class="text-xs text-gray-400 mt-1">20 اكتوبر • 08:15 م</p>
-                                 </div>
-                             </div>
-                             <div class="text-left">
-                                 <div class="font-bold text-gray-800">42 ر.س</div>
-                                 <span class="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded-full">مكتملة</span>
-                             </div>
-                        </div>
-
-                        <!-- History Item 3 -->
-                        <div class="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-red-50 hover:border-red-100 transition-colors cursor-pointer group">
-                             <div class="flex items-center">
-                                 <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-gray-500 shadow-sm group-hover:scale-110 transition-transform">
-                                     <i class="fas fa-plane"></i>
-                                 </div>
-                                 <div class="mr-3">
-                                     <h4 class="font-bold text-gray-800 text-sm">المطار <i class="fas fa-arrow-left text-xs mx-1 text-gray-400"></i> حي الملقا</h4>
-                                     <p class="text-xs text-gray-400 mt-1">15 اكتوبر • 10:00 ص</p>
-                                 </div>
-                             </div>
-                             <div class="text-left">
-                                 <div class="font-bold text-gray-400 line-through">85 ر.س</div>
-                                 <span class="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full">ملغاة</span>
-                             </div>
-                        </div>
                     </div>
-
-                    <!-- Settings Link -->
                     <div class="mt-6 border-t border-gray-100 pt-4">
                         <button class="w-full flex items-center justify-between p-3 text-gray-600 hover:bg-gray-50 rounded-xl transition-colors">
                             <span class="flex items-center"><i class="fas fa-cog ml-3 text-gray-400"></i> الإعدادات</span>
                             <i class="fas fa-chevron-left text-xs text-gray-300"></i>
-                        </button>
-                        <button class="w-full flex items-center justify-between p-3 text-red-500 hover:bg-red-50 rounded-xl transition-colors mt-2">
-                            <span class="flex items-center"><i class="fas fa-sign-out-alt ml-3"></i> تسجيل الخروج</span>
                         </button>
                     </div>
                 </div>
