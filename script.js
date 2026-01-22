@@ -7,6 +7,10 @@ const mainPanel = document.getElementById('main-panel');
 const requestBtn = document.getElementById('request-btn');
 const userMarker = document.getElementById('user-marker');
 const profileBtn = document.getElementById('profile-btn');
+const menuBtn = document.getElementById('menu-btn');
+const closeMenuBtn = document.getElementById('close-menu-btn');
+const sideMenu = document.getElementById('side-menu');
+const menuOverlay = document.getElementById('menu-overlay');
 
 // Sections
 const sections = {
@@ -33,6 +37,42 @@ document.addEventListener('DOMContentLoaded', () => {
     // Start ambient car animation
     animateAmbientCars();
 });
+
+// --- Menu Logic (NEW) ---
+function toggleMenu() {
+    const isOpen = sideMenu.classList.contains('sidebar-open');
+    
+    if (isOpen) {
+        // Close
+        sideMenu.classList.remove('sidebar-open');
+        menuOverlay.classList.remove('overlay-open');
+    } else {
+        // Open
+        sideMenu.classList.add('sidebar-open');
+        menuOverlay.classList.add('overlay-open');
+    }
+}
+
+if (menuBtn) {
+    menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMenu();
+    });
+}
+
+if (closeMenuBtn) {
+    closeMenuBtn.addEventListener('click', toggleMenu);
+}
+
+if (menuOverlay) {
+    menuOverlay.addEventListener('click', toggleMenu);
+}
+
+// Close menu when clicking links
+document.querySelectorAll('#side-menu a').forEach(link => {
+    link.addEventListener('click', toggleMenu);
+});
+
 
 // --- Logic Flow ---
 
