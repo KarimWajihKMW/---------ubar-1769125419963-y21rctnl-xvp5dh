@@ -116,6 +116,15 @@
       .glow-text {
         text-shadow: 0 0 20px rgba(255,255,255,0.5);
       }
+
+      /* Route Line Animation */
+      .route-line {
+        stroke-dasharray: 20;
+        animation: dash-move 1s linear infinite;
+      }
+      @keyframes dash-move {
+        to { stroke-dashoffset: -40; }
+      }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
@@ -125,6 +134,12 @@
         <!-- The Draggable World Layer -->
         <div id="map-world" class="absolute top-0 left-0 w-[3000px] h-[3000px] origin-center map-pattern transition-transform duration-75 will-change-transform">
             
+            <!-- SVG Layer for Routes -->
+            <svg class="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
+                <!-- Dynamic Route Line -->
+                <path id="driver-route-line" d="" stroke="#6366f1" stroke-width="6" fill="none" stroke-linecap="round" class="route-line opacity-0 transition-opacity duration-300" />
+            </svg>
+
             <!-- Decorative City Elements -->
             <!-- Parks -->
             <div class="green-park w-64 h-64 top-[500px] left-[500px]"></div>
@@ -154,6 +169,24 @@
             </div>
             <div class="absolute transition-all duration-[7000ms] ease-linear z-10" id="car-3" style="top: 800px; left: 600px;">
                  <i class="fas fa-taxi text-yellow-500 text-lg transform scale-x-[-1]"></i>
+            </div>
+
+            <!-- ACTIVE DRIVER MARKER (Real-time tracking) -->
+            <div id="active-driver" class="absolute z-50 hidden transition-transform duration-100 ease-linear">
+                <div class="relative">
+                    <!-- Car Body -->
+                    <div class="w-12 h-20 bg-gray-900 rounded-lg shadow-2xl border-2 border-white flex flex-col items-center justify-center relative z-10">
+                        <div class="w-10 h-4 bg-gray-700 rounded-sm mt-1 mb-auto"></div> <!-- Windshield -->
+                        <div class="w-10 h-3 bg-red-500/80 rounded-sm mb-1 mt-auto"></div> <!-- Rear Lights -->
+                    </div>
+                    <!-- Glow/Headlights -->
+                    <div class="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-32 bg-yellow-300/20 blur-xl rounded-t-full pointer-events-none"></div>
+                    <!-- Label -->
+                    <div class="absolute -right-24 top-1/2 -translate-y-1/2 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-gray-200 flex items-center gap-2">
+                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" class="w-6 h-6 rounded-full bg-gray-100" alt="Driver">
+                        <span>أحمد قادم إليك</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Destination Marker (Placed on Click) -->
@@ -421,7 +454,7 @@
                     <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-xl"></div>
                     <div class="relative z-10">
                         <p class="text-indigo-100 text-sm font-medium mb-1">الكابتن في الطريق</p>
-                        <h3 class="text-3xl font-bold">4 دقائق</h3>
+                        <h3 class="text-3xl font-bold" id="eta-display">4 دقائق</h3>
                     </div>
                     <div class="relative z-10 bg-white/20 px-4 py-1.5 rounded-full text-sm font-bold backdrop-blur border border-white/20">قادم</div>
                 </div>
