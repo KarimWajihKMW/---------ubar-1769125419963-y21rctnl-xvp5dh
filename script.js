@@ -18,6 +18,8 @@ const menuOverlay = document.getElementById('menu-overlay');
 const activeDriverMarker = document.getElementById('active-driver');
 const driverRouteLine = document.getElementById('driver-route-line');
 const etaDisplay = document.getElementById('eta-display');
+const rideEtaDisplay = document.getElementById('ride-eta-display');
+const driverLabelText = document.getElementById('driver-label-text');
 
 // Map Elements
 const mapContainer = document.getElementById('map-container');
@@ -32,6 +34,8 @@ const sections = {
     rideSelect: document.getElementById('state-ride-select'),
     loading: document.getElementById('state-loading'),
     driver: document.getElementById('state-driver'),
+    inRide: document.getElementById('state-in-ride'),
+    rating: document.getElementById('state-rating'),
     profile: document.getElementById('state-profile')
 };
 
@@ -164,7 +168,6 @@ centerMapBtn.addEventListener('click', () => {
 function handleMapClick(cx, cy) {
     const rect = mapWorld.getBoundingClientRect();
     // Approximate calculation for visual placement relative to the world container
-    // Note: This is a visual approximation. Real mapping requires projection libraries (Leaflet/Mapbox).
     const relX = (cx - rect.left) / mapState.scale;
     const relY = (cy - rect.top) / mapState.scale;
     
@@ -244,6 +247,22 @@ profileBtn.addEventListener('click', () => {
     backBtn.classList.remove('hidden');
 });
 
+// 6. Rating Stars
+document.querySelectorAll('.star-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const rating = parseInt(btn.dataset.rating);
+        document.querySelectorAll('.star-btn').forEach(b => {
+            if (parseInt(b.dataset.rating) <= rating) {
+                b.classList.add('text-yellow-400');
+                b.classList.remove('text-gray-300');
+            } else {
+                b.classList.remove('text-yellow-400');
+                b.classList.add('text-gray-300');
+            }
+        });
+    });
+});
+
 window.resetApp = function() {
     destInput.value = '';
     currentCarType = null;
@@ -252,7 +271,8 @@ window.resetApp = function() {
     backBtn.classList.add('hidden');
     
     document.querySelectorAll('.car-select').forEach(el => el.classList.remove('selected'));
-    
+    document.querySelectorAll('.star-btn').forEach(b => { b.classList.remove('text-yellow-400'); b.classList.add('text-gray-300'); });
+
     userMarker.classList.remove('opacity-0');
     destMarker.classList.add('hidden');
     
@@ -281,12 +301,10 @@ function switchSection(name) {
 // --- Driver Tracking Logic ---
 function startDriverTracking() {
     // 1. Calculate Start Point (Screen Center on Map + Offset)
-    // The User is always at screen center. We need to find that point in map coordinates.
     const viewportCenterX = window.innerWidth / 2;
     const viewportCenterY = window.innerHeight / 2;
     
     // Convert viewport center to map world coordinates
-    // Formula: WorldX = (ViewportX - TranslateX) / Scale
     const userMapX = (viewportCenterX - mapState.x) / mapState.scale;
     const userMapY = (viewportCenterY - mapState.y) / mapState.scale;
     
@@ -298,23 +316,18 @@ function startDriverTracking() {
     activeDriverMarker.classList.remove('hidden');
     activeDriverMarker.style.left = `${driverX}px`;
     activeDriverMarker.style.top = `${driverY}px`;
+    driverLabelText.innerText = 'أحمد قادم إليك';
     
     // Show Route Line
     driverRouteLine.classList.remove('opacity-0');
 
     const startTime = Date.now();
-    const duration = 15000; // 15 seconds to arrive
+    const duration = 10000; // 10 seconds to arrive
     
     function animate() {
         const now = Date.now();
         const elapsed = now - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        
-        // Update Target (In case map moved, target is always screen center converted to world coords)
-        // Actually, physically on the map div, the "User Location" is a fixed point IF the map wasn't dragged.
-        // If the user drags the map, the "User Marker" stays screen center, so the "Target World Coord" changes.
-        // To keep it simple: The driver drives to the coordinate where the user WAS when tracking started, OR
-        // we dynamically update destination. Let's dynamically update.
         
         const currentViewportCenterX = window.innerWidth / 2;
         const currentViewportCenterY = window.innerHeight / 2;
@@ -331,18 +344,16 @@ function startDriverTracking() {
         const angle = Math.atan2(dy, dx) * 180 / Math.PI;
         
         // Update Marker
-        activeDriverMarker.style.transform = `translate(-50%, -50%) rotate(${angle + 90}deg)`; // +90 because car icon points up
+        activeDriverMarker.style.transform = `translate(-50%, -50%) rotate(${angle + 90}deg)`;
         activeDriverMarker.style.left = `${currentX}px`;
         activeDriverMarker.style.top = `${currentY}px`;
         
-        // Update Route Line (Curve from Driver to User)
-        // Simple straight line for now, or bezier
+        // Update Route Line
         const midX = (currentX + targetX) / 2;
         const midY = (currentY + targetY) / 2;
-        // Creating a slight curve
         driverRouteLine.setAttribute('d', `M${currentX},${currentY} Q${midX + 50},${midY - 50} ${targetX},${targetY}`);
         
-        // Update ETA Text randomly
+        // Update ETA Text
         if (elapsed % 1000 < 20) {
              const remainingSec = Math.ceil((1 - progress) * 15);
              if (remainingSec > 60) etaDisplay.innerText = Math.ceil(remainingSec/60) + " دقائق";
@@ -354,16 +365,102 @@ function startDriverTracking() {
         } else {
             // Arrived
             etaDisplay.innerText = "وصل";
+            driverLabelText.innerText = 'وصل الكابتن';
+            
+            // Wait 2 seconds then start Ride
+            setTimeout(() => {
+                startRide(currentX, currentY);
+            }, 2000);
         }
     }
     
     driverAnimationId = requestAnimationFrame(animate);
 }
 
+function startRide(startX, startY) {
+    switchSection('inRide');
+    
+    // Determine destination (either marker or random point)
+    let destX, destY;
+    
+    if (!destMarker.classList.contains('hidden')) {
+        destX = parseFloat(destMarker.style.left);
+        destY = parseFloat(destMarker.style.top);
+    } else {
+        // Random point far away
+        destX = startX - 800;
+        destY = startY + 600;
+    }
+
+    const startTime = Date.now();
+    const duration = 12000; // 12 seconds ride
+    
+    driverLabelText.innerText = 'جاري الرحلة';
+
+    function animateRide() {
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        const currentX = startX + (destX - startX) * progress;
+        const currentY = startY + (destY - startY) * progress;
+        
+        const dx = destX - currentX;
+        const dy = destY - currentY;
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        
+        activeDriverMarker.style.transform = `translate(-50%, -50%) rotate(${angle + 90}deg)`;
+        activeDriverMarker.style.left = `${currentX}px`;
+        activeDriverMarker.style.top = `${currentY}px`;
+
+        // Move Map to follow car (Auto-Pan)
+        // We want the car to stay roughly center. 
+        // MapWorld transform = translate(ScreenWidth/2 - CarWorldX*Scale, ScreenHeight/2 - CarWorldY*Scale)
+        const viewportCenterX = window.innerWidth / 2;
+        const viewportCenterY = window.innerHeight / 2;
+        
+        mapState.x = viewportCenterX - (currentX * mapState.scale);
+        mapState.y = viewportCenterY - (currentY * mapState.scale);
+        updateMapTransform();
+        
+        driverRouteLine.setAttribute('d', `M${currentX},${currentY} L${destX},${destY}`);
+
+        if (elapsed % 1000 < 20) {
+             const remainingSec = Math.ceil((1 - progress) * 12);
+             rideEtaDisplay.innerText = remainingSec + " دقيقة";
+        }
+
+        if (progress < 1) {
+            driverAnimationId = requestAnimationFrame(animateRide);
+        } else {
+            // End Ride
+            setTimeout(() => {
+                triggerConfetti();
+                switchSection('rating');
+                stopDriverTracking();
+            }, 1000);
+        }
+    }
+
+    driverAnimationId = requestAnimationFrame(animateRide);
+}
+
 function stopDriverTracking() {
     if (driverAnimationId) cancelAnimationFrame(driverAnimationId);
     activeDriverMarker.classList.add('hidden');
     driverRouteLine.classList.add('opacity-0');
+}
+
+function triggerConfetti() {
+    for(let i=0; i<50; i++) {
+        const confetti = document.createElement('div');
+        confetti.classList.add('confetti');
+        confetti.style.left = Math.random() * 100 + 'vw';
+        confetti.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 50%)`;
+        confetti.style.animationDuration = (Math.random() * 2 + 2) + 's';
+        document.body.appendChild(confetti);
+        setTimeout(() => confetti.remove(), 4000);
+    }
 }
 
 // Ambient Animations
