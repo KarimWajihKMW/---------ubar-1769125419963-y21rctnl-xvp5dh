@@ -1,4 +1,4 @@
-console.log('Akwadra Super Builder Initialized - Fixed Reference Errors');
+console.log('Akwadra Super Builder Initialized - Database Connected');
 
 // --- Configuration & Elements ---
 const destInput = document.getElementById('dest-input');
@@ -13,6 +13,22 @@ const menuBtn = document.getElementById('menu-btn');
 const closeMenuBtn = document.getElementById('close-menu-btn');
 const sideMenu = document.getElementById('side-menu');
 const menuOverlay = document.getElementById('menu-overlay');
+const tripHistoryContainer = document.getElementById('trip-history-container');
+const toastNotification = document.getElementById('toast-notification');
+const toastMessage = document.getElementById('toast-message');
+
+// Profile & Sidebar Elements
+const profileName = document.getElementById('profile-name');
+const profileAvatar = document.getElementById('profile-avatar');
+const profileRating = document.getElementById('profile-rating');
+const profileBalance = document.getElementById('profile-balance');
+const profilePoints = document.getElementById('profile-points');
+const sidebarName = document.getElementById('sidebar-name');
+const sidebarAvatar = document.getElementById('sidebar-avatar');
+const sidebarRating = document.getElementById('sidebar-rating');
+const sidebarBalance = document.getElementById('sidebar-balance');
+const navAvatar = document.getElementById('nav-avatar');
+const rideDestText = document.getElementById('ride-dest-text');
 
 // Driver Tracking Elements
 const activeDriverMarker = document.getElementById('active-driver');
@@ -40,6 +56,7 @@ const sections = {
 };
 
 let currentCarType = null;
+let currentTripPrice = 0;
 let mapState = {
     x: -1500 + (window.innerWidth / 2),
     y: -1500 + (window.innerHeight / 2),
@@ -55,7 +72,141 @@ let mapState = {
 
 let driverAnimationId = null;
 
+// --- DATABASE SIMULATION SERVICE ---
+const DB = {
+    keyUser: 'akwadra_user',
+    keyTrips: 'akwadra_trips',
+
+    init() {
+        // Seed User Data if not exists
+        if (!localStorage.getItem(this.keyUser)) {
+            const defaultUser = {
+                name: "عبد الله أحمد",
+                balance: 150,
+                points: 450,
+                rating: 4.85,
+                status: "عضو ذهبي",
+                avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Abdullah"
+            };
+            localStorage.setItem(this.keyUser, JSON.stringify(defaultUser));
+        }
+
+        // Seed Trip History if not exists
+        if (!localStorage.getItem(this.keyTrips)) {
+            const defaultTrips = [
+                {
+                    id: 'TR-8854',
+                    date: new Date(Date.now() - 86400000).toISOString(), // Yesterday
+                    pickup: "العمل",
+                    dropoff: "المنزل",
+                    cost: 25,
+                    status: "completed",
+                    car: "economy"
+                },
+                {
+                    id: 'TR-1290',
+                    date: new Date(Date.now() - 172800000).toISOString(), // 2 Days ago
+                    pickup: "المطار",
+                    dropoff: "فندق النرجس",
+                    cost: 80,
+                    status: "completed",
+                    car: "luxury"
+                }
+            ];
+            localStorage.setItem(this.keyTrips, JSON.stringify(defaultTrips));
+        }
+    },
+
+    getUser() {
+        return JSON.parse(localStorage.getItem(this.keyUser));
+    },
+
+    updateUser(updates) {
+        const user = this.getUser();
+        const updatedUser = { ...user, ...updates };
+        localStorage.setItem(this.keyUser, JSON.stringify(updatedUser));
+        updateUIWithUserData();
+        return updatedUser;
+    },
+
+    getTrips() {
+        return JSON.parse(localStorage.getItem(this.keyTrips)) || [];
+    },
+
+    addTrip(trip) {
+        const trips = this.getTrips();
+        trips.unshift(trip); // Add to beginning
+        localStorage.setItem(this.keyTrips, JSON.stringify(trips));
+    }
+};
+
 // --- Function Declarations (Hoisted) ---
+
+function showToast(message) {
+    if(toastNotification && toastMessage) {
+        toastMessage.innerText = message;
+        toastNotification.style.transform = 'translate(-50%, 120px)';
+        toastNotification.style.opacity = '1';
+        setTimeout(() => {
+            toastNotification.style.transform = 'translate(-50%, 0)';
+            toastNotification.style.opacity = '0';
+        }, 3000);
+    }
+}
+
+function updateUIWithUserData() {
+    const user = DB.getUser();
+    if (!user) return;
+
+    // Update Sidebar
+    if(sidebarName) sidebarName.innerText = `أهلاً، ${user.name.split(' ')[0]}`;
+    if(sidebarRating) sidebarRating.innerText = user.rating;
+    if(sidebarBalance) sidebarBalance.innerText = `${user.balance} ر.س`;
+    if(sidebarAvatar) sidebarAvatar.src = user.avatar;
+    if(navAvatar) navAvatar.src = user.avatar;
+
+    // Update Profile View
+    if(profileName) profileName.innerText = user.name;
+    if(profileAvatar) profileAvatar.src = user.avatar;
+    if(profileRating) profileRating.innerText = user.rating;
+    if(profileBalance) profileBalance.innerText = user.balance;
+    if(profilePoints) profilePoints.innerText = user.points;
+}
+
+function renderTripHistory() {
+    if (!tripHistoryContainer) return;
+    const trips = DB.getTrips();
+    tripHistoryContainer.innerHTML = '';
+
+    if (trips.length === 0) {
+        tripHistoryContainer.innerHTML = '<div class="text-center text-gray-400 py-4">لا توجد رحلات سابقة</div>';
+        return;
+    }
+
+    trips.forEach(trip => {
+        const date = new Date(trip.date);
+        const formattedDate = date.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' });
+        const formattedTime = date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+        const html = `
+        <div class="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all cursor-pointer group">
+             <div class="flex items-center">
+                 <div class="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                     <i class="fas fa-car"></i>
+                 </div>
+                 <div class="mr-4">
+                     <h4 class="font-bold text-gray-800">من ${trip.pickup} إلى ${trip.dropoff}</h4>
+                     <p class="text-xs text-gray-400 mt-1 font-medium">${formattedDate} • ${formattedTime}</p>
+                 </div>
+             </div>
+             <div class="text-left">
+                 <div class="font-bold text-gray-800">${trip.cost} ر.س</div>
+                 <span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">مكتملة</span>
+             </div>
+        </div>`;
+        tripHistoryContainer.insertAdjacentHTML('beforeend', html);
+    });
+}
 
 function centerMap() {
     mapState.x = -1500 + (window.innerWidth / 2);
@@ -77,6 +228,7 @@ function toggleMenu() {
     } else {
         sideMenu.classList.add('sidebar-open');
         menuOverlay.classList.add('overlay-open');
+        updateUIWithUserData(); // Refresh data on open
     }
 }
 
@@ -95,6 +247,11 @@ function switchSection(name) {
         target.classList.add('slide-up-enter-active');
         target.classList.remove('slide-up-enter');
     }
+    
+    if(name === 'profile') {
+        updateUIWithUserData();
+        renderTripHistory();
+    }
 }
 
 function confirmDestination(destination) {
@@ -105,7 +262,6 @@ function confirmDestination(destination) {
 }
 
 // --- GLOBAL FUNCTIONS EXPOSED TO WINDOW ---
-// These are defined as function declarations so they are hoisted, then assigned to window.
 
 function selectCar(element, type) {
     document.querySelectorAll('.car-select').forEach(el => {
@@ -114,6 +270,9 @@ function selectCar(element, type) {
     element.classList.add('selected');
     currentCarType = type;
     
+    const prices = { 'economy': 25, 'family': 45, 'luxury': 75 };
+    currentTripPrice = prices[type];
+
     if (requestBtn) {
         requestBtn.disabled = false;
         const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر' };
@@ -147,6 +306,7 @@ function resetApp() {
 window.selectCar = selectCar;
 window.resetApp = resetApp;
 window.confirmDestination = confirmDestination;
+window.switchSection = switchSection;
 
 // --- Map Drag Logic ---
 
@@ -237,7 +397,7 @@ function startDriverTracking() {
     driverRouteLine.classList.remove('opacity-0');
 
     const startTime = Date.now();
-    const duration = 10000;
+    const duration = 8000; // Faster for demo
     
     function animate() {
         const now = Date.now();
@@ -287,6 +447,11 @@ function startDriverTracking() {
 function startRide(startX, startY) {
     switchSection('inRide');
     
+    // Set destination text based on input or default
+    if(rideDestText) {
+        rideDestText.innerText = destInput.value.includes("خريطة") ? "وجهة محددة" : (destInput.value || "فندق الريتز كارلتون");
+    }
+
     let destX, destY;
     if (!destMarker.classList.contains('hidden')) {
         destX = parseFloat(destMarker.style.left);
@@ -297,7 +462,7 @@ function startRide(startX, startY) {
     }
 
     const startTime = Date.now();
-    const duration = 12000;
+    const duration = 10000; // Faster for demo
     
     driverLabelText.innerText = 'جاري الرحلة';
 
@@ -317,6 +482,7 @@ function startRide(startX, startY) {
         activeDriverMarker.style.left = `${currentX}px`;
         activeDriverMarker.style.top = `${currentY}px`;
 
+        // Auto follow car
         const viewportCenterX = window.innerWidth / 2;
         const viewportCenterY = window.innerHeight / 2;
         mapState.x = viewportCenterX - (currentX * mapState.scale);
@@ -335,6 +501,7 @@ function startRide(startX, startY) {
         } else {
             setTimeout(() => {
                 triggerConfetti();
+                finishTrip(); // Save to DB
                 switchSection('rating');
                 stopDriverTracking();
             }, 1000);
@@ -342,6 +509,31 @@ function startRide(startX, startY) {
     }
 
     driverAnimationId = requestAnimationFrame(animateRide);
+}
+
+function finishTrip() {
+    // Create Trip Record
+    const newTrip = {
+        id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
+        date: new Date().toISOString(),
+        pickup: "موقعك الحالي",
+        dropoff: rideDestText ? rideDestText.innerText : "وجهة محددة",
+        cost: currentTripPrice || 25,
+        status: "completed",
+        car: currentCarType || "economy"
+    };
+
+    // Save to DB
+    DB.addTrip(newTrip);
+
+    // Update Wallet/Points
+    const user = DB.getUser();
+    DB.updateUser({
+        balance: user.balance - currentTripPrice,
+        points: user.points + 25
+    });
+
+    showToast('تم حفظ الرحلة وخصم المبلغ من المحفظة');
 }
 
 function stopDriverTracking() {
@@ -378,6 +570,8 @@ function animateAmbientCars() {
 // --- Initialization & Event Listeners ---
 
 document.addEventListener('DOMContentLoaded', () => {
+    DB.init(); // Initialize Database
+    updateUIWithUserData(); // Load Data
     centerMap();
     animateAmbientCars();
     
