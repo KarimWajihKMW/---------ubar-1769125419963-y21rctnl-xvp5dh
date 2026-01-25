@@ -1889,31 +1889,76 @@ window.initPaymentFlow = function() {
 };
 
 // ========================================
-// PANEL CONTROL (Minimize/Maximize)
+// PANEL DRAG CONTROL (Swipe to minimize/maximize)
 // ========================================
 
-let isPanelMinimized = false;
+let panelDragStartY = 0;
+let panelCurrentHeight = 85; // in vh
+let isDraggingPanel = false;
 
-window.togglePanelSize = function() {
+window.startDragPanel = function(e) {
+    isDraggingPanel = true;
+    panelDragStartY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
     const panel = document.getElementById('main-panel');
-    const content = document.getElementById('panel-content');
-    const icon = document.getElementById('panel-toggle-icon');
-    
-    if (!panel || !content || !icon) return;
-    
-    isPanelMinimized = !isPanelMinimized;
-    
-    if (isPanelMinimized) {
-        // Minimize panel - show only header
-        panel.style.maxHeight = '80px';
-        content.style.display = 'none';
-        icon.classList.remove('fa-chevron-down');
-        icon.classList.add('fa-chevron-up');
-    } else {
-        // Maximize panel - show full content
-        panel.style.maxHeight = '85vh';
-        content.style.display = 'block';
-        icon.classList.remove('fa-chevron-up');
-        icon.classList.add('fa-chevron-down');
+    if (panel) {
+        panel.style.transition = 'none';
     }
+    
+    document.addEventListener('mousemove', dragPanel);
+    document.addEventListener('touchmove', dragPanel);
+    document.addEventListener('mouseup', endDragPanel);
+    document.addEventListener('touchend', endDragPanel);
 };
+
+function dragPanel(e) {
+    if (!isDraggingPanel) return;
+    
+    const currentY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+    const deltaY = currentY - panelDragStartY;
+    const panel = document.getElementById('main-panel');
+    
+    if (!panel) return;
+    
+    // Calculate new height (dragging down decreases height)
+    const windowHeight = window.innerHeight;
+    const newHeightPx = (panelCurrentHeight / 100 * windowHeight) - deltaY;
+    const newHeightVh = (newHeightPx / windowHeight) * 100;
+    
+    // Constrain between 10vh and 85vh
+    const constrainedHeight = Math.max(10, Math.min(85, newHeightVh));
+    panel.style.maxHeight = constrainedHeight + 'vh';
+}
+
+function endDragPanel(e) {
+    if (!isDraggingPanel) return;
+    
+    isDraggingPanel = false;
+    const panel = document.getElementById('main-panel');
+    
+    if (panel) {
+        panel.style.transition = 'max-height 0.3s ease-in-out';
+        
+        // Get current height
+        const currentMaxHeight = parseFloat(panel.style.maxHeight);
+        
+        // Snap to position based on current height
+        if (currentMaxHeight < 30) {
+            // Minimize to 10vh
+            panel.style.maxHeight = '10vh';
+            panelCurrentHeight = 10;
+        } else if (currentMaxHeight < 60) {
+            // Medium size 50vh
+            panel.style.maxHeight = '50vh';
+            panelCurrentHeight = 50;
+        } else {
+            // Maximize to 85vh
+            panel.style.maxHeight = '85vh';
+            panelCurrentHeight = 85;
+        }
+    }
+    
+    document.removeEventListener('mousemove', dragPanel);
+    document.removeEventListener('touchmove', dragPanel);
+    document.removeEventListener('mouseup', endDragPanel);
+    document.removeEventListener('touchend', endDragPanel);
+}
