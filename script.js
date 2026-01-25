@@ -80,6 +80,109 @@ const roleAccounts = {
     }
 };
 
+// Leaflet map state
+let leafletMap = null;
+let pickupMarkerL = null;
+let destMarkerL = null;
+let currentPickup = null; // {lat, lng}
+let currentDestination = null; // {lat, lng, label}
+
+function initLeafletMap() {
+    const mapDiv = document.getElementById('leaflet-map');
+    if (!mapDiv) return;
+    if (leafletMap) {
+        leafletMap.invalidateSize();
+        return;
+    }
+    // Egypt center fallback
+    const egyptCenter = [26.8206, 30.8025];
+    leafletMap = L.map('leaflet-map', { zoomControl: false }).setView(egyptCenter, 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+    }).addTo(leafletMap);
+
+    // Custom controls hookup
+    const zi = document.getElementById('zoom-in');
+    const zo = document.getElementById('zoom-out');
+    const cm = document.getElementById('center-map');
+    if (zi) zi.onclick = () => leafletMap.zoomIn();
+    if (zo) zo.onclick = () => leafletMap.zoomOut();
+    if (cm) cm.onclick = () => {
+        if (currentPickup) leafletMap.setView([currentPickup.lat, currentPickup.lng], Math.max(leafletMap.getZoom(), 14));
+    };
+
+    // Geolocate user
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+            const { latitude, longitude } = pos.coords;
+            setPickup({ lat: latitude, lng: longitude }, 'موقعك الحالي');
+            leafletMap.setView([latitude, longitude], 14);
+        }, () => {
+            // Fallback to Cairo
+            setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة');
+            leafletMap.setView([30.0444, 31.2357], 12);
+        }, { enableHighAccuracy: true, timeout: 6000 });
+    } else {
+        setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة');
+        leafletMap.setView([30.0444, 31.2357], 12);
+    }
+
+    // Destination select by click
+    leafletMap.on('click', e => {
+        setDestination({ lat: e.latlng.lat, lng: e.latlng.lng }, 'وجهة محددة');
+    });
+
+    // Hook destination search input
+    const destInput = document.getElementById('dest-input');
+    if (destInput) {
+        destInput.addEventListener('keydown', evt => {
+            if (evt.key === 'Enter') {
+                const q = destInput.value.trim();
+                if (q) searchDestinationByName(q);
+            }
+        });
+    }
+}
+
+function setPickup(coords, label) {
+    currentPickup = { ...coords, label: label || 'نقطة الالتقاط' };
+    if (!leafletMap) return;
+    if (pickupMarkerL) pickupMarkerL.remove();
+    pickupMarkerL = L.marker([coords.lat, coords.lng], { draggable: true }).addTo(leafletMap);
+    pickupMarkerL.bindPopup(currentPickup.label).openPopup();
+    pickupMarkerL.on('dragend', () => {
+        const p = pickupMarkerL.getLatLng();
+        currentPickup.lat = p.lat;
+        currentPickup.lng = p.lng;
+        showToast('تم تعديل موقع الالتقاط');
+    });
+}
+
+function setDestination(coords, label) {
+    currentDestination = { ...coords, label: label || 'الوجهة' };
+    if (!leafletMap) return;
+    if (destMarkerL) destMarkerL.remove();
+    destMarkerL = L.marker([coords.lat, coords.lng], { draggable: false, opacity: 0.9 }).addTo(leafletMap);
+    destMarkerL.bindPopup(currentDestination.label).openPopup();
+    document.getElementById('ride-dest-text') && (document.getElementById('ride-dest-text').innerText = currentDestination.label);
+    confirmDestination(currentDestination.label);
+}
+
+function searchDestinationByName(q) {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&q=${encodeURIComponent(q)}`;
+    fetch(url, { headers: { 'Accept': 'application/json' }})
+        .then(r => r.json())
+        .then(arr => {
+            if (!arr || !arr.length) { showToast('لم يتم العثور على نتائج'); return; }
+            const best = arr[0];
+            const lat = parseFloat(best.lat), lon = parseFloat(best.lon);
+            setDestination({ lat, lng: lon }, best.display_name);
+            leafletMap.setView([lat, lon], 15);
+        })
+        .catch(() => showToast('حدث خطأ في البحث'));
+}
+
 // --- DATABASE SIMULATION SERVICE ---
 const DB = {
     keyUser: 'akwadra_user',
@@ -572,7 +675,9 @@ function loginSuccess() {
 function initPassengerMode() {
     document.getElementById('passenger-ui-container').classList.remove('hidden');
     document.getElementById('passenger-top-bar').classList.remove('hidden');
-    centerMap();
+    const world = document.getElementById('map-world');
+    if (world) world.classList.add('hidden');
+    initLeafletMap();
     updateUIWithUserData();
 }
 
@@ -580,7 +685,8 @@ function initDriverMode() {
     document.getElementById('driver-ui-container').classList.remove('hidden');
     const um = document.getElementById('user-marker');
     if(um) um.classList.add('hidden');
-    centerMap();
+    const world = document.getElementById('map-world');
+    if (world) world.classList.remove('hidden');
     scheduleMockRequest();
 }
 
