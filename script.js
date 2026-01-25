@@ -1,4 +1,4 @@
-console.log('Akwadra Super Builder Initialized - Interactive Map Mode');
+console.log('Akwadra Super Builder Initialized - Interactive Map Mode + Real-time Tracking');
 
 // --- Configuration & Elements ---
 const destInput = document.getElementById('dest-input');
@@ -13,6 +13,11 @@ const menuBtn = document.getElementById('menu-btn');
 const closeMenuBtn = document.getElementById('close-menu-btn');
 const sideMenu = document.getElementById('side-menu');
 const menuOverlay = document.getElementById('menu-overlay');
+
+// Driver Tracking Elements
+const activeDriverMarker = document.getElementById('active-driver');
+const driverRouteLine = document.getElementById('driver-route-line');
+const etaDisplay = document.getElementById('eta-display');
 
 // Map Elements
 const mapContainer = document.getElementById('map-container');
@@ -41,6 +46,8 @@ let mapState = {
     lastX: 0,
     lastY: 0
 };
+
+let driverAnimationId = null;
 
 // Update initial center based on screen size
 function centerMap() {
@@ -222,7 +229,10 @@ window.selectCar = function(element, type) {
 requestBtn.addEventListener('click', () => {
     if (!currentCarType) return;
     switchSection('loading');
-    setTimeout(() => switchSection('driver'), 3000);
+    setTimeout(() => {
+        switchSection('driver');
+        startDriverTracking(); // START REAL-TIME TRACKING SIMULATION
+    }, 3000);
 });
 
 // 4. Back/Reset
@@ -246,6 +256,8 @@ window.resetApp = function() {
     userMarker.classList.remove('opacity-0');
     destMarker.classList.add('hidden');
     
+    stopDriverTracking(); // STOP TRACKING
+    
     switchSection('destination');
 };
 
@@ -264,6 +276,94 @@ function switchSection(name) {
         target.classList.add('slide-up-enter-active');
         target.classList.remove('slide-up-enter');
     }
+}
+
+// --- Driver Tracking Logic ---
+function startDriverTracking() {
+    // 1. Calculate Start Point (Screen Center on Map + Offset)
+    // The User is always at screen center. We need to find that point in map coordinates.
+    const viewportCenterX = window.innerWidth / 2;
+    const viewportCenterY = window.innerHeight / 2;
+    
+    // Convert viewport center to map world coordinates
+    // Formula: WorldX = (ViewportX - TranslateX) / Scale
+    const userMapX = (viewportCenterX - mapState.x) / mapState.scale;
+    const userMapY = (viewportCenterY - mapState.y) / mapState.scale;
+    
+    // Start Driver 400px away to the top-right
+    let driverX = userMapX + 400;
+    let driverY = userMapY - 300;
+    
+    // Show Marker
+    activeDriverMarker.classList.remove('hidden');
+    activeDriverMarker.style.left = `${driverX}px`;
+    activeDriverMarker.style.top = `${driverY}px`;
+    
+    // Show Route Line
+    driverRouteLine.classList.remove('opacity-0');
+
+    const startTime = Date.now();
+    const duration = 15000; // 15 seconds to arrive
+    
+    function animate() {
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Update Target (In case map moved, target is always screen center converted to world coords)
+        // Actually, physically on the map div, the "User Location" is a fixed point IF the map wasn't dragged.
+        // If the user drags the map, the "User Marker" stays screen center, so the "Target World Coord" changes.
+        // To keep it simple: The driver drives to the coordinate where the user WAS when tracking started, OR
+        // we dynamically update destination. Let's dynamically update.
+        
+        const currentViewportCenterX = window.innerWidth / 2;
+        const currentViewportCenterY = window.innerHeight / 2;
+        const targetX = (currentViewportCenterX - mapState.x) / mapState.scale;
+        const targetY = (currentViewportCenterY - mapState.y) / mapState.scale;
+
+        // Linear Interpolation
+        const currentX = driverX + (targetX - driverX) * progress;
+        const currentY = driverY + (targetY - driverY) * progress;
+        
+        // Calculate Rotation
+        const dx = targetX - currentX;
+        const dy = targetY - currentY;
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        
+        // Update Marker
+        activeDriverMarker.style.transform = `translate(-50%, -50%) rotate(${angle + 90}deg)`; // +90 because car icon points up
+        activeDriverMarker.style.left = `${currentX}px`;
+        activeDriverMarker.style.top = `${currentY}px`;
+        
+        // Update Route Line (Curve from Driver to User)
+        // Simple straight line for now, or bezier
+        const midX = (currentX + targetX) / 2;
+        const midY = (currentY + targetY) / 2;
+        // Creating a slight curve
+        driverRouteLine.setAttribute('d', `M${currentX},${currentY} Q${midX + 50},${midY - 50} ${targetX},${targetY}`);
+        
+        // Update ETA Text randomly
+        if (elapsed % 1000 < 20) {
+             const remainingSec = Math.ceil((1 - progress) * 15);
+             if (remainingSec > 60) etaDisplay.innerText = Math.ceil(remainingSec/60) + " دقائق";
+             else etaDisplay.innerText = remainingSec + " ثانية";
+        }
+
+        if (progress < 1) {
+            driverAnimationId = requestAnimationFrame(animate);
+        } else {
+            // Arrived
+            etaDisplay.innerText = "وصل";
+        }
+    }
+    
+    driverAnimationId = requestAnimationFrame(animate);
+}
+
+function stopDriverTracking() {
+    if (driverAnimationId) cancelAnimationFrame(driverAnimationId);
+    activeDriverMarker.classList.add('hidden');
+    driverRouteLine.classList.add('opacity-0');
 }
 
 // Ambient Animations
