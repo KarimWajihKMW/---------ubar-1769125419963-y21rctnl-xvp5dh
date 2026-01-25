@@ -475,7 +475,9 @@ const DB = {
                     status: "completed",
                     car: "economy",
                     driver: "أحمد محمد",
-                    passenger: "عبد الله أحمد"
+                    passenger: "عبد الله أحمد",
+                    paymentMethod: "wallet",
+                    rating: 5
                 },
                 {
                     id: 'TR-1290',
@@ -486,7 +488,9 @@ const DB = {
                     status: "completed",
                     car: "luxury",
                     driver: "سالم العلي",
-                    passenger: "سارة خالد"
+                    passenger: "سارة خالد",
+                    paymentMethod: "card",
+                    rating: 4
                 }
             ];
             SafeStorage.setItem(this.keyTrips, JSON.stringify(defaultTrips));
@@ -1962,3 +1966,248 @@ function endDragPanel(e) {
     document.removeEventListener('mouseup', endDragPanel);
     document.removeEventListener('touchend', endDragPanel);
 }
+
+// ========================================
+// TRIP HISTORY SYSTEM
+// ========================================
+
+let currentTripFilter = 'all';
+
+window.loadTripHistory = function() {
+    const trips = DB.getTrips() || [];
+    const container = document.getElementById('trip-history-container');
+    
+    if (!container) return;
+    
+    // Show only last 3 trips in profile
+    const recentTrips = trips.slice(0, 3);
+    
+    if (recentTrips.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8 text-gray-400">
+                <i class="fas fa-inbox text-3xl mb-2"></i>
+                <p class="text-sm">لا توجد رحلات سابقة</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = recentTrips.map(trip => createTripCard(trip, false)).join('');
+};
+
+window.loadAllTrips = function() {
+    const trips = DB.getTrips() || [];
+    const container = document.getElementById('all-trips-container');
+    const emptyState = document.getElementById('empty-trips-state');
+    
+    if (!container) return;
+    
+    // Filter trips based on current filter
+    let filteredTrips = trips;
+    if (currentTripFilter !== 'all') {
+        filteredTrips = trips.filter(t => t.status === currentTripFilter);
+    }
+    
+    if (filteredTrips.length === 0) {
+        container.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+        return;
+    }
+    
+    container.classList.remove('hidden');
+    emptyState.classList.add('hidden');
+    
+    container.innerHTML = filteredTrips.map(trip => createTripCard(trip, true)).join('');
+    
+    // Update stats
+    updateTripStats(trips);
+};
+
+function createTripCard(trip, showDetailsButton = false) {
+    const statusColors = {
+        completed: 'bg-green-100 text-green-700',
+        cancelled: 'bg-red-100 text-red-700',
+        ongoing: 'bg-blue-100 text-blue-700'
+    };
+    
+    const statusIcons = {
+        completed: 'fa-check-circle',
+        cancelled: 'fa-times-circle',
+        ongoing: 'fa-clock'
+    };
+    
+    const statusLabels = {
+        completed: 'مكتملة',
+        cancelled: 'ملغية',
+        ongoing: 'جارية'
+    };
+    
+    const carTypeLabels = {
+        economy: 'اقتصادي',
+        family: 'عائلي',
+        luxury: 'فاخر',
+        delivery: 'توصيل'
+    };
+    
+    const paymentLabels = {
+        cash: 'كاش',
+        card: 'بطاقة',
+        wallet: 'محفظة'
+    };
+    
+    const date = new Date(trip.date);
+    const formattedDate = date.toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+    const formattedTime = date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+    
+    const detailsBtn = showDetailsButton 
+        ? `<button onclick="showTripDetails('${trip.id}')" class="text-indigo-600 hover:text-indigo-700 font-bold text-sm">التفاصيل <i class="fas fa-chevron-left mr-1"></i></button>`
+        : '';
+    
+    return `
+        <div class="bg-white border border-gray-200 rounded-2xl p-4 hover:shadow-md transition-shadow">
+            <div class="flex justify-between items-start mb-3">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded-full text-xs font-bold ${statusColors[trip.status] || statusColors.completed}">
+                            <i class="fas ${statusIcons[trip.status] || statusIcons.completed} mr-1"></i>
+                            ${statusLabels[trip.status] || statusLabels.completed}
+                        </span>
+                        <span class="text-xs text-gray-500 font-bold">${trip.id}</span>
+                    </div>
+                    <p class="text-xs text-gray-500 font-bold mb-1">${formattedDate} • ${formattedTime}</p>
+                </div>
+                <div class="text-left">
+                    <p class="text-2xl font-extrabold text-gray-800">${trip.cost} <span class="text-sm text-gray-500">ر.س</span></p>
+                    <p class="text-xs text-gray-500 font-bold">${paymentLabels[trip.paymentMethod] || 'كاش'}</p>
+                </div>
+            </div>
+            
+            <div class="bg-gray-50 rounded-xl p-3 mb-3">
+                <div class="flex items-start gap-2 mb-2">
+                    <i class="fas fa-circle text-indigo-600 text-xs mt-1"></i>
+                    <p class="text-sm text-gray-700 font-bold flex-1">${trip.pickup || 'موقعك الحالي'}</p>
+                </div>
+                <div class="border-r-2 border-dashed border-gray-300 h-3 mr-1"></div>
+                <div class="flex items-start gap-2">
+                    <i class="fas fa-map-marker-alt text-red-500 text-xs mt-1"></i>
+                    <p class="text-sm text-gray-700 font-bold flex-1">${trip.dropoff || 'الوجهة'}</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=${trip.driver}" class="w-8 h-8 rounded-full bg-gray-100 border border-gray-200">
+                    <div>
+                        <p class="text-xs font-bold text-gray-800">${trip.driver || 'السائق'}</p>
+                        <p class="text-xs text-gray-500">${carTypeLabels[trip.car] || 'اقتصادي'}</p>
+                    </div>
+                </div>
+                ${detailsBtn}
+            </div>
+        </div>
+    `;
+}
+
+function updateTripStats(trips) {
+    const totalTrips = trips.length;
+    const totalSpent = trips.reduce((sum, trip) => sum + (trip.cost || 0), 0);
+    const completedTrips = trips.filter(t => t.status === 'completed');
+    const avgRating = completedTrips.length > 0 
+        ? (completedTrips.reduce((sum, trip) => sum + (trip.rating || 5), 0) / completedTrips.length).toFixed(1)
+        : 0;
+    
+    document.getElementById('total-trips-count').innerText = totalTrips;
+    document.getElementById('total-spent').innerText = totalSpent;
+    document.getElementById('avg-rating').innerText = avgRating;
+}
+
+window.filterTrips = function(filter) {
+    currentTripFilter = filter;
+    
+    // Update button styles
+    document.querySelectorAll('.trip-filter-btn').forEach(btn => {
+        if (btn.dataset.filter === filter) {
+            btn.classList.remove('bg-gray-100', 'text-gray-600');
+            btn.classList.add('bg-indigo-600', 'text-white', 'active');
+        } else {
+            btn.classList.remove('bg-indigo-600', 'text-white', 'active');
+            btn.classList.add('bg-gray-100', 'text-gray-600');
+        }
+    });
+    
+    loadAllTrips();
+};
+
+window.showTripDetails = function(tripId) {
+    const trips = DB.getTrips() || [];
+    const trip = trips.find(t => t.id === tripId);
+    
+    if (!trip) {
+        showToast('الرحلة غير موجودة');
+        return;
+    }
+    
+    // Populate trip details
+    const statusColors = {
+        completed: 'bg-green-100 text-green-700',
+        cancelled: 'bg-red-100 text-red-700'
+    };
+    
+    const statusLabels = {
+        completed: 'مكتملة',
+        cancelled: 'ملغية'
+    };
+    
+    const carTypeLabels = {
+        economy: 'اقتصادي',
+        family: 'عائلي',
+        luxury: 'فاخر',
+        delivery: 'توصيل'
+    };
+    
+    const paymentLabels = {
+        cash: 'دفع كاش',
+        card: 'بطاقة بنكية',
+        wallet: 'محفظة إلكترونية'
+    };
+    
+    const date = new Date(trip.date);
+    const formattedDateTime = date.toLocaleDateString('ar-EG') + ' • ' + date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+    
+    document.getElementById('trip-detail-status').className = `inline-block px-4 py-2 rounded-full font-bold text-sm ${statusColors[trip.status] || statusColors.completed}`;
+    document.getElementById('trip-detail-status').innerHTML = `<i class="fas fa-check-circle ml-1"></i> ${statusLabels[trip.status] || statusLabels.completed}`;
+    document.getElementById('trip-detail-id').innerText = trip.id;
+    document.getElementById('trip-detail-date').innerText = formattedDateTime;
+    document.getElementById('trip-detail-pickup').innerText = trip.pickup || 'موقعك الحالي';
+    document.getElementById('trip-detail-dropoff').innerText = trip.dropoff || 'الوجهة';
+    document.getElementById('trip-detail-driver-name').innerText = trip.driver || 'أحمد محمد';
+    document.getElementById('trip-detail-driver-avatar').src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${trip.driver}`;
+    document.getElementById('trip-detail-car-info').innerText = `تويوتا كامري • ${carTypeLabels[trip.car] || 'اقتصادي'}`;
+    document.getElementById('trip-detail-payment-method').innerText = paymentLabels[trip.paymentMethod] || 'كاش';
+    document.getElementById('trip-detail-cost').innerText = trip.cost + ' ر.س';
+    
+    // Show rating
+    const rating = trip.rating || 5;
+    const ratingContainer = document.getElementById('trip-detail-user-rating');
+    ratingContainer.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+        const star = document.createElement('i');
+        star.className = i <= rating ? 'fas fa-star text-yellow-400 text-lg' : 'fas fa-star text-gray-300 text-lg';
+        ratingContainer.appendChild(star);
+    }
+    ratingContainer.nextElementSibling.innerText = `(${rating} نجوم)`;
+    
+    window.switchSection('trip-details');
+};
+
+// Initialize trip history when profile is opened
+const originalSwitchSection = window.switchSection;
+window.switchSection = function(section) {
+    originalSwitchSection(section);
+    
+    if (section === 'profile') {
+        loadTripHistory();
+    } else if (section === 'trip-history') {
+        loadAllTrips();
+    }
+};
