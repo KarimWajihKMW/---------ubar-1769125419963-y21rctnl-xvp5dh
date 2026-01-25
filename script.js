@@ -61,6 +61,25 @@ let mapState = {
 let driverAnimationId = null;
 let driverRequestTimeout = null;
 
+// Demo role accounts for gated access per role
+const roleAccounts = {
+    passenger: {
+        email: 'abdullah@example.com',
+        phone: '+201000000001',
+        password: 'P@ssw0rd123'
+    },
+    driver: {
+        email: 'driver@example.com',
+        phone: '+201000000002',
+        password: 'P@ssw0rd123'
+    },
+    admin: {
+        email: 'admin@example.com',
+        phone: '+201000000003',
+        password: 'P@ssw0rd123'
+    }
+};
+
 // --- DATABASE SIMULATION SERVICE ---
 const DB = {
     keyUser: 'akwadra_user',
@@ -170,10 +189,8 @@ window.selectRole = function(role) {
             // Show Auth Modal
             openAuthModal();
         }
-    } else if (role === 'driver') {
-        initDriverMode();
-    } else if (role === 'admin') {
-        initAdminMode();
+    } else if (role === 'driver' || role === 'admin') {
+        openRoleLoginModal(role);
     }
 };
 
@@ -205,6 +222,76 @@ window.closeAuthModal = function() {
             }
         }
     }, 300);
+};
+
+// Role-specific login modal (driver/admin)
+function openRoleLoginModal(role) {
+    const modal = document.getElementById('role-login-modal');
+    if (!modal) return;
+    modal.dataset.role = role;
+    const titles = { driver: 'تسجيل دخول الكابتن', admin: 'تسجيل دخول الإدارة', passenger: 'تسجيل الدخول' };
+    const hints = {
+        driver: 'استخدم بيانات الكابتن: driver@example.com / P@ssw0rd123',
+        admin: 'استخدم بيانات الإدارة: admin@example.com / P@ssw0rd123'
+    };
+    const titleEl = document.getElementById('role-login-title');
+    const hintEl = document.getElementById('role-login-hint');
+    if (titleEl) titleEl.innerText = titles[role] || titles.passenger;
+    if (hintEl) hintEl.innerText = hints[role] || 'اكتب بيانات الدخول الخاصة بهذا الدور';
+
+    const emailInput = document.getElementById('role-login-email');
+    const passInput = document.getElementById('role-login-password');
+    if (emailInput) emailInput.value = '';
+    if (passInput) passInput.value = '';
+
+    modal.classList.remove('hidden');
+    setTimeout(() => modal.classList.remove('opacity-0', 'pointer-events-none'), 30);
+    setTimeout(() => emailInput && emailInput.focus(), 120);
+}
+
+function closeRoleLoginModal() {
+    const modal = document.getElementById('role-login-modal');
+    if (!modal) return;
+    modal.classList.add('opacity-0', 'pointer-events-none');
+    setTimeout(() => {
+        modal.classList.add('hidden');
+        // If user backed out, show role selector again
+        const rs = document.getElementById('role-selection-modal');
+        if (rs && !DB.hasSession()) {
+            rs.classList.remove('hidden');
+            setTimeout(() => rs.classList.remove('opacity-0', 'pointer-events-none'), 50);
+        }
+    }, 250);
+}
+
+window.submitRoleLogin = function() {
+    const modal = document.getElementById('role-login-modal');
+    if (!modal) return;
+    const role = modal.dataset.role || 'driver';
+    const emailInput = document.getElementById('role-login-email');
+    const passInput = document.getElementById('role-login-password');
+    const email = emailInput ? emailInput.value.trim() : '';
+    const password = passInput ? passInput.value.trim() : '';
+    const account = roleAccounts[role];
+
+    if (!email || !password) {
+        showToast('يرجى إدخال البريد وكلمة المرور');
+        return;
+    }
+    if (!account || email.toLowerCase() !== account.email.toLowerCase() || password !== account.password) {
+        showToast('بيانات الدخول غير صحيحة لهذا الدور');
+        return;
+    }
+
+    DB.saveSession();
+    closeRoleLoginModal();
+    if (role === 'driver') {
+        initDriverMode();
+    } else if (role === 'admin') {
+        initAdminMode();
+    } else {
+        initPassengerMode();
+    }
 };
 
 window.switchAuthTab = function(type) {
@@ -280,10 +367,23 @@ window.verifyOTP = function() {
 
 window.loginWithEmail = function() {
     const email = document.getElementById('email-input').value;
+    const password = document.getElementById('password-input').value;
     if (!email || !email.includes('@')) {
         showToast('يرجى إدخال بريد إلكتروني صحيح');
         return;
     }
+    if (!password) {
+        showToast('أدخل كلمة المرور');
+        return;
+    }
+
+    // Passenger login only via this modal
+    const account = roleAccounts.passenger;
+    if (!account || email.toLowerCase() !== account.email.toLowerCase() || password !== account.password) {
+        showToast('بيانات الراكب غير صحيحة');
+        return;
+    }
+
     loginSuccess();
 };
 
