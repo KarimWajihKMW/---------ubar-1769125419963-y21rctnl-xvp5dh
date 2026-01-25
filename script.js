@@ -116,15 +116,18 @@ function initLeafletMap() {
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(pos => {
             const { latitude, longitude } = pos.coords;
-            setPickup({ lat: latitude, lng: longitude }, 'موقعك الحالي');
-            leafletMap.setView([latitude, longitude], 14);
+            // Reverse geocode to get readable address
+            reverseGeocode(latitude, longitude, (address) => {
+                setPickup({ lat: latitude, lng: longitude }, address);
+                leafletMap.setView([latitude, longitude], 14);
+            });
         }, () => {
             // Fallback to Cairo
-            setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة');
+            setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة، مصر');
             leafletMap.setView([30.0444, 31.2357], 12);
         }, { enableHighAccuracy: true, timeout: 6000 });
     } else {
-        setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة');
+        setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة، مصر');
         leafletMap.setView([30.0444, 31.2357], 12);
     }
 
@@ -151,11 +154,21 @@ function setPickup(coords, label) {
     if (pickupMarkerL) pickupMarkerL.remove();
     pickupMarkerL = L.marker([coords.lat, coords.lng], { draggable: true }).addTo(leafletMap);
     pickupMarkerL.bindPopup(currentPickup.label).openPopup();
+    
+    // Update current location input
+    updateCurrentLocationInput(currentPickup.label);
+    
     pickupMarkerL.on('dragend', () => {
         const p = pickupMarkerL.getLatLng();
         currentPickup.lat = p.lat;
         currentPickup.lng = p.lng;
-        showToast('تم تعديل موقع الالتقاط');
+        // Reverse geocode to get address
+        reverseGeocode(p.lat, p.lng, (address) => {
+            currentPickup.label = address;
+            pickupMarkerL.setPopupContent(address).openPopup();
+            updateCurrentLocationInput(address);
+            showToast('تم تعديل موقع الالتقاط');
+        });
     });
 }
 
@@ -181,6 +194,24 @@ function searchDestinationByName(q) {
             leafletMap.setView([lat, lon], 15);
         })
         .catch(() => showToast('حدث خطأ في البحث'));
+}
+
+function reverseGeocode(lat, lng, callback) {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ar`;
+    fetch(url, { headers: { 'Accept': 'application/json' }})
+        .then(r => r.json())
+        .then(data => {
+            const address = data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            callback(address);
+        })
+        .catch(() => {
+            callback(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        });
+}
+
+function updateCurrentLocationInput(text) {
+    const inp = document.getElementById('current-loc-input');
+    if (inp) inp.value = text || 'موقعك الحالي';
 }
 
 // --- DATABASE SIMULATION SERVICE ---
