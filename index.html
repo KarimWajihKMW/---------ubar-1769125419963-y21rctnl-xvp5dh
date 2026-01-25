@@ -145,6 +145,26 @@
       #toast-notification {
         transition: transform 0.3s ease-out, opacity 0.3s ease-out;
       }
+
+      /* Chat Animations */
+      .msg-enter {
+        animation: msg-slide 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      @keyframes msg-slide {
+        from { opacity: 0; transform: translateY(10px) scale(0.95); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+
+      .typing-dot {
+        animation: typing 1.4s infinite ease-in-out both;
+      }
+      .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+      .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+      
+      @keyframes typing {
+        0%, 80%, 100% { transform: scale(0); }
+        40% { transform: scale(1); }
+      }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
@@ -513,7 +533,7 @@
                         <button class="flex-1 bg-green-500 text-white py-4 rounded-2xl font-bold hover:bg-green-600 transition-colors shadow-lg shadow-green-200 flex justify-center items-center transform active:scale-95">
                             <i class="fas fa-phone-alt ml-2"></i> اتصال
                         </button>
-                        <button class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-2xl font-bold hover:bg-gray-200 transition-colors flex justify-center items-center transform active:scale-95">
+                        <button onclick="openChat()" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-2xl font-bold hover:bg-gray-200 transition-colors flex justify-center items-center transform active:scale-95">
                             <i class="fas fa-comment-alt ml-2"></i> محادثة
                         </button>
                     </div>
@@ -521,6 +541,60 @@
                     <button class="mt-6 w-full text-red-500 py-3 text-sm font-bold hover:bg-red-50 rounded-xl transition-colors" onclick="resetApp()">
                         إلغاء الرحلة
                     </button>
+                </div>
+            </div>
+
+            <!-- NEW State: Chat Interface -->
+            <div id="state-chat" class="hidden flex flex-col bg-white h-full relative" style="height: 500px;">
+                <!-- Header -->
+                <div class="p-4 border-b border-gray-100 flex items-center justify-between bg-white z-10 shadow-sm">
+                    <div class="flex items-center">
+                        <button onclick="closeChat()" class="p-2 -mr-2 text-gray-500 hover:text-indigo-600 transition-colors">
+                            <i class="fas fa-arrow-right"></i>
+                        </button>
+                        <div class="mr-3 relative">
+                             <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" class="w-10 h-10 rounded-full border border-gray-200 bg-gray-100">
+                             <div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></div>
+                        </div>
+                        <div class="mr-3">
+                            <h4 class="font-bold text-sm text-gray-800">أحمد محمد</h4>
+                            <span class="text-xs text-green-500 font-bold flex items-center"><i class="fas fa-circle text-[6px] ml-1"></i> متصل الآن</span>
+                        </div>
+                    </div>
+                    <button class="w-9 h-9 bg-gray-50 rounded-full flex items-center justify-center text-indigo-600 hover:bg-indigo-50 transition-colors">
+                        <i class="fas fa-phone text-sm"></i>
+                    </button>
+                </div>
+                
+                <!-- Messages Area -->
+                <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 relative">
+                     <!-- Decorative background pattern for chat -->
+                     <div class="absolute inset-0 opacity-5 pointer-events-none" style="background-image: radial-gradient(#6366f1 1px, transparent 1px); background-size: 20px 20px;"></div>
+                     
+                     <div class="text-center mb-4">
+                         <span class="text-[10px] text-gray-400 bg-white border border-gray-100 px-3 py-1 rounded-full shadow-sm font-bold">اليوم</span>
+                     </div>
+                     
+                     <!-- Initial Driver Message -->
+                     <div class="flex items-start">
+                         <div class="bg-white border border-gray-100 rounded-2xl rounded-tr-none px-4 py-2.5 shadow-sm text-sm text-gray-700 max-w-[85%]">
+                             مرحباً بك! أنا في طريقي إليك، سأصل خلال دقائق إن شاء الله 🚗
+                             <div class="text-[10px] text-gray-400 mt-1 text-left">الآن</div>
+                         </div>
+                     </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="p-3 border-t border-gray-100 bg-white">
+                    <div class="flex items-center bg-gray-100 rounded-2xl px-2 py-1.5 focus-within:ring-2 ring-indigo-500/20 transition-all">
+                        <button class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-white transition-all flex items-center justify-center">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <input type="text" id="chat-input" placeholder="اكتب رسالة..." class="bg-transparent flex-1 outline-none text-sm text-gray-700 px-2 font-medium h-9">
+                        <button onclick="sendChatMessage()" class="w-9 h-9 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-300 hover:scale-105 active:scale-95 transition-all flex items-center justify-center">
+                            <i class="fas fa-paper-plane text-xs transform -rotate-45 translate-x-0.5"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -561,6 +635,11 @@
                              <span class="text-xs font-bold text-red-600">طوارئ</span>
                         </button>
                     </div>
+                    
+                    <!-- In Ride Chat Button -->
+                    <button onclick="openChat()" class="w-full mt-4 flex items-center justify-center p-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-100 transition-colors">
+                        <i class="fas fa-comment-alt ml-2"></i> محادثة مع السائق
+                    </button>
                 </div>
             </div>
 
