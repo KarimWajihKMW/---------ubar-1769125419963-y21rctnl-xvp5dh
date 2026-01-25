@@ -125,6 +125,21 @@
       @keyframes dash-move {
         to { stroke-dashoffset: -40; }
       }
+
+      /* Confetti Animation */
+      @keyframes confetti-fall {
+        0% { transform: translateY(-100%) rotate(0deg); opacity: 1; }
+        100% { transform: translateY(100vh) rotate(360deg); opacity: 0; }
+      }
+      .confetti {
+        position: absolute;
+        top: -20px;
+        width: 10px;
+        height: 10px;
+        background-color: #f00;
+        animation: confetti-fall 3s linear forwards;
+        z-index: 100;
+      }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
@@ -184,7 +199,7 @@
                     <!-- Label -->
                     <div class="absolute -right-24 top-1/2 -translate-y-1/2 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-gray-200 flex items-center gap-2">
                         <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" class="w-6 h-6 rounded-full bg-gray-100" alt="Driver">
-                        <span>أحمد قادم إليك</span>
+                        <span id="driver-label-text">أحمد قادم إليك</span>
                     </div>
                 </div>
             </div>
@@ -496,6 +511,73 @@
                         إلغاء الرحلة
                     </button>
                 </div>
+            </div>
+
+            <!-- State 6: In Ride (New) -->
+            <div id="state-in-ride" class="hidden p-0 bg-white">
+                <div class="bg-gradient-to-r from-emerald-500 to-teal-600 p-6 text-white flex justify-between items-center rounded-t-[2.5rem] shadow-lg relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-xl"></div>
+                    <div class="relative z-10">
+                        <p class="text-emerald-100 text-sm font-medium mb-1">في الطريق إلى الوجهة</p>
+                        <h3 class="text-3xl font-bold" id="ride-eta-display">12 دقيقة</h3>
+                    </div>
+                    <div class="relative z-10 bg-white/20 px-4 py-1.5 rounded-full text-sm font-bold backdrop-blur border border-white/20">
+                         <i class="fas fa-route ml-1"></i> جاري الرحلة
+                    </div>
+                </div>
+                <div class="p-6">
+                    <div class="flex items-center p-4 bg-gray-50 rounded-2xl border border-gray-100 mb-6">
+                        <div class="w-12 h-12 rounded-full bg-white flex items-center justify-center text-gray-600 shadow-sm">
+                            <i class="fas fa-map-pin text-red-500"></i>
+                        </div>
+                        <div class="mr-4">
+                            <p class="text-xs text-gray-400 font-bold uppercase">الوجهة</p>
+                            <p class="font-bold text-gray-800 text-lg">فندق الريتز كارلتون</p>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <button class="flex flex-col items-center justify-center p-4 bg-gray-100 rounded-2xl hover:bg-gray-200 transition-colors group">
+                             <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-gray-600 mb-2 shadow-sm group-hover:scale-110 transition-transform">
+                                 <i class="fas fa-share-alt"></i>
+                             </div>
+                             <span class="text-xs font-bold text-gray-600">مشاركة الرحلة</span>
+                        </button>
+                        <button class="flex flex-col items-center justify-center p-4 bg-red-50 rounded-2xl hover:bg-red-100 transition-colors group">
+                             <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-red-500 mb-2 shadow-sm group-hover:scale-110 transition-transform">
+                                 <i class="fas fa-shield-alt"></i>
+                             </div>
+                             <span class="text-xs font-bold text-red-600">طوارئ</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- State 7: Rating (New) -->
+            <div id="state-rating" class="hidden p-8 text-center bg-white">
+                <div class="w-24 h-24 mx-auto rounded-full p-1 bg-gradient-to-tr from-yellow-400 to-yellow-200 mb-4 shadow-xl">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" alt="Driver" class="w-full h-full rounded-full bg-white border-4 border-white">
+                </div>
+                <h2 class="text-2xl font-extrabold text-gray-800 mb-1">كيف كانت رحلتك؟</h2>
+                <p class="text-gray-500 mb-8">مع الكابتن أحمد</p>
+                
+                <div class="flex justify-center gap-2 mb-8" id="star-container">
+                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="1"><i class="fas fa-star"></i></button>
+                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="2"><i class="fas fa-star"></i></button>
+                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="3"><i class="fas fa-star"></i></button>
+                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="4"><i class="fas fa-star"></i></button>
+                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="5"><i class="fas fa-star"></i></button>
+                </div>
+
+                <div class="flex gap-3 overflow-x-auto no-scrollbar pb-2 mb-8 justify-center">
+                    <button class="px-4 py-2 rounded-full border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 whitespace-nowrap">سيارة نظيفة</button>
+                    <button class="px-4 py-2 rounded-full border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 whitespace-nowrap">قيادة آمنة</button>
+                    <button class="px-4 py-2 rounded-full border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 whitespace-nowrap">تعامل راقٍ</button>
+                </div>
+
+                <button onclick="resetApp()" class="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-lg hover:bg-black transition-colors transform active:scale-95">
+                    إرسال التقييم
+                </button>
             </div>
 
             <!-- State 5: User Profile -->
