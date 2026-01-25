@@ -673,7 +673,7 @@
                             </div>
                         </div>
                         <div class="text-left ml-2">
-                            <div class="font-bold text-xl text-gray-900">25 ر.س</div>
+                            <div class="font-bold text-xl text-gray-900">--</div>
                         </div>
                     </div>
 
@@ -689,7 +689,7 @@
                             </div>
                         </div>
                         <div class="text-left ml-2">
-                            <div class="font-bold text-xl text-gray-900">45 ر.س</div>
+                            <div class="font-bold text-xl text-gray-900">--</div>
                         </div>
                     </div>
 
@@ -705,8 +705,39 @@
                             </div>
                         </div>
                         <div class="text-left ml-2">
-                            <div class="font-bold text-xl text-gray-900">75 ر.س</div>
+                            <div class="font-bold text-xl text-gray-900">--</div>
                         </div>
+                    </div>
+
+                    <!-- Delivery -->
+                    <div class="car-select flex items-center justify-between p-4 border border-gray-100 rounded-2xl cursor-pointer bg-white shadow-sm" onclick="selectCar(this, 'delivery')">
+                        <div class="flex items-center">
+                            <div class="w-20 h-14 relative mr-2 flex items-center justify-center">
+                                <i class="fas fa-box text-4xl text-orange-500"></i>
+                            </div>
+                            <div class="mr-4">
+                                <h4 class="font-bold text-lg text-gray-800">توصيل طلبات</h4>
+                                <p class="text-xs text-gray-500 font-medium">توصيل سريع للبضائع</p>
+                            </div>
+                        </div>
+                        <div class="text-left ml-2">
+                            <div class="font-bold text-xl text-gray-900">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Schedule Later Option -->
+                <div class="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-2xl p-4 border border-purple-100">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="schedule-later-check" class="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500">
+                        <div class="mr-3 flex-1">
+                            <span class="font-bold text-gray-800 block">جدولة الرحلة لاحقاً</span>
+                            <span class="text-xs text-gray-600">حدد موعد لاحق للرحلة</span>
+                        </div>
+                        <i class="fas fa-clock text-purple-400 text-2xl"></i>
+                    </label>
+                    <div id="schedule-time-picker" class="hidden mt-3 space-y-2">
+                        <input type="datetime-local" id="schedule-datetime" class="w-full px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 ring-indigo-500/50 outline-none">
                     </div>
                 </div>
 

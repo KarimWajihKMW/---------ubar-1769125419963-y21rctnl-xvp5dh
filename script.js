@@ -531,6 +531,10 @@ window.selectCar = function(element, type) {
     const est = computeTripEstimates();
     currentTripPrice = computePrice(type, est.distanceKm);
 
+    // Update selected car price display in the card
+    const priceEl = element.querySelector('.text-xl');
+    if (priceEl) priceEl.innerText = `${currentTripPrice} ر.س`;
+
     const reqBtn = document.getElementById('request-btn');
     const priceSummary = document.getElementById('ride-price-summary');
     if (priceSummary) {
@@ -539,7 +543,7 @@ window.selectCar = function(element, type) {
     }
     if (reqBtn) {
         reqBtn.disabled = false;
-        const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر' };
+        const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر', 'delivery': 'توصيل' };
         reqBtn.querySelector('span').innerText = `اطلب ${names[type]} — ${currentTripPrice} ر.س`;
         reqBtn.classList.add('animate-pulse');
         setTimeout(() => reqBtn.classList.remove('animate-pulse'), 500);
@@ -728,8 +732,8 @@ function computeTripEstimates() {
 }
 
 function computePrice(type, distanceKm) {
-    const base = { economy: 10, family: 15, luxury: 25 };
-    const perKm = { economy: 4, family: 6, luxury: 9 };
+    const base = { economy: 10, family: 15, luxury: 25, delivery: 8 };
+    const perKm = { economy: 4, family: 6, luxury: 9, delivery: 3 };
     const b = base[type] || 10;
     const p = perKm[type] || 4;
     return Math.round((b + p * distanceKm) * 10) / 10; // 0.1 SAR precision
@@ -746,8 +750,32 @@ function updateTripEstimatesUI() {
 window.requestRide = function() {
     if (!currentPickup || !currentDestination) { showToast('حدد الالتقاط والوجهة أولاً'); return; }
     if (!currentCarType) { showToast('اختر نوع السيارة'); return; }
+    
+    const scheduleCheck = document.getElementById('schedule-later-check');
+    const scheduleDatetime = document.getElementById('schedule-datetime');
+    let scheduledTime = null;
+    
+    if (scheduleCheck && scheduleCheck.checked) {
+        if (!scheduleDatetime || !scheduleDatetime.value) {
+            showToast('حدد موعد الرحلة المجدولة');
+            return;
+        }
+        scheduledTime = new Date(scheduleDatetime.value);
+        if (scheduledTime <= new Date()) {
+            showToast('الموعد يجب أن يكون في المستقبل');
+            return;
+        }
+    }
+    
     const est = computeTripEstimates();
     currentTripPrice = computePrice(currentCarType, est.distanceKm);
+    
+    if (scheduledTime) {
+        showToast(`تم جدولة الرحلة في ${scheduledTime.toLocaleString('ar-EG')}`);
+        setTimeout(() => resetApp(), 2000);
+        return;
+    }
+    
     // Show loading (searching for driver)
     switchSection('loading');
     // After a short delay, show driver found
@@ -774,6 +802,25 @@ function initPassengerMode() {
     if (world) world.classList.add('hidden');
     initLeafletMap();
     updateUIWithUserData();
+    
+    // Schedule later toggle handler
+    const scheduleCheck = document.getElementById('schedule-later-check');
+    const schedulePicker = document.getElementById('schedule-time-picker');
+    if (scheduleCheck && schedulePicker) {
+        scheduleCheck.addEventListener('change', () => {
+            if (scheduleCheck.checked) {
+                schedulePicker.classList.remove('hidden');
+                // Set min time to current + 15 min
+                const minTime = new Date(Date.now() + 15 * 60 * 1000);
+                const dateInput = document.getElementById('schedule-datetime');
+                if (dateInput) {
+                    dateInput.min = minTime.toISOString().slice(0, 16);
+                }
+            } else {
+                schedulePicker.classList.add('hidden');
+            }
+        });
+    }
 }
 
 function initDriverMode() {
