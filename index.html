@@ -165,11 +165,74 @@
         0%, 80%, 100% { transform: scale(0); }
         40% { transform: scale(1); }
       }
+
+      /* Role Selection Modal */
+      .role-card {
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .role-card:hover {
+          transform: translateY(-5px) scale(1.02);
+      }
+      .role-card.active {
+          border-color: #6366f1;
+          background-color: #eff6ff;
+      }
+      
+      /* Admin Dashboard Transitions */
+      .admin-panel-enter {
+          animation: fade-in-up 0.5s ease-out forwards;
+      }
+      @keyframes fade-in-up {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+      }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
     
-    <!-- Map Container (Interactive) -->
+    <!-- LOGIN / ROLE SELECTION MODAL (Initial Screen) -->
+    <div id="role-selection-modal" class="fixed inset-0 z-[100] bg-gradient-to-br from-indigo-900 to-slate-900 flex flex-col items-center justify-center p-6">
+        <div class="text-center mb-10">
+            <div class="w-24 h-24 bg-white/10 rounded-3xl mx-auto flex items-center justify-center backdrop-blur-md border border-white/20 shadow-2xl mb-6 animate-bounce">
+                <i class="fas fa-taxi text-5xl text-white"></i>
+            </div>
+            <h1 class="text-4xl font-extrabold text-white mb-2 tracking-tight">تاكسي أكوادرا</h1>
+            <p class="text-indigo-200 text-lg">اختر نوع حسابك للدخول</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl">
+            <!-- Passenger Role -->
+            <button onclick="selectRole('passenger')" class="role-card bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/10 hover:bg-white/20 group text-center">
+                <div class="w-20 h-20 bg-gradient-to-tr from-blue-500 to-cyan-400 rounded-2xl mx-auto flex items-center justify-center mb-6 shadow-lg group-hover:scale-110 transition-transform">
+                    <i class="fas fa-user text-3xl text-white"></i>
+                </div>
+                <h3 class="text-2xl font-bold text-white mb-2">راكب</h3>
+                <p class="text-blue-200 text-sm">اطلب سيارة وتنقل بسهولة</p>
+            </button>
+
+            <!-- Driver Role -->
+            <button onclick="selectRole('driver')" class="role-card bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/10 hover:bg-white/20 group text-center">
+                <div class="w-20 h-20 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-2xl mx-auto flex items-center justify-center mb-6 shadow-lg group-hover:scale-110 transition-transform">
+                    <i class="fas fa-steering-wheel text-3xl text-white"></i>
+                </div>
+                <h3 class="text-2xl font-bold text-white mb-2">كابتن</h3>
+                <p class="text-emerald-200 text-sm">استقبل الطلبات وضاعف دخلك</p>
+            </button>
+
+            <!-- Admin Role -->
+            <button onclick="selectRole('admin')" class="role-card bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/10 hover:bg-white/20 group text-center">
+                <div class="w-20 h-20 bg-gradient-to-tr from-purple-500 to-pink-400 rounded-2xl mx-auto flex items-center justify-center mb-6 shadow-lg group-hover:scale-110 transition-transform">
+                    <i class="fas fa-chart-line text-3xl text-white"></i>
+                </div>
+                <h3 class="text-2xl font-bold text-white mb-2">الإدارة</h3>
+                <p class="text-purple-200 text-sm">لوحة التحكم والتقارير</p>
+            </button>
+        </div>
+
+        <p class="mt-12 text-white/30 text-xs">© 2024 Akwadra Taxi Demo</p>
+    </div>
+
+    <!-- Map Container (Interactive) - Shared by User and Driver -->
     <div id="map-container" class="absolute inset-0 z-0 overflow-hidden grab-cursor bg-gray-100">
         <!-- The Draggable World Layer -->
         <div id="map-world" class="absolute top-0 left-0 w-[3000px] h-[3000px] origin-center map-pattern transition-transform duration-75 will-change-transform">
@@ -238,7 +301,7 @@
             </div>
         </div>
 
-        <!-- User Pickup Marker (Fixed Center Screen) -->
+        <!-- User Pickup Marker (Fixed Center Screen) - ONLY FOR PASSENGER MODE -->
         <div id="user-marker" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none z-30 flex flex-col items-center justify-center transition-all duration-300">
             <div class="relative">
                 <div class="marker-pulse w-8 h-8 bg-indigo-600 rounded-full border-4 border-white shadow-2xl flex items-center justify-center">
@@ -267,13 +330,15 @@
         </div>
     </div>
 
+    <!-- =============================================
+         PASSENGER UI COMPONENTS
+    ============================================== -->
     <!-- Top Bar -->
-    <div class="relative z-10 p-5 flex justify-between items-center bg-gradient-to-b from-black/20 to-transparent pointer-events-none">
+    <div id="passenger-top-bar" class="relative z-10 p-5 flex justify-between items-center bg-gradient-to-b from-black/20 to-transparent pointer-events-none hidden">
         <button id="menu-btn" class="bg-white/90 backdrop-blur-md p-3 w-12 h-12 rounded-full shadow-lg pointer-events-auto hover:scale-110 transition-transform text-gray-700 hover:text-indigo-600 active:scale-95 flex items-center justify-center">
             <i class="fas fa-bars text-lg"></i>
         </button>
         
-        <!-- Animated Logo -->
         <div class="bg-white/90 backdrop-blur-md px-5 py-2.5 rounded-full shadow-lg font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-700 to-purple-600 pointer-events-auto cursor-pointer shadow-indigo-500/20 transform hover:scale-105 transition-all">
             تاكسي أكوادرا
         </div>
@@ -283,10 +348,10 @@
         </button>
     </div>
 
-    <!-- Side Menu Overlay -->
+    <!-- Side Menu Overlay (Passenger) -->
     <div id="menu-overlay" class="fixed inset-0 bg-black/60 z-40 opacity-0 pointer-events-none transition-opacity duration-300 backdrop-blur-[2px]"></div>
 
-    <!-- Side Menu Drawer -->
+    <!-- Side Menu Drawer (Passenger) -->
     <div id="side-menu" class="fixed inset-y-0 right-0 w-80 bg-white z-50 shadow-[rgba(0,0,0,0.2)_10px_0px_50px] transform translate-x-full transition-transform duration-300 ease-in-out flex flex-col rounded-l-3xl overflow-hidden">
         <!-- Menu Header -->
         <div class="relative bg-gradient-to-br from-indigo-600 to-purple-700 p-8 text-white overflow-hidden">
@@ -331,15 +396,15 @@
 
         <!-- Menu Footer -->
         <div class="p-6 border-t border-gray-100 bg-gray-50">
-             <button class="flex items-center text-red-500 hover:text-red-700 transition-colors w-full group">
+             <button onclick="window.location.reload()" class="flex items-center text-red-500 hover:text-red-700 transition-colors w-full group">
                  <i class="fas fa-sign-out-alt w-8 text-center ml-2 group-hover:rotate-180 transition-transform duration-500"></i>
                  <span class="font-bold">تسجيل الخروج</span>
              </button>
         </div>
     </div>
 
-    <!-- Main Bottom Sheet UI -->
-    <div class="absolute bottom-0 w-full z-20 flex flex-col justify-end pointer-events-none">
+    <!-- Main Passenger Panel UI -->
+    <div class="absolute bottom-0 w-full z-20 flex flex-col justify-end pointer-events-none hidden" id="passenger-ui-container">
         
         <!-- Back Button -->
         <button id="back-btn" class="mx-4 mb-4 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-700 pointer-events-auto hidden hover:bg-indigo-50 hover:text-indigo-600 transition-all z-30 transform hover:scale-110 active:scale-95">
@@ -716,6 +781,210 @@
 
         </div>
     </div>
+
+    <!-- =============================================
+         DRIVER UI COMPONENTS
+    ============================================== -->
+    <div id="driver-ui-container" class="absolute inset-0 z-50 pointer-events-none hidden flex flex-col justify-end">
+        <!-- Driver Status Bar -->
+        <div class="absolute top-0 left-0 right-0 p-4 flex justify-between items-center bg-white/80 backdrop-blur-md shadow-sm pointer-events-auto">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-indigo-100 border border-indigo-200 overflow-hidden">
+                     <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" alt="Driver">
+                </div>
+                <div>
+                    <h3 class="font-bold text-sm text-gray-800">الكابتن أحمد</h3>
+                    <div class="flex items-center gap-1">
+                         <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                         <span class="text-xs text-green-600 font-bold">متصل الآن</span>
+                    </div>
+                </div>
+            </div>
+            <button onclick="window.location.reload()" class="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
+                تسجيل خروج
+            </button>
+        </div>
+
+        <!-- Driver Controls (Bottom Sheet) -->
+        <div class="pointer-events-auto bg-white rounded-t-3xl shadow-[0_-5px_30px_rgba(0,0,0,0.1)] p-6 pb-8 transition-transform transform translate-y-0" id="driver-controls">
+            <!-- Status: Waiting -->
+            <div id="driver-status-waiting" class="text-center py-4">
+                <div class="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+                    <i class="fas fa-satellite-dish text-2xl"></i>
+                </div>
+                <h2 class="text-xl font-bold text-gray-800">بانتظار الطلبات...</h2>
+                <p class="text-gray-500 text-sm mt-1">أنت متصل في منطقة الرياض</p>
+            </div>
+
+            <!-- Incoming Request (Hidden by default) -->
+            <div id="driver-incoming-request" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                        <i class="fas fa-bell text-yellow-500 animate-swing"></i> طلب جديد!
+                    </h3>
+                    <span class="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-1 rounded-md">يبعد 5 دقائق</span>
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+                    <div class="flex items-center gap-3 mb-3 border-b border-gray-200 pb-3">
+                        <div class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-400">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-gray-800">راكب #4922</div>
+                            <div class="text-xs text-gray-400">⭐ 4.8 (رحلة نقدية)</div>
+                        </div>
+                        <div class="mr-auto font-bold text-xl text-indigo-600">25 ر.س</div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 bg-indigo-500 rounded-full"></div>
+                            <span class="text-xs font-bold text-gray-500">من:</span>
+                            <span class="text-sm font-bold text-gray-800">موقع الراكب الحالي</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 bg-red-500 rounded-full"></div>
+                            <span class="text-xs font-bold text-gray-500">إلى:</span>
+                            <span class="text-sm font-bold text-gray-800">برج المملكة</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="driverRejectRequest()" class="flex-1 bg-red-50 text-red-500 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors">تجاهل</button>
+                    <button onclick="driverAcceptRequest()" class="flex-[2] bg-indigo-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-indigo-700 hover:shadow-indigo-300 transition-all transform active:scale-95">قبول الطلب (15ث)</button>
+                </div>
+            </div>
+
+            <!-- Active Trip Mode (Hidden by default) -->
+            <div id="driver-active-trip" class="hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-bold text-gray-800">جاري الرحلة</h3>
+                    <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-bold">نشطة</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <button class="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold text-sm hover:bg-indigo-100 transition-colors flex flex-col items-center gap-1">
+                        <i class="fas fa-location-arrow"></i> الملاحة
+                    </button>
+                    <button class="bg-gray-100 text-gray-600 py-3 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors flex flex-col items-center gap-1">
+                         <i class="fas fa-phone"></i> اتصال بالراكب
+                    </button>
+                </div>
+                <button onclick="driverEndTrip()" class="w-full bg-green-500 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-green-600 transition-all">
+                    إنهاء الرحلة وتحصيل المبلغ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- =============================================
+         ADMIN UI COMPONENTS (Full Screen Dashboard)
+    ============================================== -->
+    <div id="admin-ui-container" class="fixed inset-0 z-50 bg-gray-100 hidden overflow-y-auto">
+        <!-- Admin Sidebar -->
+        <div class="fixed inset-y-0 right-0 w-64 bg-slate-900 text-white hidden md:flex flex-col">
+            <div class="p-6 border-b border-slate-800">
+                <h1 class="text-xl font-bold tracking-wider">أكوادرا <span class="text-indigo-400">أدمن</span></h1>
+            </div>
+            <nav class="flex-1 p-4 space-y-1">
+                <a href="#" class="flex items-center gap-3 px-4 py-3 bg-indigo-600 rounded-xl text-white font-bold">
+                    <i class="fas fa-chart-pie w-6 text-center"></i> لوحة التحكم
+                </a>
+                <a href="#" class="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
+                    <i class="fas fa-users w-6 text-center"></i> السائقين
+                </a>
+                <a href="#" class="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
+                    <i class="fas fa-user-friends w-6 text-center"></i> الركاب
+                </a>
+                <a href="#" class="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
+                    <i class="fas fa-wallet w-6 text-center"></i> المالية
+                </a>
+            </nav>
+            <div class="p-4 border-t border-slate-800">
+                <button onclick="window.location.reload()" class="flex items-center gap-3 text-red-400 hover:text-red-300 transition-colors text-sm font-bold">
+                    <i class="fas fa-sign-out-alt"></i> تسجيل الخروج
+                </button>
+            </div>
+        </div>
+
+        <!-- Mobile Header -->
+        <div class="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center">
+            <span class="font-bold">لوحة التحكم</span>
+            <button onclick="window.location.reload()" class="text-red-400"><i class="fas fa-sign-out-alt"></i></button>
+        </div>
+
+        <!-- Main Content -->
+        <div class="md:mr-64 p-6 md:p-10 space-y-8">
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <!-- Stat Card 1 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.1s">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">إجمالي الرحلات</p>
+                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">1,240</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
+                        <i class="fas fa-route text-xl"></i>
+                    </div>
+                </div>
+                <!-- Stat Card 2 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.2s">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">السائقين النشطين</p>
+                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">58</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-green-50 text-green-600 rounded-xl flex items-center justify-center">
+                        <i class="fas fa-car text-xl"></i>
+                    </div>
+                </div>
+                <!-- Stat Card 3 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.3s">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">الإيرادات اليوم</p>
+                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">4,850</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center">
+                        <i class="fas fa-dollar-sign text-xl"></i>
+                    </div>
+                </div>
+                <!-- Stat Card 4 -->
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.4s">
+                    <div>
+                        <p class="text-xs font-bold text-gray-400 uppercase">مستخدمين جدد</p>
+                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">+12</h3>
+                    </div>
+                    <div class="w-12 h-12 bg-yellow-50 text-yellow-500 rounded-xl flex items-center justify-center">
+                        <i class="fas fa-user-plus text-xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Trips Table -->
+            <div class="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden admin-panel-enter" style="animation-delay: 0.5s">
+                <div class="p-6 border-b border-gray-100 flex justify-between items-center">
+                    <h3 class="font-bold text-lg text-gray-800">أحدث الرحلات</h3>
+                    <button class="text-indigo-600 text-sm font-bold hover:bg-indigo-50 px-3 py-1 rounded-lg transition-colors">عرض الكل</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-right">
+                        <thead class="bg-gray-50 text-gray-400 text-xs uppercase font-bold">
+                            <tr>
+                                <th class="px-6 py-4">معرف الرحلة</th>
+                                <th class="px-6 py-4">السائق</th>
+                                <th class="px-6 py-4">الراكب</th>
+                                <th class="px-6 py-4">التكلفة</th>
+                                <th class="px-6 py-4">الحالة</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100 text-sm font-medium text-gray-600" id="admin-trips-table">
+                            <!-- Rows populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>
