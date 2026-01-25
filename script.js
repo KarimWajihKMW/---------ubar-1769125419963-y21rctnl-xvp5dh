@@ -497,14 +497,19 @@ window.selectCar = function(element, type) {
     element.classList.add('selected');
     currentCarType = type;
     
-    const prices = { 'economy': 25, 'family': 45, 'luxury': 75 };
-    currentTripPrice = prices[type];
+    const est = computeTripEstimates();
+    currentTripPrice = computePrice(type, est.distanceKm);
 
     const reqBtn = document.getElementById('request-btn');
+    const priceSummary = document.getElementById('ride-price-summary');
+    if (priceSummary) {
+        priceSummary.classList.remove('hidden');
+        priceSummary.innerText = `السعر: ${currentTripPrice} ر.س`;
+    }
     if (reqBtn) {
         reqBtn.disabled = false;
         const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر' };
-        reqBtn.querySelector('span').innerText = `اطلب ${names[type]}`;
+        reqBtn.querySelector('span').innerText = `اطلب ${names[type]} — ${currentTripPrice} ر.س`;
         reqBtn.classList.add('animate-pulse');
         setTimeout(() => reqBtn.classList.remove('animate-pulse'), 500);
     }
@@ -546,7 +551,13 @@ window.confirmDestination = function(destination) {
     if (userMarker) userMarker.classList.add('opacity-0'); 
     if (backBtn) backBtn.classList.remove('hidden');
     switchSection('rideSelect');
-    if (reqBtn) reqBtn.querySelector('span').innerText = 'اختر نوع السيارة';
+
+    // Update distance/time based on pickup/destination
+    updateTripEstimatesUI();
+    if (reqBtn) {
+        reqBtn.disabled = true;
+        reqBtn.querySelector('span').innerText = 'اختر نوع السيارة';
+    }
 };
 
 window.switchSection = function(name) {
@@ -662,6 +673,59 @@ window.logoutUser = function() {
 };
 
 // --- Helper Functions ---
+
+// --- Trip estimation helpers ---
+function haversineKm(a, b) {
+    const R = 6371; // km
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const sinDLat = Math.sin(dLat / 2);
+    const sinDLng = Math.sin(dLng / 2);
+    const c = 2 * Math.asin(Math.sqrt(sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng));
+    return Math.max(0, R * c);
+}
+
+function computeTripEstimates() {
+    if (!currentPickup || !currentDestination) return { distanceKm: 0, etaMin: 0 };
+    const distanceKm = Math.round(haversineKm(currentPickup, currentDestination) * 10) / 10; // 0.1 km precision
+    const avgSpeedKmh = 30; // urban estimate
+    const etaMin = Math.max(1, Math.round((distanceKm / avgSpeedKmh) * 60));
+    return { distanceKm, etaMin };
+}
+
+function computePrice(type, distanceKm) {
+    const base = { economy: 10, family: 15, luxury: 25 };
+    const perKm = { economy: 4, family: 6, luxury: 9 };
+    const b = base[type] || 10;
+    const p = perKm[type] || 4;
+    return Math.round((b + p * distanceKm) * 10) / 10; // 0.1 SAR precision
+}
+
+function updateTripEstimatesUI() {
+    const { distanceKm, etaMin } = computeTripEstimates();
+    const dEl = document.getElementById('ride-distance-badge');
+    const tEl = document.getElementById('ride-time-badge');
+    if (dEl) dEl.innerText = `${distanceKm} كم`;
+    if (tEl) tEl.innerText = `~${etaMin} دقيقة`;
+}
+
+window.requestRide = function() {
+    if (!currentPickup || !currentDestination) { showToast('حدد الالتقاط والوجهة أولاً'); return; }
+    if (!currentCarType) { showToast('اختر نوع السيارة'); return; }
+    const est = computeTripEstimates();
+    currentTripPrice = computePrice(currentCarType, est.distanceKm);
+    // Show loading (searching for driver)
+    switchSection('loading');
+    // After a short delay, show driver found
+    setTimeout(() => {
+        document.getElementById('eta-display') && (document.getElementById('eta-display').innerText = `${est.etaMin} دقائق`);
+        switchSection('driver');
+        startDriverTracking();
+    }, 2000);
+};
 
 function loginSuccess() {
     window.closeAuthModal();
