@@ -136,8 +136,13 @@ const savedPlaces = {
 let leafletMap = null;
 let pickupMarkerL = null;
 let destMarkerL = null;
+let driverMarkerL = null;
+let routePolyline = null;
 let currentPickup = null; // {lat, lng}
 let currentDestination = null; // {lat, lng, label}
+let driverLocation = null; // {lat, lng}
+let etaCountdown = null;
+let etaSeconds = 0;
 
 function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
@@ -300,6 +305,143 @@ window.savePlaceAs = function(event, type) {
     const labels = { home: 'المنزل', work: 'العمل', favorite: 'المفضلة' };
     showToast(`تم حفظ الموقع كـ ${labels[type]}`);
 };
+
+// Live driver tracking on Leaflet map
+function startDriverTrackingLive() {
+    if (!leafletMap || !currentPickup) return;
+    
+    // Clear any existing driver marker
+    if (driverMarkerL) driverMarkerL.remove();
+    if (routePolyline) routePolyline.remove();
+    
+    // Create driver marker with custom icon (car)
+    const carIcon = L.divIcon({
+        className: 'driver-car-marker',
+        html: '<div style="font-size: 32px; transform: rotate(0deg);"><i class="fas fa-car" style="color: #4f46e5;"></i></div>',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+    });
+    
+    // Initial driver location: offset from pickup
+    const offsetLat = 0.01; // ~1km
+    const offsetLng = 0.01;
+    driverLocation = {
+        lat: currentPickup.lat + offsetLat,
+        lng: currentPickup.lng + offsetLng
+    };
+    
+    driverMarkerL = L.marker([driverLocation.lat, driverLocation.lng], { icon: carIcon }).addTo(leafletMap);
+    driverMarkerL.bindPopup('السيارة قادمة إليك').openPopup();
+    
+    // Draw route line
+    routePolyline = L.polyline([
+        [driverLocation.lat, driverLocation.lng],
+        [currentPickup.lat, currentPickup.lng]
+    ], { color: '#4f46e5', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(leafletMap);
+    
+    // Fit map to show both driver and pickup
+    const bounds = L.latLngBounds([
+        [driverLocation.lat, driverLocation.lng],
+        [currentPickup.lat, currentPickup.lng]
+    ]);
+    leafletMap.fitBounds(bounds, { padding: [50, 50] });
+    
+    // Animate driver moving to pickup
+    animateDriverToPickup();
+}
+
+function animateDriverToPickup() {
+    if (!driverMarkerL || !currentPickup) return;
+    
+    const startLat = driverLocation.lat;
+    const startLng = driverLocation.lng;
+    const endLat = currentPickup.lat;
+    const endLng = currentPickup.lng;
+    const duration = etaSeconds * 1000; // ms
+    const startTime = Date.now();
+    
+    function moveStep() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Ease-in-out
+        const eased = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+        
+        const currentLat = startLat + (endLat - startLat) * eased;
+        const currentLng = startLng + (endLng - startLng) * eased;
+        
+        driverLocation = { lat: currentLat, lng: currentLng };
+        driverMarkerL.setLatLng([currentLat, currentLng]);
+        
+        // Update route line
+        if (routePolyline) {
+            routePolyline.setLatLngs([
+                [currentLat, currentLng],
+                [endLat, endLng]
+            ]);
+        }
+        
+        // Calculate bearing for car rotation
+        const bearing = calculateBearing(currentLat, currentLng, endLat, endLng);
+        const carEl = driverMarkerL.getElement();
+        if (carEl) {
+            const iconDiv = carEl.querySelector('div');
+            if (iconDiv) iconDiv.style.transform = `rotate(${bearing}deg)`;
+        }
+        
+        if (progress < 1) {
+            requestAnimationFrame(moveStep);
+        } else {
+            // Driver arrived
+            showToast('وصل الكابتن!');
+            if (routePolyline) routePolyline.remove();
+        }
+    }
+    
+    requestAnimationFrame(moveStep);
+}
+
+function calculateBearing(lat1, lng1, lat2, lng2) {
+    const toRad = deg => deg * Math.PI / 180;
+    const toDeg = rad => rad * 180 / Math.PI;
+    
+    const dLng = toRad(lng2 - lng1);
+    const y = Math.sin(dLng) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+              Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLng);
+    const bearing = toDeg(Math.atan2(y, x));
+    return (bearing + 360) % 360;
+}
+
+function startETACountdown() {
+    if (etaCountdown) clearInterval(etaCountdown);
+    
+    etaCountdown = setInterval(() => {
+        if (etaSeconds > 0) {
+            etaSeconds--;
+            const etaEl = document.getElementById('eta-display');
+            if (etaEl) etaEl.innerText = formatETA(etaSeconds);
+        } else {
+            clearInterval(etaCountdown);
+        }
+    }, 1000);
+}
+
+function formatETA(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins > 0) {
+        return `${mins} د ${secs} ث`;
+    }
+    return `${secs} ث`;
+}
+
+function stopDriverTrackingLive() {
+    if (etaCountdown) clearInterval(etaCountdown);
+    if (driverMarkerL) driverMarkerL.remove();
+    if (routePolyline) routePolyline.remove();
+}
+
 
 // --- DATABASE SIMULATION SERVICE ---
 const DB = {
@@ -661,6 +803,7 @@ window.resetApp = function() {
     if (destMarker) destMarker.classList.add('hidden');
     
     stopDriverTracking(); 
+    stopDriverTrackingLive();
     
     switchSection('destination');
 };
@@ -867,9 +1010,11 @@ window.requestRide = function() {
     switchSection('loading');
     // After a short delay, show driver found
     setTimeout(() => {
-        document.getElementById('eta-display') && (document.getElementById('eta-display').innerText = `${est.etaMin} دقائق`);
+        etaSeconds = est.etaMin * 60;
+        document.getElementById('eta-display') && (document.getElementById('eta-display').innerText = formatETA(etaSeconds));
         switchSection('driver');
-        startDriverTracking();
+        startDriverTrackingLive();
+        startETACountdown();
     }, 2000);
 };
 
