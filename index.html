@@ -590,8 +590,17 @@
             
             <!-- State 1: Where to? -->
             <div id="state-destination" class="p-6 pb-8">
-                <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-8"></div>
-                <h2 class="text-2xl font-extrabold text-gray-800 mb-6">إلى أين تريد الذهاب؟</h2>
+                <!-- Drag Handle with Minimize Button -->
+                <div class="flex items-center justify-between mb-6">
+                    <div class="w-16 h-1.5 bg-gray-200 rounded-full"></div>
+                    <button onclick="togglePanelSize()" class="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 transition-colors" title="تصغير/توسيع">
+                        <i class="fas fa-chevron-down" id="panel-toggle-icon"></i>
+                    </button>
+                    <div class="w-16 h-1.5 bg-gray-200 rounded-full"></div>
+                </div>
+                
+                <div id="panel-content">
+                    <h2 class="text-2xl font-extrabold text-gray-800 mb-6">إلى أين تريد الذهاب؟</h2>
                 
                 <div class="space-y-4">
                     <div class="flex items-center bg-gray-50 p-3.5 rounded-2xl border border-gray-100 focus-within:ring-2 ring-indigo-500/30 transition-all">
@@ -648,9 +657,10 @@
                      </div>
                 </div>
             </div>
+            </div>
 
             <!-- State 2: Select Car -->
-            <div id="state-ride-select" class="hidden p-6 pb-8 bg-white">
+            <div id="state-ride-select" class="hidden p-6 pb-8 bg-white max-h-[80vh] overflow-y-auto no-scrollbar">
                 <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
                 <div class="text-center mb-6">
                     <h3 class="text-2xl font-extrabold text-gray-800">اختر الرحلة</h3>

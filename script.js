@@ -1887,3 +1887,33 @@ window.initPaymentFlow = function() {
     document.getElementById('confirm-payment-btn').disabled = true;
     updatePaymentSummary();
 };
+
+// ========================================
+// PANEL CONTROL (Minimize/Maximize)
+// ========================================
+
+let isPanelMinimized = false;
+
+window.togglePanelSize = function() {
+    const panel = document.getElementById('main-panel');
+    const content = document.getElementById('panel-content');
+    const icon = document.getElementById('panel-toggle-icon');
+    
+    if (!panel || !content || !icon) return;
+    
+    isPanelMinimized = !isPanelMinimized;
+    
+    if (isPanelMinimized) {
+        // Minimize panel - show only header
+        panel.style.maxHeight = '80px';
+        content.style.display = 'none';
+        icon.classList.remove('fa-chevron-down');
+        icon.classList.add('fa-chevron-up');
+    } else {
+        // Maximize panel - show full content
+        panel.style.maxHeight = '85vh';
+        content.style.display = 'block';
+        icon.classList.remove('fa-chevron-up');
+        icon.classList.add('fa-chevron-down');
+    }
+};
