@@ -1,7 +1,6 @@
-console.log('Akwadra Super Builder Initialized - Safe Mode');
+console.log('Akwadra Super Builder Initialized - Multi-Role System');
 
 // --- Safe Storage Wrapper ---
-// Prevents SecurityError in sandboxed iframe environments
 const SafeStorage = {
     _memory: {},
     getItem(key) {
@@ -21,7 +20,31 @@ const SafeStorage = {
     }
 };
 
-// --- Configuration & Elements ---
+// --- Global State ---
+let currentUserRole = null; // 'passenger', 'driver', 'admin'
+let currentCarType = null;
+let currentTripPrice = 0;
+let previousState = 'driver';
+let mapState = {
+    x: -1500 + (window.innerWidth / 2),
+    y: -1500 + (window.innerHeight / 2),
+    scale: 1,
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    clickStartX: 0,
+    clickStartY: 0
+};
+
+let driverAnimationId = null;
+let driverRequestTimeout = null;
+
+// --- Elements (Passenger) ---
+const roleSelectionModal = document.getElementById('role-selection-modal');
+const passengerUIContainer = document.getElementById('passenger-ui-container');
+const passengerTopBar = document.getElementById('passenger-top-bar');
 const destInput = document.getElementById('dest-input');
 const currentLocInput = document.getElementById('current-loc-input');
 const backBtn = document.getElementById('back-btn');
@@ -37,6 +60,16 @@ const menuOverlay = document.getElementById('menu-overlay');
 const tripHistoryContainer = document.getElementById('trip-history-container');
 const toastNotification = document.getElementById('toast-notification');
 const toastMessage = document.getElementById('toast-message');
+
+// --- Elements (Driver) ---
+const driverUIContainer = document.getElementById('driver-ui-container');
+const driverStatusWaiting = document.getElementById('driver-status-waiting');
+const driverIncomingRequest = document.getElementById('driver-incoming-request');
+const driverActiveTrip = document.getElementById('driver-active-trip');
+
+// --- Elements (Admin) ---
+const adminUIContainer = document.getElementById('admin-ui-container');
+const adminTripsTable = document.getElementById('admin-trips-table');
 
 // Chat Elements
 const chatInput = document.getElementById('chat-input');
@@ -81,24 +114,6 @@ const sections = {
     chat: document.getElementById('state-chat')
 };
 
-let currentCarType = null;
-let currentTripPrice = 0;
-let previousState = 'driver';
-let mapState = {
-    x: -1500 + (window.innerWidth / 2),
-    y: -1500 + (window.innerHeight / 2),
-    scale: 1,
-    isDragging: false,
-    startX: 0,
-    startY: 0,
-    lastX: 0,
-    lastY: 0,
-    clickStartX: 0,
-    clickStartY: 0
-};
-
-let driverAnimationId = null;
-
 // --- DATABASE SIMULATION SERVICE ---
 const DB = {
     keyUser: 'akwadra_user',
@@ -123,21 +138,25 @@ const DB = {
             const defaultTrips = [
                 {
                     id: 'TR-8854',
-                    date: new Date(Date.now() - 86400000).toISOString(), // Yesterday
+                    date: new Date(Date.now() - 86400000).toISOString(),
                     pickup: "العمل",
                     dropoff: "المنزل",
                     cost: 25,
                     status: "completed",
-                    car: "economy"
+                    car: "economy",
+                    driver: "أحمد محمد",
+                    passenger: "عبد الله أحمد"
                 },
                 {
                     id: 'TR-1290',
-                    date: new Date(Date.now() - 172800000).toISOString(), // 2 Days ago
+                    date: new Date(Date.now() - 172800000).toISOString(),
                     pickup: "المطار",
                     dropoff: "فندق النرجس",
                     cost: 80,
                     status: "completed",
-                    car: "luxury"
+                    car: "luxury",
+                    driver: "سالم العلي",
+                    passenger: "سارة خالد"
                 }
             ];
             SafeStorage.setItem(this.keyTrips, JSON.stringify(defaultTrips));
@@ -165,14 +184,27 @@ const DB = {
 
     addTrip(trip) {
         const trips = this.getTrips();
-        trips.unshift(trip); // Add to beginning
+        trips.unshift(trip);
         SafeStorage.setItem(this.keyTrips, JSON.stringify(trips));
     }
 };
 
-// --- Function Declarations (Hoisted & Global) ---
+// --- GLOBAL FUNCTIONS (WINDOW) ---
 
-// Explicitly define global functions for HTML onclick handlers
+window.selectRole = function(role) {
+    currentUserRole = role;
+    roleSelectionModal.classList.add('opacity-0', 'pointer-events-none');
+    setTimeout(() => roleSelectionModal.classList.add('hidden'), 500);
+
+    if (role === 'passenger') {
+        initPassengerMode();
+    } else if (role === 'driver') {
+        initDriverMode();
+    } else if (role === 'admin') {
+        initAdminMode();
+    }
+};
+
 window.selectCar = function(element, type) {
     document.querySelectorAll('.car-select').forEach(el => {
         el.classList.remove('selected', 'ring-2', 'ring-indigo-500');
@@ -193,6 +225,8 @@ window.selectCar = function(element, type) {
 };
 
 window.resetApp = function() {
+    if (currentUserRole !== 'passenger') return;
+
     if (destInput) destInput.value = '';
     currentCarType = null;
     if (requestBtn) {
@@ -220,7 +254,6 @@ window.confirmDestination = function(destination) {
 };
 
 window.switchSection = function(name) {
-    // Record previous state for back navigation (specifically for chat)
     const currentVisible = Object.keys(sections).find(key => sections[key] && !sections[key].classList.contains('hidden'));
     if(currentVisible && name === 'chat') {
         previousState = currentVisible;
@@ -249,9 +282,7 @@ window.switchSection = function(name) {
 
 window.openChat = function() {
     switchSection('chat');
-    // Auto scroll to bottom
     if(chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
-    // Focus input
     if(chatInput) setTimeout(() => chatInput.focus(), 300);
 };
 
@@ -263,7 +294,6 @@ window.sendChatMessage = function() {
     const text = chatInput.value.trim();
     if(!text) return;
 
-    // Add User Message
     const msgHtml = `
     <div class="flex items-start justify-end msg-enter">
         <div class="bg-indigo-600 text-white rounded-2xl rounded-tl-none px-4 py-2.5 shadow-md text-sm max-w-[85%]">
@@ -278,12 +308,101 @@ window.sendChatMessage = function() {
     chatInput.value = '';
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    // Simulate Driver Response
     simulateDriverResponse(text);
 };
 
+// --- Driver Mode Specific Functions ---
+window.driverRejectRequest = function() {
+    driverIncomingRequest.classList.add('hidden');
+    driverStatusWaiting.classList.remove('hidden');
+    showToast('تم رفض الطلب');
+    scheduleMockRequest();
+};
+
+window.driverAcceptRequest = function() {
+    driverIncomingRequest.classList.add('hidden');
+    driverActiveTrip.classList.remove('hidden');
+    showToast('تم قبول الطلب! اذهب للراكب');
+    // Here we could animate the map to the passenger
+};
+
+window.driverEndTrip = function() {
+    driverActiveTrip.classList.add('hidden');
+    driverStatusWaiting.classList.remove('hidden');
+    showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
+    triggerConfetti();
+    
+    // Record mock trip for stats
+    DB.addTrip({
+        id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
+        date: new Date().toISOString(),
+        pickup: "موقع الراكب",
+        dropoff: "وجهة محددة",
+        cost: 25,
+        status: "completed",
+        car: "economy",
+        driver: "الكابتن أحمد",
+        passenger: "راكب تجريبي"
+    });
+    scheduleMockRequest();
+};
+
+// --- Helper Functions ---
+
+function initPassengerMode() {
+    passengerUIContainer.classList.remove('hidden');
+    passengerTopBar.classList.remove('hidden');
+    centerMap();
+    updateUIWithUserData();
+}
+
+function initDriverMode() {
+    driverUIContainer.classList.remove('hidden');
+    // Hide Passenger specifics
+    if(userMarker) userMarker.classList.add('hidden');
+    centerMap();
+    scheduleMockRequest();
+}
+
+function initAdminMode() {
+    adminUIContainer.classList.remove('hidden');
+    // Render Admin Data
+    renderAdminTrips();
+}
+
+function scheduleMockRequest() {
+    // Simulate a request coming in after 5-10 seconds
+    if (driverRequestTimeout) clearTimeout(driverRequestTimeout);
+    driverRequestTimeout = setTimeout(() => {
+        if (currentUserRole === 'driver' && !driverStatusWaiting.classList.contains('hidden')) {
+            driverStatusWaiting.classList.add('hidden');
+            driverIncomingRequest.classList.remove('hidden');
+            // Play sound ideally
+        }
+    }, 5000);
+}
+
+function renderAdminTrips() {
+    if (!adminTripsTable) return;
+    const trips = DB.getTrips();
+    adminTripsTable.innerHTML = '';
+    
+    trips.forEach(trip => {
+        const html = `
+        <tr class="hover:bg-indigo-50/30 transition-colors">
+            <td class="px-6 py-4 font-bold">${trip.id}</td>
+            <td class="px-6 py-4">${trip.driver || 'غير محدد'}</td>
+            <td class="px-6 py-4">${trip.passenger || 'غير محدد'}</td>
+            <td class="px-6 py-4 font-bold text-indigo-600">${trip.cost} ر.س</td>
+            <td class="px-6 py-4">
+                <span class="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold">${trip.status}</span>
+            </td>
+        </tr>`;
+        adminTripsTable.insertAdjacentHTML('beforeend', html);
+    });
+}
+
 function simulateDriverResponse(userText) {
-    // Show typing indicator
     const typingId = 'typing-' + Date.now();
     const typingHtml = `
     <div id="${typingId}" class="flex items-start msg-enter">
@@ -299,7 +418,6 @@ function simulateDriverResponse(userText) {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }, 600);
 
-    // Determine response
     let responseText = "حسناً، فهمت!";
     if (userText.includes("وينك") || userText.includes("متى")) responseText = "أنا قريب جداً، الطريق مزدحم قليلاً.";
     else if (userText.includes("بسرعة") || userText.includes("مستعجل")) responseText = "سأبذل قصارى جهدي للوصول سريعاً!";
@@ -319,8 +437,6 @@ function simulateDriverResponse(userText) {
         </div>`;
         chatMessages.insertAdjacentHTML('beforeend', respHtml);
         chatMessages.scrollTop = chatMessages.scrollHeight;
-        
-        // Play sound effect (optional/silent for now)
     }, 2500);
 }
 
@@ -340,14 +456,12 @@ function updateUIWithUserData() {
     const user = DB.getUser();
     if (!user) return;
 
-    // Update Sidebar
     if(sidebarName) sidebarName.innerText = `أهلاً، ${user.name.split(' ')[0]}`;
     if(sidebarRating) sidebarRating.innerText = user.rating;
     if(sidebarBalance) sidebarBalance.innerText = `${user.balance} ر.س`;
     if(sidebarAvatar) sidebarAvatar.src = user.avatar;
     if(navAvatar) navAvatar.src = user.avatar;
 
-    // Update Profile View
     if(profileName) profileName.innerText = user.name;
     if(profileAvatar) profileAvatar.src = user.avatar;
     if(profileRating) profileRating.innerText = user.rating;
@@ -410,11 +524,9 @@ function toggleMenu() {
     } else {
         sideMenu.classList.add('sidebar-open');
         menuOverlay.classList.add('overlay-open');
-        updateUIWithUserData(); // Refresh data on open
+        updateUIWithUserData();
     }
 }
-
-// --- Map Drag Logic ---
 
 function startDrag(e) {
     if (e.target.closest('.pointer-events-auto')) return;
@@ -445,7 +557,7 @@ function drag(e) {
     
     updateMapTransform();
     
-    if (Math.random() > 0.9 && currentLocInput) {
+    if (currentUserRole === 'passenger' && Math.random() > 0.9 && currentLocInput) {
         currentLocInput.value = "جاري تحديد الموقع...";
     }
 }
@@ -464,12 +576,15 @@ function endDrag(e) {
     
     if (dist < 5) {
         handleMapClick(clientX, clientY);
-    } else if (currentLocInput) {
+    } else if (currentUserRole === 'passenger' && currentLocInput) {
         currentLocInput.value = "شارع الملك عبدالله، حي النخيل";
     }
 }
 
 function handleMapClick(cx, cy) {
+    // Only handle click for destination setting in Passenger Mode
+    if (currentUserRole !== 'passenger') return;
+
     const rect = mapWorld.getBoundingClientRect();
     const relX = (cx - rect.left) / mapState.scale;
     const relY = (cy - rect.top) / mapState.scale;
@@ -484,7 +599,7 @@ function handleMapClick(cx, cy) {
     window.confirmDestination("Map Point");
 }
 
-// --- Driver Tracking Logic ---
+// --- Driver Tracking Logic (Visuals) ---
 function startDriverTracking() {
     const viewportCenterX = window.innerWidth / 2;
     const viewportCenterY = window.innerHeight / 2;
@@ -503,7 +618,7 @@ function startDriverTracking() {
     driverRouteLine.classList.remove('opacity-0');
 
     const startTime = Date.now();
-    const duration = 8000; // Faster for demo
+    const duration = 8000;
     
     function animate() {
         const now = Date.now();
@@ -553,7 +668,6 @@ function startDriverTracking() {
 function startRide(startX, startY) {
     window.switchSection('inRide');
     
-    // Set destination text based on input or default
     if(rideDestText) {
         rideDestText.innerText = destInput.value.includes("خريطة") ? "وجهة محددة" : (destInput.value || "فندق الريتز كارلتون");
     }
@@ -563,14 +677,13 @@ function startRide(startX, startY) {
         destX = parseFloat(destMarker.style.left);
         destY = parseFloat(destMarker.style.top);
     }
-    // Fallback if no marker set
     if (!destX) {
         destX = startX - 800;
         destY = startY + 600;
     }
 
     const startTime = Date.now();
-    const duration = 10000; // Faster for demo
+    const duration = 10000;
     
     driverLabelText.innerText = 'جاري الرحلة';
 
@@ -590,7 +703,6 @@ function startRide(startX, startY) {
         activeDriverMarker.style.left = `${currentX}px`;
         activeDriverMarker.style.top = `${currentY}px`;
 
-        // Auto follow car
         const viewportCenterX = window.innerWidth / 2;
         const viewportCenterY = window.innerHeight / 2;
         mapState.x = viewportCenterX - (currentX * mapState.scale);
@@ -609,7 +721,7 @@ function startRide(startX, startY) {
         } else {
             setTimeout(() => {
                 triggerConfetti();
-                finishTrip(); // Save to DB
+                finishTrip();
                 window.switchSection('rating');
                 stopDriverTracking();
             }, 1000);
@@ -620,7 +732,6 @@ function startRide(startX, startY) {
 }
 
 function finishTrip() {
-    // Create Trip Record
     const newTrip = {
         id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
         date: new Date().toISOString(),
@@ -628,13 +739,13 @@ function finishTrip() {
         dropoff: rideDestText ? rideDestText.innerText : "وجهة محددة",
         cost: currentTripPrice || 25,
         status: "completed",
-        car: currentCarType || "economy"
+        car: currentCarType || "economy",
+        driver: "أحمد محمد",
+        passenger: "المستخدم"
     };
 
-    // Save to DB
     DB.addTrip(newTrip);
 
-    // Update Wallet/Points
     const user = DB.getUser();
     DB.updateUser({
         balance: user.balance - currentTripPrice,
@@ -680,8 +791,7 @@ function animateAmbientCars() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM Ready');
     try {
-        DB.init(); // Initialize Database
-        updateUIWithUserData(); // Load Data
+        DB.init();
         centerMap();
         animateAmbientCars();
     } catch (e) {
@@ -713,9 +823,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (centerMapBtn) centerMapBtn.addEventListener('click', () => {
         centerMap();
-        userMarker.classList.remove('hidden');
-        destMarker.classList.add('hidden');
-        window.resetApp();
+        if (currentUserRole === 'passenger') {
+            userMarker.classList.remove('hidden');
+            destMarker.classList.add('hidden');
+            window.resetApp();
+        }
     });
 
     // UI Controls
