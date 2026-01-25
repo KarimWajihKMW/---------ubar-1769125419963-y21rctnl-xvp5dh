@@ -1607,15 +1607,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const requestBtn = document.getElementById('request-btn');
-    if (requestBtn) requestBtn.addEventListener('click', () => {
-        if (!currentCarType) return;
-        window.switchSection('loading');
-        setTimeout(() => {
-            window.switchSection('driver');
-            startDriverTracking();
-        }, 3000);
-    });
+    // request button handled by inline onclick="requestRide()"; avoid double-binding here
 
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.addEventListener('click', window.resetApp);
