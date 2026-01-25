@@ -1,4 +1,25 @@
-console.log('Akwadra Super Builder Initialized - Database Connected');
+console.log('Akwadra Super Builder Initialized - Safe Mode');
+
+// --- Safe Storage Wrapper ---
+// Prevents SecurityError in sandboxed iframe environments
+const SafeStorage = {
+    _memory: {},
+    getItem(key) {
+        try {
+            return window.localStorage.getItem(key);
+        } catch (e) {
+            console.warn('LocalStorage access failed, using in-memory fallback:', e.message);
+            return this._memory[key] || null;
+        }
+    },
+    setItem(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {
+            this._memory[key] = value;
+        }
+    }
+};
 
 // --- Configuration & Elements ---
 const destInput = document.getElementById('dest-input');
@@ -79,7 +100,7 @@ const DB = {
 
     init() {
         // Seed User Data if not exists
-        if (!localStorage.getItem(this.keyUser)) {
+        if (!SafeStorage.getItem(this.keyUser)) {
             const defaultUser = {
                 name: "عبد الله أحمد",
                 balance: 150,
@@ -88,11 +109,11 @@ const DB = {
                 status: "عضو ذهبي",
                 avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Abdullah"
             };
-            localStorage.setItem(this.keyUser, JSON.stringify(defaultUser));
+            SafeStorage.setItem(this.keyUser, JSON.stringify(defaultUser));
         }
 
         // Seed Trip History if not exists
-        if (!localStorage.getItem(this.keyTrips)) {
+        if (!SafeStorage.getItem(this.keyTrips)) {
             const defaultTrips = [
                 {
                     id: 'TR-8854',
@@ -113,34 +134,106 @@ const DB = {
                     car: "luxury"
                 }
             ];
-            localStorage.setItem(this.keyTrips, JSON.stringify(defaultTrips));
+            SafeStorage.setItem(this.keyTrips, JSON.stringify(defaultTrips));
         }
     },
 
     getUser() {
-        return JSON.parse(localStorage.getItem(this.keyUser));
+        const data = SafeStorage.getItem(this.keyUser);
+        return data ? JSON.parse(data) : null;
     },
 
     updateUser(updates) {
         const user = this.getUser();
+        if (!user) return;
         const updatedUser = { ...user, ...updates };
-        localStorage.setItem(this.keyUser, JSON.stringify(updatedUser));
+        SafeStorage.setItem(this.keyUser, JSON.stringify(updatedUser));
         updateUIWithUserData();
         return updatedUser;
     },
 
     getTrips() {
-        return JSON.parse(localStorage.getItem(this.keyTrips)) || [];
+        const data = SafeStorage.getItem(this.keyTrips);
+        return data ? JSON.parse(data) : [];
     },
 
     addTrip(trip) {
         const trips = this.getTrips();
         trips.unshift(trip); // Add to beginning
-        localStorage.setItem(this.keyTrips, JSON.stringify(trips));
+        SafeStorage.setItem(this.keyTrips, JSON.stringify(trips));
     }
 };
 
-// --- Function Declarations (Hoisted) ---
+// --- Function Declarations (Hoisted & Global) ---
+
+// Explicitly define global functions for HTML onclick handlers
+window.selectCar = function(element, type) {
+    document.querySelectorAll('.car-select').forEach(el => {
+        el.classList.remove('selected', 'ring-2', 'ring-indigo-500');
+    });
+    element.classList.add('selected');
+    currentCarType = type;
+    
+    const prices = { 'economy': 25, 'family': 45, 'luxury': 75 };
+    currentTripPrice = prices[type];
+
+    if (requestBtn) {
+        requestBtn.disabled = false;
+        const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر' };
+        requestBtn.querySelector('span').innerText = `اطلب ${names[type]}`;
+        requestBtn.classList.add('animate-pulse');
+        setTimeout(() => requestBtn.classList.remove('animate-pulse'), 500);
+    }
+};
+
+window.resetApp = function() {
+    if (destInput) destInput.value = '';
+    currentCarType = null;
+    if (requestBtn) {
+        requestBtn.disabled = true;
+        requestBtn.querySelector('span').innerText = 'اطلب سيارة';
+    }
+    if (backBtn) backBtn.classList.add('hidden');
+    
+    document.querySelectorAll('.car-select').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.star-btn').forEach(b => { b.classList.remove('text-yellow-400'); b.classList.add('text-gray-300'); });
+
+    if (userMarker) userMarker.classList.remove('opacity-0');
+    if (destMarker) destMarker.classList.add('hidden');
+    
+    stopDriverTracking(); 
+    
+    switchSection('destination');
+};
+
+window.confirmDestination = function(destination) {
+    if (userMarker) userMarker.classList.add('opacity-0'); 
+    if (backBtn) backBtn.classList.remove('hidden');
+    switchSection('rideSelect');
+    if (requestBtn) requestBtn.querySelector('span').innerText = 'اختر نوع السيارة';
+};
+
+window.switchSection = function(name) {
+    Object.values(sections).forEach(sec => {
+        if(sec) {
+            sec.classList.add('hidden');
+            sec.classList.remove('slide-up-enter-active');
+        }
+    });
+    const target = sections[name];
+    if(target) {
+        target.classList.remove('hidden');
+        target.classList.add('slide-up-enter');
+        void target.offsetWidth;
+        target.classList.add('slide-up-enter-active');
+        target.classList.remove('slide-up-enter');
+    }
+    
+    if(name === 'profile') {
+        updateUIWithUserData();
+        renderTripHistory();
+    }
+};
 
 function showToast(message) {
     if(toastNotification && toastMessage) {
@@ -232,82 +325,6 @@ function toggleMenu() {
     }
 }
 
-function switchSection(name) {
-    Object.values(sections).forEach(sec => {
-        if(sec) {
-            sec.classList.add('hidden');
-            sec.classList.remove('slide-up-enter-active');
-        }
-    });
-    const target = sections[name];
-    if(target) {
-        target.classList.remove('hidden');
-        target.classList.add('slide-up-enter');
-        void target.offsetWidth;
-        target.classList.add('slide-up-enter-active');
-        target.classList.remove('slide-up-enter');
-    }
-    
-    if(name === 'profile') {
-        updateUIWithUserData();
-        renderTripHistory();
-    }
-}
-
-function confirmDestination(destination) {
-    if (userMarker) userMarker.classList.add('opacity-0'); 
-    if (backBtn) backBtn.classList.remove('hidden');
-    switchSection('rideSelect');
-    if (requestBtn) requestBtn.querySelector('span').innerText = 'اختر نوع السيارة';
-}
-
-// --- GLOBAL FUNCTIONS EXPOSED TO WINDOW ---
-
-function selectCar(element, type) {
-    document.querySelectorAll('.car-select').forEach(el => {
-        el.classList.remove('selected', 'ring-2', 'ring-indigo-500');
-    });
-    element.classList.add('selected');
-    currentCarType = type;
-    
-    const prices = { 'economy': 25, 'family': 45, 'luxury': 75 };
-    currentTripPrice = prices[type];
-
-    if (requestBtn) {
-        requestBtn.disabled = false;
-        const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر' };
-        requestBtn.querySelector('span').innerText = `اطلب ${names[type]}`;
-        requestBtn.classList.add('animate-pulse');
-        setTimeout(() => requestBtn.classList.remove('animate-pulse'), 500);
-    }
-}
-
-function resetApp() {
-    if (destInput) destInput.value = '';
-    currentCarType = null;
-    if (requestBtn) {
-        requestBtn.disabled = true;
-        requestBtn.querySelector('span').innerText = 'اطلب سيارة';
-    }
-    if (backBtn) backBtn.classList.add('hidden');
-    
-    document.querySelectorAll('.car-select').forEach(el => el.classList.remove('selected'));
-    document.querySelectorAll('.star-btn').forEach(b => { b.classList.remove('text-yellow-400'); b.classList.add('text-gray-300'); });
-
-    if (userMarker) userMarker.classList.remove('opacity-0');
-    if (destMarker) destMarker.classList.add('hidden');
-    
-    stopDriverTracking(); 
-    
-    switchSection('destination');
-}
-
-// Expose to window immediately
-window.selectCar = selectCar;
-window.resetApp = resetApp;
-window.confirmDestination = confirmDestination;
-window.switchSection = switchSection;
-
 // --- Map Drag Logic ---
 
 function startDrag(e) {
@@ -375,7 +392,7 @@ function handleMapClick(cx, cy) {
     }
     
     if (destInput) destInput.value = "تم تحديد موقع على الخريطة";
-    confirmDestination("Map Point");
+    window.confirmDestination("Map Point");
 }
 
 // --- Driver Tracking Logic ---
@@ -445,7 +462,7 @@ function startDriverTracking() {
 }
 
 function startRide(startX, startY) {
-    switchSection('inRide');
+    window.switchSection('inRide');
     
     // Set destination text based on input or default
     if(rideDestText) {
@@ -456,7 +473,9 @@ function startRide(startX, startY) {
     if (!destMarker.classList.contains('hidden')) {
         destX = parseFloat(destMarker.style.left);
         destY = parseFloat(destMarker.style.top);
-    } else {
+    }
+    // Fallback if no marker set
+    if (!destX) {
         destX = startX - 800;
         destY = startY + 600;
     }
@@ -502,7 +521,7 @@ function startRide(startX, startY) {
             setTimeout(() => {
                 triggerConfetti();
                 finishTrip(); // Save to DB
-                switchSection('rating');
+                window.switchSection('rating');
                 stopDriverTracking();
             }, 1000);
         }
@@ -570,10 +589,15 @@ function animateAmbientCars() {
 // --- Initialization & Event Listeners ---
 
 document.addEventListener('DOMContentLoaded', () => {
-    DB.init(); // Initialize Database
-    updateUIWithUserData(); // Load Data
-    centerMap();
-    animateAmbientCars();
+    console.log('DOM Ready');
+    try {
+        DB.init(); // Initialize Database
+        updateUIWithUserData(); // Load Data
+        centerMap();
+        animateAmbientCars();
+    } catch (e) {
+        console.error('Initialization error:', e);
+    }
     
     // Map Interactions
     if (mapContainer) {
@@ -602,7 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
         centerMap();
         userMarker.classList.remove('hidden');
         destMarker.classList.add('hidden');
-        resetApp();
+        window.resetApp();
     });
 
     // UI Controls
@@ -613,26 +637,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (destInput) {
         destInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && destInput.value.trim() !== '') confirmDestination(destInput.value);
+            if (e.key === 'Enter' && destInput.value.trim() !== '') window.confirmDestination(destInput.value);
         });
         destInput.addEventListener('change', () => {
-            if (destInput.value.trim() !== '') confirmDestination(destInput.value);
+            if (destInput.value.trim() !== '') window.confirmDestination(destInput.value);
         });
     }
 
     if (requestBtn) requestBtn.addEventListener('click', () => {
         if (!currentCarType) return;
-        switchSection('loading');
+        window.switchSection('loading');
         setTimeout(() => {
-            switchSection('driver');
+            window.switchSection('driver');
             startDriverTracking();
         }, 3000);
     });
 
-    if (backBtn) backBtn.addEventListener('click', resetApp);
+    if (backBtn) backBtn.addEventListener('click', window.resetApp);
 
     if (profileBtn) profileBtn.addEventListener('click', () => {
-        switchSection('profile');
+        window.switchSection('profile');
         backBtn.classList.remove('hidden');
     });
 
@@ -649,9 +673,5 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
-    });
-
-    window.addEventListener('resize', () => {
-        // Optional resize logic
     });
 });
