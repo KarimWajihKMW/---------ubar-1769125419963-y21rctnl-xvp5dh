@@ -58,8 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Resize handler to keep centered
     window.addEventListener('resize', () => {
         if (!mapState.isDragging) {
-             // Only re-center if not being manipulated
-             // Or we can just let it be.
+             // Optional: Re-center on resize if desired
         }
     });
 });
@@ -156,24 +155,9 @@ centerMapBtn.addEventListener('click', () => {
 
 // --- Map Click (Set Destination) ---
 function handleMapClick(cx, cy) {
-    // We need to place the pin at the CLICKED location on the MAP WORLD layer
-    // Calculate world coordinates
-    // mapState.x is the translation of the world
-    // clickX = worldX + mapState.x
-    // worldX = clickX - mapState.x
-    // (Ignoring scale for simplicity in this calculation or assuming scale originates at 0,0 - CSS origin is center)
-    // Actually CSS origin is center, so scale complicates math. Let's assume scale=1 for basic interactions or fix origin.
-    // Since transform-origin is center of the div (1500, 1500), let's simplify by using the element offset.
-    
-    // Simplest approach: Put marker absolute to world using local calc
-    // But since we use simple translation logic:
-    
-    // Let's just create a visual effect for now, converting screen to world space is tricky with scale + origin.
-    // We will place the marker relative to the container for visual feedback, then snap "World" coords.
-    
-    // Better: Just use the fact that we can place it inside mapWorld.
-    // The bounding rect of mapWorld tells us where it is.
     const rect = mapWorld.getBoundingClientRect();
+    // Approximate calculation for visual placement relative to the world container
+    // Note: This is a visual approximation. Real mapping requires projection libraries (Leaflet/Mapbox).
     const relX = (cx - rect.left) / mapState.scale;
     const relY = (cy - rect.top) / mapState.scale;
     
@@ -216,7 +200,7 @@ function confirmDestination(destination) {
     userMarker.classList.add('opacity-0'); // Hide pickup marker to focus on route
     backBtn.classList.remove('hidden');
     switchSection('rideSelect');
-    requestBtn.innerText = 'اختر نوع السيارة';
+    requestBtn.querySelector('span').innerText = 'اختر نوع السيارة';
 }
 
 // 2. Car Selection
@@ -224,12 +208,12 @@ window.selectCar = function(element, type) {
     document.querySelectorAll('.car-select').forEach(el => {
         el.classList.remove('selected', 'ring-2', 'ring-indigo-500');
     });
-    element.classList.add('selected', 'ring-2', 'ring-indigo-500');
+    element.classList.add('selected');
     currentCarType = type;
     
     requestBtn.disabled = false;
-    const names = { 'economy': 'أكوادرا X', 'comfort': 'راحة', 'luxury': 'فخامة' };
-    requestBtn.innerText = `اطلب ${names[type]}`;
+    const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر' };
+    requestBtn.querySelector('span').innerText = `اطلب ${names[type]}`;
     requestBtn.classList.add('animate-pulse');
     setTimeout(() => requestBtn.classList.remove('animate-pulse'), 500);
 };
@@ -254,10 +238,10 @@ window.resetApp = function() {
     destInput.value = '';
     currentCarType = null;
     requestBtn.disabled = true;
-    requestBtn.innerText = 'اطلب سيارة';
+    requestBtn.querySelector('span').innerText = 'اطلب سيارة';
     backBtn.classList.add('hidden');
     
-    document.querySelectorAll('.car-select').forEach(el => el.classList.remove('selected', 'ring-2'));
+    document.querySelectorAll('.car-select').forEach(el => el.classList.remove('selected'));
     
     userMarker.classList.remove('opacity-0');
     destMarker.classList.add('hidden');
@@ -287,11 +271,10 @@ function animateAmbientCars() {
     const cars = ['car-1', 'car-2', 'car-3'];
     cars.forEach(id => {
         const car = document.getElementById(id);
+        if(!car) return;
         setInterval(() => {
             const rx = Math.random() * 200 - 100;
             const ry = Math.random() * 200 - 100;
-            // Get current computed style left/top to add relative movement
-            // For simplicity in this demo, we just transform
             car.style.transform = `translate(${rx}px, ${ry}px) scaleX(${Math.random() > 0.5 ? -1 : 1})`;
         }, 4000 + Math.random() * 2000);
     });
