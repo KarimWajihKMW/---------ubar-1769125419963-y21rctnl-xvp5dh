@@ -80,6 +80,58 @@ const roleAccounts = {
     }
 };
 
+// Saved places storage
+const savedPlaces = {
+    home: null,
+    work: null,
+    favorite: null,
+    _storageKey: 'akwadra_saved_places',
+    
+    load() {
+        try {
+            const data = SafeStorage.getItem(this._storageKey);
+            if (data) {
+                const parsed = JSON.parse(data);
+                this.home = parsed.home || null;
+                this.work = parsed.work || null;
+                this.favorite = parsed.favorite || null;
+                this.updateIndicators();
+            }
+        } catch (e) {
+            console.warn('Failed to load saved places', e);
+        }
+    },
+    
+    save() {
+        const data = { home: this.home, work: this.work, favorite: this.favorite };
+        SafeStorage.setItem(this._storageKey, JSON.stringify(data));
+        this.updateIndicators();
+    },
+    
+    set(type, location) {
+        if (!['home', 'work', 'favorite'].includes(type)) return;
+        this[type] = location;
+        this.save();
+    },
+    
+    get(type) {
+        return this[type];
+    },
+    
+    updateIndicators() {
+        ['home', 'work', 'favorite'].forEach(type => {
+            const indicator = document.getElementById(`${type}-set-indicator`);
+            if (indicator) {
+                if (this[type]) {
+                    indicator.classList.remove('hidden');
+                } else {
+                    indicator.classList.add('hidden');
+                }
+            }
+        });
+    }
+};
+
 // Leaflet map state
 let leafletMap = null;
 let pickupMarkerL = null;
@@ -213,6 +265,41 @@ function updateCurrentLocationInput(text) {
     const inp = document.getElementById('current-loc-input');
     if (inp) inp.value = text || 'موقعك الحالي';
 }
+
+// Saved places functionality
+window.selectSavedPlace = function(type) {
+    const place = savedPlaces.get(type);
+    if (!place) {
+        const labels = { home: 'المنزل', work: 'العمل', favorite: 'المفضلة' };
+        showToast(`لم يتم حفظ عنوان ${labels[type]} بعد. اضغط مطولاً للحفظ`);
+        return;
+    }
+    
+    // Set as destination
+    setDestination(place, place.label);
+    if (leafletMap) {
+        leafletMap.setView([place.lat, place.lng], 15);
+    }
+    
+    // Update destination input
+    const destInput = document.getElementById('dest-input');
+    if (destInput) destInput.value = place.label;
+};
+
+window.savePlaceAs = function(event, type) {
+    event.preventDefault();
+    if (!currentPickup && !currentDestination) {
+        showToast('لا يوجد موقع محدد للحفظ');
+        return;
+    }
+    
+    // Prefer destination if set, else pickup
+    const location = currentDestination || currentPickup;
+    savedPlaces.set(type, location);
+    
+    const labels = { home: 'المنزل', work: 'العمل', favorite: 'المفضلة' };
+    showToast(`تم حفظ الموقع كـ ${labels[type]}`);
+};
 
 // --- DATABASE SIMULATION SERVICE ---
 const DB = {
@@ -802,6 +889,9 @@ function initPassengerMode() {
     if (world) world.classList.add('hidden');
     initLeafletMap();
     updateUIWithUserData();
+    
+    // Load saved places
+    savedPlaces.load();
     
     // Schedule later toggle handler
     const scheduleCheck = document.getElementById('schedule-later-check');
