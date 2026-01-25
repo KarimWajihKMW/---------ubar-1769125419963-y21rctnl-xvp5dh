@@ -846,6 +846,169 @@
                  </div>
             </div>
 
+            <!-- State 6: Payment Method Selection -->
+            <div id="state-payment-method" class="hidden p-6 pb-8 bg-white">
+                <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
+                <div class="text-center mb-8">
+                    <h3 class="text-2xl font-extrabold text-gray-800">اختر طريقة الدفع</h3>
+                    <p class="text-gray-500 text-sm mt-2">اختر الطريقة المفضلة للدفع</p>
+                </div>
+
+                <!-- Trip Summary Card -->
+                <div class="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl p-5 mb-6 border border-indigo-100">
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="text-gray-600 font-bold">المبلغ المستحق</span>
+                        <span class="text-3xl font-extrabold text-indigo-600" id="payment-amount">-- ر.س</span>
+                    </div>
+                    <div class="text-xs text-gray-500 space-y-1">
+                        <div class="flex justify-between">
+                            <span>المسافة</span>
+                            <span id="payment-distance">-- كم</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>نوع السيارة</span>
+                            <span id="payment-car-type">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>وقت الرحلة</span>
+                            <span id="payment-duration">-- دقيقة</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payment Methods -->
+                <div class="space-y-3 mb-8">
+                    <!-- Cash -->
+                    <button onclick="selectPaymentMethod('cash')" class="payment-method-btn w-full flex items-center justify-between p-4 border-2 border-gray-200 rounded-2xl cursor-pointer hover:border-green-500 hover:bg-green-50 transition-all group" data-method="cash">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center text-green-600 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-money-bill-wave text-2xl"></i>
+                            </div>
+                            <div class="mr-4 text-right">
+                                <h4 class="font-bold text-gray-800">دفع كاش</h4>
+                                <p class="text-xs text-gray-500">ادفع للكابتن بشكل مباشر</p>
+                            </div>
+                        </div>
+                        <div class="w-5 h-5 border-2 border-gray-300 rounded-full"></div>
+                    </button>
+
+                    <!-- Debit Card -->
+                    <button onclick="selectPaymentMethod('card')" class="payment-method-btn w-full flex items-center justify-between p-4 border-2 border-gray-200 rounded-2xl cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all group" data-method="card">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-credit-card text-2xl"></i>
+                            </div>
+                            <div class="mr-4 text-right">
+                                <h4 class="font-bold text-gray-800">بطاقة بنكية</h4>
+                                <p class="text-xs text-gray-500">فيزا أو ماستركارد</p>
+                            </div>
+                        </div>
+                        <div class="w-5 h-5 border-2 border-gray-300 rounded-full"></div>
+                    </button>
+
+                    <!-- Digital Wallet -->
+                    <button onclick="selectPaymentMethod('wallet')" class="payment-method-btn w-full flex items-center justify-between p-4 border-2 border-gray-200 rounded-2xl cursor-pointer hover:border-purple-500 hover:bg-purple-50 transition-all group" data-method="wallet">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center text-purple-600 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-wallet text-2xl"></i>
+                            </div>
+                            <div class="mr-4 text-right">
+                                <h4 class="font-bold text-gray-800">محفظة إلكترونية</h4>
+                                <p class="text-xs text-gray-500">رصيدك: <span id="wallet-balance">150</span> ر.س</p>
+                            </div>
+                        </div>
+                        <div class="w-5 h-5 border-2 border-gray-300 rounded-full"></div>
+                    </button>
+                </div>
+
+                <!-- Promo Code Section -->
+                <div class="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 mb-6">
+                    <div class="flex items-center gap-2 mb-3">
+                        <i class="fas fa-tag text-yellow-600 text-lg"></i>
+                        <span class="font-bold text-yellow-800">هل لديك رمز خصم؟</span>
+                    </div>
+                    <div class="flex gap-2">
+                        <input type="text" id="promo-code-input" placeholder="أدخل الرمز" class="flex-1 px-3 py-2 rounded-lg border border-yellow-300 outline-none text-sm font-bold focus:ring-2 ring-yellow-500/50">
+                        <button onclick="applyPromoCode()" class="px-4 py-2 bg-yellow-600 text-white rounded-lg font-bold text-sm hover:bg-yellow-700 transition-colors">تطبيق</button>
+                    </div>
+                    <div id="promo-result" class="text-xs text-yellow-700 mt-2 hidden"></div>
+                </div>
+
+                <button id="confirm-payment-btn" onclick="confirmPayment()" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-indigo-200 hover:shadow-xl transform hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    متابعة الدفع
+                </button>
+            </div>
+
+            <!-- State 6.5: Payment Invoice/Summary -->
+            <div id="state-payment-invoice" class="hidden p-6 pb-8 bg-white">
+                <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
+                <div class="text-center mb-8">
+                    <h3 class="text-2xl font-extrabold text-gray-800">ملخص الرحلة</h3>
+                    <p class="text-gray-500 text-sm mt-2">تفاصيل فاتورتك</p>
+                </div>
+
+                <!-- Invoice Card -->
+                <div class="bg-white border-2 border-gray-200 rounded-2xl p-6 mb-6">
+                    <!-- Header -->
+                    <div class="text-center mb-6 pb-6 border-b border-gray-200">
+                        <h2 class="text-3xl font-extrabold text-gray-800 mb-2">أكوادرا تاكسي</h2>
+                        <p class="text-gray-500 text-sm">الفاتورة الإلكترونية</p>
+                    </div>
+
+                    <!-- Trip Details -->
+                    <div class="space-y-4 mb-6 pb-6 border-b border-gray-200">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600 font-bold">من</span>
+                            <span class="font-bold text-gray-800" id="inv-from">موقعك الحالي</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600 font-bold">إلى</span>
+                            <span class="font-bold text-gray-800" id="inv-to">الوجهة المختارة</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600 font-bold">التاريخ</span>
+                            <span class="font-bold text-gray-800" id="inv-date">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600 font-bold">نوع السيارة</span>
+                            <span class="font-bold text-gray-800" id="inv-car">--</span>
+                        </div>
+                    </div>
+
+                    <!-- Pricing Breakdown -->
+                    <div class="space-y-3 mb-6 pb-6 border-b border-gray-200">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-gray-600">السعر الأساسي</span>
+                            <span class="text-gray-800 font-bold" id="inv-base">-- ر.س</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-gray-600" id="inv-distance-label">المسافة (-- كم × -- ر.س)</span>
+                            <span class="text-gray-800 font-bold" id="inv-distance-cost">-- ر.س</span>
+                        </div>
+                        <div id="inv-discount-row" class="flex justify-between text-sm hidden">
+                            <span class="text-green-600 font-bold">خصم</span>
+                            <span class="text-green-600 font-bold" id="inv-discount">-- ر.س</span>
+                        </div>
+                    </div>
+
+                    <!-- Total -->
+                    <div class="flex justify-between items-center mb-6">
+                        <span class="text-lg font-bold text-gray-800">المبلغ المستحق</span>
+                        <span class="text-4xl font-extrabold text-indigo-600" id="inv-total">-- ر.س</span>
+                    </div>
+
+                    <!-- Payment Method -->
+                    <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                        <p class="text-xs text-indigo-600 font-bold mb-1">طريقة الدفع</p>
+                        <p class="font-bold text-gray-800 text-lg" id="inv-payment-method">--</p>
+                    </div>
+                </div>
+
+                <button onclick="proceedToPayment()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-green-200 hover:shadow-xl transform hover:scale-[1.02] transition-all">
+                    <i class="fas fa-check-circle ml-2"></i> تم - انتقل إلى التقييم
+                </button>
+            </div>
+
             <!-- State 6: Rating -->
             <div id="state-rating" class="hidden p-8 text-center bg-white">
                 <div class="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600 animate-bounce">

@@ -805,6 +805,11 @@ window.resetApp = function() {
     stopDriverTracking(); 
     stopDriverTrackingLive();
     
+    // Reset payment
+    selectedPaymentMethod = null;
+    appliedPromo = null;
+    promoDiscount = 0;
+    
     switchSection('destination');
 };
 
@@ -1456,9 +1461,10 @@ function startRide(startX, startY) {
         } else {
             setTimeout(() => {
                 triggerConfetti();
-                finishTrip();
-                window.switchSection('rating');
                 stopDriverTracking();
+                // Start payment flow
+                initPaymentFlow();
+                window.switchSection('payment-method');
             }, 1000);
         }
     }
@@ -1657,3 +1663,227 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+// ========================================
+// PAYMENT SYSTEM
+// ========================================
+
+let selectedPaymentMethod = null;
+let tripDetails = {};
+let appliedPromo = null;
+let promoDiscount = 0;
+
+window.selectPaymentMethod = function(method) {
+    selectedPaymentMethod = method;
+    const confirmBtn = document.getElementById('confirm-payment-btn');
+    
+    // Update UI
+    document.querySelectorAll('.payment-method-btn').forEach(btn => {
+        const radio = btn.querySelector('.w-5');
+        if (btn.dataset.method === method) {
+            radio.classList.add('bg-indigo-600', 'border-indigo-600');
+            radio.classList.remove('border-gray-300');
+        } else {
+            radio.classList.remove('bg-indigo-600', 'border-indigo-600');
+            radio.classList.add('border-gray-300');
+        }
+    });
+    
+    // Check wallet balance for wallet payment
+    if (method === 'wallet') {
+        const user = DB.getUser();
+        if (user && user.balance < (currentTripPrice || 0)) {
+            showToast('رصيدك غير كافي للدفع عبر المحفظة');
+            selectedPaymentMethod = null;
+            return;
+        }
+    }
+    
+    confirmBtn.disabled = false;
+    confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+};
+
+window.applyPromoCode = function() {
+    const promoInput = document.getElementById('promo-code-input');
+    const promoResult = document.getElementById('promo-result');
+    const code = promoInput.value.trim().toUpperCase();
+    
+    if (!code) {
+        showToast('يرجى إدخال رمز خصم');
+        return;
+    }
+    
+    // Mock promo codes (in real app, validate from server)
+    const validPromos = {
+        'WELCOME20': 0.20,  // 20% off
+        'SAVE50': 50,       // 50 SAR off
+        'SUMMER15': 0.15,   // 15% off
+        'FIRST10': 10       // 10 SAR off
+    };
+    
+    if (validPromos[code]) {
+        const discountValue = validPromos[code];
+        if (discountValue < 1) {
+            // Percentage discount
+            promoDiscount = Math.floor(currentTripPrice * discountValue);
+        } else {
+            // Fixed discount
+            promoDiscount = Math.min(discountValue, currentTripPrice);
+        }
+        
+        appliedPromo = code;
+        promoResult.classList.remove('hidden');
+        promoResult.innerHTML = `✅ تم تطبيق الكود: ${code} - خصم ${promoDiscount} ر.س`;
+        promoInput.disabled = true;
+        
+        // Update price display
+        updatePaymentSummary();
+        showToast('تم تطبيق الرمز بنجاح!');
+    } else {
+        promoResult.classList.remove('hidden');
+        promoResult.innerHTML = '❌ الرمز غير صحيح أو منتهي الصلاحية';
+        showToast('رمز خصم غير صحيح');
+    }
+};
+
+window.updatePaymentSummary = function() {
+    const distance = Math.floor(Math.random() * 8) + 2; // 2-10 km for demo
+    const carType = currentCarType || 'economy';
+    const carTypes = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
+    
+    tripDetails = {
+        distance: distance,
+        carType: carType,
+        duration: Math.ceil(distance / 0.5), // rough estimate
+        basePrice: currentTripPrice || 25
+    };
+    
+    const finalPrice = tripDetails.basePrice - promoDiscount;
+    
+    // Update payment method selection screen
+    document.getElementById('payment-amount').innerText = finalPrice + ' ر.س';
+    document.getElementById('payment-distance').innerText = distance + ' كم';
+    document.getElementById('payment-car-type').innerText = carTypes[carType] || 'اقتصادي';
+    document.getElementById('payment-duration').innerText = tripDetails.duration + ' دقيقة';
+    
+    // Update wallet balance display
+    const user = DB.getUser();
+    if (user) {
+        document.getElementById('wallet-balance').innerText = user.balance;
+    }
+};
+
+window.confirmPayment = function() {
+    if (!selectedPaymentMethod) {
+        showToast('يرجى اختيار طريقة دفع');
+        return;
+    }
+    
+    // Show invoice/summary
+    showInvoice();
+    window.switchSection('payment-invoice');
+};
+
+window.showInvoice = function() {
+    const carTypes = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
+    const paymentMethodNames = { cash: 'دفع كاش', card: 'بطاقة بنكية', wallet: 'محفظة إلكترونية' };
+    const basePriceMap = { economy: 10, family: 15, luxury: 25, delivery: 8 };
+    const pricePerKmMap = { economy: 4, family: 6, luxury: 9, delivery: 3 };
+    
+    const carType = currentCarType || 'economy';
+    const basePrice = basePriceMap[carType];
+    const pricePerKm = pricePerKmMap[carType];
+    const distance = tripDetails.distance || 5;
+    const distanceCost = distance * pricePerKm;
+    const subtotal = basePrice + distanceCost;
+    const finalPrice = subtotal - promoDiscount;
+    
+    // Populate invoice
+    document.getElementById('inv-from').innerText = document.getElementById('current-loc-input').value || 'موقعك الحالي';
+    document.getElementById('inv-to').innerText = document.getElementById('dest-input').value || 'الوجهة المختارة';
+    document.getElementById('inv-date').innerText = new Date().toLocaleDateString('ar-EG');
+    document.getElementById('inv-car').innerText = carTypes[carType];
+    document.getElementById('inv-base').innerText = basePrice + ' ر.س';
+    document.getElementById('inv-distance-label').innerText = `المسافة (${distance} كم × ${pricePerKm} ر.س)`;
+    document.getElementById('inv-distance-cost').innerText = distanceCost + ' ر.س';
+    document.getElementById('inv-total').innerText = finalPrice + ' ر.س';
+    document.getElementById('inv-payment-method').innerText = paymentMethodNames[selectedPaymentMethod];
+    
+    // Show discount row if applicable
+    if (promoDiscount > 0) {
+        document.getElementById('inv-discount-row').classList.remove('hidden');
+        document.getElementById('inv-discount').innerText = '- ' + promoDiscount + ' ر.س';
+    } else {
+        document.getElementById('inv-discount-row').classList.add('hidden');
+    }
+};
+
+window.proceedToPayment = function() {
+    const paymentMethod = selectedPaymentMethod;
+    const amount = (tripDetails.basePrice || 25) - promoDiscount;
+    
+    // Simulate payment processing
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري معالجة الدفع...';
+    
+    setTimeout(() => {
+        // Mark trip as paid
+        const rideDestText = document.getElementById('ride-dest-text');
+        const user = DB.getUser();
+        
+        const newTrip = {
+            id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
+            date: new Date().toISOString(),
+            pickup: document.getElementById('current-loc-input').value || 'موقعك الحالي',
+            dropoff: rideDestText ? rideDestText.innerText : 'وجهة محددة',
+            cost: amount,
+            status: 'completed',
+            car: currentCarType || 'economy',
+            driver: 'أحمد محمد',
+            passenger: user?.name || 'المستخدم',
+            paymentMethod: paymentMethod,
+            promoApplied: appliedPromo || null
+        };
+        
+        DB.addTrip(newTrip);
+        
+        if (user) {
+            const newBalance = paymentMethod === 'wallet' 
+                ? user.balance - amount
+                : user.balance;
+            DB.updateUser({
+                balance: newBalance,
+                points: user.points + Math.floor(amount / 5) // 1 point per 5 SAR
+            });
+        }
+        
+        showToast(`تم الدفع: ${amount} ر.س عبر ${paymentMethod === 'cash' ? 'كاش' : paymentMethod === 'card' ? 'بطاقة' : 'محفظة'}`);
+        
+        // Reset payment data
+        selectedPaymentMethod = null;
+        appliedPromo = null;
+        promoDiscount = 0;
+        
+        // Go to rating
+        window.switchSection('rating');
+        
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - انتقل إلى التقييم';
+    }, 2000);
+};
+
+window.initPaymentFlow = function() {
+    selectedPaymentMethod = null;
+    appliedPromo = null;
+    promoDiscount = 0;
+    document.getElementById('promo-code-input').value = '';
+    document.getElementById('promo-code-input').disabled = false;
+    document.getElementById('promo-result').classList.add('hidden');
+    document.querySelectorAll('.payment-method-btn .w-5').forEach(radio => {
+        radio.classList.remove('bg-indigo-600', 'border-indigo-600');
+        radio.classList.add('border-gray-300');
+    });
+    document.getElementById('confirm-payment-btn').disabled = true;
+    updatePaymentSummary();
+};
