@@ -38,6 +38,10 @@ const tripHistoryContainer = document.getElementById('trip-history-container');
 const toastNotification = document.getElementById('toast-notification');
 const toastMessage = document.getElementById('toast-message');
 
+// Chat Elements
+const chatInput = document.getElementById('chat-input');
+const chatMessages = document.getElementById('chat-messages');
+
 // Profile & Sidebar Elements
 const profileName = document.getElementById('profile-name');
 const profileAvatar = document.getElementById('profile-avatar');
@@ -73,11 +77,13 @@ const sections = {
     driver: document.getElementById('state-driver'),
     inRide: document.getElementById('state-in-ride'),
     rating: document.getElementById('state-rating'),
-    profile: document.getElementById('state-profile')
+    profile: document.getElementById('state-profile'),
+    chat: document.getElementById('state-chat')
 };
 
 let currentCarType = null;
 let currentTripPrice = 0;
+let previousState = 'driver';
 let mapState = {
     x: -1500 + (window.innerWidth / 2),
     y: -1500 + (window.innerHeight / 2),
@@ -214,6 +220,12 @@ window.confirmDestination = function(destination) {
 };
 
 window.switchSection = function(name) {
+    // Record previous state for back navigation (specifically for chat)
+    const currentVisible = Object.keys(sections).find(key => sections[key] && !sections[key].classList.contains('hidden'));
+    if(currentVisible && name === 'chat') {
+        previousState = currentVisible;
+    }
+
     Object.values(sections).forEach(sec => {
         if(sec) {
             sec.classList.add('hidden');
@@ -234,6 +246,83 @@ window.switchSection = function(name) {
         renderTripHistory();
     }
 };
+
+window.openChat = function() {
+    switchSection('chat');
+    // Auto scroll to bottom
+    if(chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+    // Focus input
+    if(chatInput) setTimeout(() => chatInput.focus(), 300);
+};
+
+window.closeChat = function() {
+    switchSection(previousState);
+};
+
+window.sendChatMessage = function() {
+    const text = chatInput.value.trim();
+    if(!text) return;
+
+    // Add User Message
+    const msgHtml = `
+    <div class="flex items-start justify-end msg-enter">
+        <div class="bg-indigo-600 text-white rounded-2xl rounded-tl-none px-4 py-2.5 shadow-md text-sm max-w-[85%]">
+            ${text}
+            <div class="text-[10px] text-indigo-200 mt-1 text-left flex items-center justify-end gap-1">
+                ${new Date().toLocaleTimeString('ar-EG', {hour: '2-digit', minute:'2-digit'})} <i class="fas fa-check-double"></i>
+            </div>
+        </div>
+    </div>`;
+    
+    chatMessages.insertAdjacentHTML('beforeend', msgHtml);
+    chatInput.value = '';
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    // Simulate Driver Response
+    simulateDriverResponse(text);
+};
+
+function simulateDriverResponse(userText) {
+    // Show typing indicator
+    const typingId = 'typing-' + Date.now();
+    const typingHtml = `
+    <div id="${typingId}" class="flex items-start msg-enter">
+        <div class="bg-white border border-gray-100 rounded-2xl rounded-tr-none px-4 py-3 shadow-sm flex items-center gap-1">
+            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+            <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+        </div>
+    </div>`;
+    
+    setTimeout(() => {
+        chatMessages.insertAdjacentHTML('beforeend', typingHtml);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }, 600);
+
+    // Determine response
+    let responseText = "حسناً، فهمت!";
+    if (userText.includes("وينك") || userText.includes("متى")) responseText = "أنا قريب جداً، الطريق مزدحم قليلاً.";
+    else if (userText.includes("بسرعة") || userText.includes("مستعجل")) responseText = "سأبذل قصارى جهدي للوصول سريعاً!";
+    else if (userText.includes("شكرا")) responseText = "على الرحب والسعة يا غالي! 🌹";
+    else if (userText.includes("انتظرني")) responseText = "لا تقلق، أنا بانتظارك.";
+
+    setTimeout(() => {
+        const typingEl = document.getElementById(typingId);
+        if(typingEl) typingEl.remove();
+
+        const respHtml = `
+        <div class="flex items-start msg-enter">
+             <div class="bg-white border border-gray-100 rounded-2xl rounded-tr-none px-4 py-2.5 shadow-sm text-sm text-gray-700 max-w-[85%]">
+                 ${responseText}
+                 <div class="text-[10px] text-gray-400 mt-1 text-left">الآن</div>
+             </div>
+        </div>`;
+        chatMessages.insertAdjacentHTML('beforeend', respHtml);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        // Play sound effect (optional/silent for now)
+    }, 2500);
+}
 
 function showToast(message) {
     if(toastNotification && toastMessage) {
@@ -526,7 +615,7 @@ function startRide(startX, startY) {
             }, 1000);
         }
     }
-
+    
     driverAnimationId = requestAnimationFrame(animateRide);
 }
 
@@ -659,6 +748,13 @@ document.addEventListener('DOMContentLoaded', () => {
         window.switchSection('profile');
         backBtn.classList.remove('hidden');
     });
+
+    // Chat Input Listener
+    if (chatInput) {
+        chatInput.addEventListener('keydown', (e) => {
+             if (e.key === 'Enter') window.sendChatMessage();
+        });
+    }
 
     document.querySelectorAll('.star-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
