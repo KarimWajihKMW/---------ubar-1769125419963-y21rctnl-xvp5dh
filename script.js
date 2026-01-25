@@ -1,4 +1,4 @@
-console.log('Akwadra Super Builder Initialized - Multi-Role System');
+console.log('Akwadra Super Builder Initialized - Multi-Role System with Auth');
 
 // --- Safe Storage Wrapper ---
 const SafeStorage = {
@@ -16,6 +16,13 @@ const SafeStorage = {
             window.localStorage.setItem(key, value);
         } catch (e) {
             this._memory[key] = value;
+        }
+    },
+    removeItem(key) {
+        try {
+             window.localStorage.removeItem(key);
+        } catch (e) {
+            delete this._memory[key];
         }
     }
 };
@@ -41,8 +48,11 @@ let mapState = {
 let driverAnimationId = null;
 let driverRequestTimeout = null;
 
-// --- Elements (Passenger) ---
+// --- Elements (Global) ---
 const roleSelectionModal = document.getElementById('role-selection-modal');
+const authModal = document.getElementById('auth-modal');
+
+// --- Elements (Passenger) ---
 const passengerUIContainer = document.getElementById('passenger-ui-container');
 const passengerTopBar = document.getElementById('passenger-top-bar');
 const destInput = document.getElementById('dest-input');
@@ -60,6 +70,19 @@ const menuOverlay = document.getElementById('menu-overlay');
 const tripHistoryContainer = document.getElementById('trip-history-container');
 const toastNotification = document.getElementById('toast-notification');
 const toastMessage = document.getElementById('toast-message');
+
+// --- Elements (Auth) ---
+const authPhoneForm = document.getElementById('auth-phone-form');
+const authEmailForm = document.getElementById('auth-email-form');
+const authOtpSection = document.getElementById('auth-otp-section');
+const authTabBg = document.getElementById('auth-tab-bg');
+const tabPhone = document.getElementById('tab-phone');
+const tabEmail = document.getElementById('tab-email');
+const phoneInput = document.getElementById('phone-input');
+const emailInput = document.getElementById('email-input');
+const sendOtpBtn = document.getElementById('send-otp-btn');
+const otpPhoneDisplay = document.getElementById('otp-phone-display');
+const otpInputs = document.querySelectorAll('.otp-input');
 
 // --- Elements (Driver) ---
 const driverUIContainer = document.getElementById('driver-ui-container');
@@ -118,6 +141,7 @@ const sections = {
 const DB = {
     keyUser: 'akwadra_user',
     keyTrips: 'akwadra_trips',
+    keySession: 'akwadra_session_active',
 
     init() {
         // Seed User Data if not exists
@@ -186,6 +210,18 @@ const DB = {
         const trips = this.getTrips();
         trips.unshift(trip);
         SafeStorage.setItem(this.keyTrips, JSON.stringify(trips));
+    },
+
+    saveSession() {
+        SafeStorage.setItem(this.keySession, 'true');
+    },
+
+    hasSession() {
+        return SafeStorage.getItem(this.keySession) === 'true';
+    },
+
+    clearSession() {
+        SafeStorage.removeItem(this.keySession);
     }
 };
 
@@ -193,17 +229,167 @@ const DB = {
 
 window.selectRole = function(role) {
     currentUserRole = role;
+    
+    // Animate out role selection
     roleSelectionModal.classList.add('opacity-0', 'pointer-events-none');
     setTimeout(() => roleSelectionModal.classList.add('hidden'), 500);
 
     if (role === 'passenger') {
-        initPassengerMode();
+        // Check for existing session (Auto Login)
+        if (DB.hasSession()) {
+            initPassengerMode();
+        } else {
+            // Show Auth Modal
+            openAuthModal();
+        }
     } else if (role === 'driver') {
         initDriverMode();
     } else if (role === 'admin') {
         initAdminMode();
     }
 };
+
+// --- AUTH FUNCTIONS ---
+
+window.openAuthModal = function() {
+    authModal.classList.remove('hidden');
+    // Small delay to allow display:block to apply before opacity transition
+    setTimeout(() => {
+        authModal.classList.remove('opacity-0', 'pointer-events-none');
+    }, 50);
+    
+    // Reset state
+    switchAuthTab('phone');
+    authOtpSection.classList.add('hidden');
+    authPhoneForm.classList.remove('hidden');
+    phoneInput.value = '';
+    emailInput.value = '';
+};
+
+window.closeAuthModal = function() {
+    authModal.classList.add('opacity-0', 'pointer-events-none');
+    setTimeout(() => {
+        authModal.classList.add('hidden');
+        // If closed without login, go back to role selection
+        if (!DB.hasSession()) {
+            roleSelectionModal.classList.remove('hidden');
+            setTimeout(() => roleSelectionModal.classList.remove('opacity-0', 'pointer-events-none'), 50);
+        }
+    }, 300);
+};
+
+window.switchAuthTab = function(type) {
+    if (type === 'phone') {
+        authTabBg.style.transform = 'translateX(0)';
+        tabPhone.classList.replace('text-gray-500', 'text-indigo-600');
+        tabEmail.classList.replace('text-indigo-600', 'text-gray-500');
+        authPhoneForm.classList.remove('hidden');
+        authEmailForm.classList.add('hidden');
+        authOtpSection.classList.add('hidden');
+    } else {
+        authTabBg.style.transform = 'translateX(-100%)';
+        tabPhone.classList.replace('text-indigo-600', 'text-gray-500');
+        tabEmail.classList.replace('text-gray-500', 'text-indigo-600');
+        authPhoneForm.classList.add('hidden');
+        authEmailForm.classList.remove('hidden');
+        authOtpSection.classList.add('hidden');
+    }
+};
+
+window.sendOTP = function() {
+    const phone = phoneInput.value;
+    if (!phone || phone.length < 9) {
+        showToast('يرجى إدخال رقم هاتف صحيح');
+        return;
+    }
+
+    // Simulate API Call
+    const btn = sendOtpBtn;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري الإرسال...';
+    btn.disabled = true;
+
+    setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        
+        authPhoneForm.classList.add('hidden');
+        authOtpSection.classList.remove('hidden');
+        otpPhoneDisplay.innerText = "+966 " + phone;
+        
+        // Auto focus first OTP input
+        const firstOtp = document.querySelector('.otp-input');
+        if(firstOtp) firstOtp.focus();
+        
+        showToast('تم إرسال رمز التحقق: 1234');
+    }, 1500);
+};
+
+window.verifyOTP = function() {
+    // Validate OTP inputs (mock validation)
+    let otpCode = '';
+    otpInputs.forEach(input => otpCode += input.value);
+    
+    if (otpCode.length < 4) {
+        showToast('يرجى إدخال الرمز كاملاً');
+        return;
+    }
+
+    // Simulate Verification
+    const btn = document.querySelector('#auth-otp-section button');
+    const originalText = btn.innerText;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري التحقق...';
+    
+    setTimeout(() => {
+        btn.innerText = originalText;
+        loginSuccess();
+    }, 1500);
+};
+
+window.loginWithEmail = function() {
+    const email = emailInput.value;
+    if (!email || !email.includes('@')) {
+        showToast('يرجى إدخال بريد إلكتروني صحيح');
+        return;
+    }
+    
+    // Simulate Login
+    loginSuccess();
+};
+
+function loginSuccess() {
+    closeAuthModal();
+    DB.saveSession(); // Save session automatically
+    showToast('تم تسجيل الدخول بنجاح');
+    setTimeout(() => {
+        initPassengerMode();
+    }, 500);
+}
+
+window.logoutUser = function() {
+    DB.clearSession();
+    window.location.reload();
+};
+
+// --- OTP Input Logic ---
+otpInputs.forEach((input, index) => {
+    input.addEventListener('input', (e) => {
+        if (input.value.length === 1) {
+            if (index < otpInputs.length - 1) {
+                otpInputs[index + 1].focus();
+            }
+        }
+    });
+    
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && input.value.length === 0) {
+            if (index > 0) {
+                otpInputs[index - 1].focus();
+            }
+        }
+    });
+});
+
 
 window.selectCar = function(element, type) {
     document.querySelectorAll('.car-select').forEach(el => {
