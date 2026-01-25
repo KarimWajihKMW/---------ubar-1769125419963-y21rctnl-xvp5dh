@@ -1,27 +1,40 @@
 console.log('Akwadra Super Builder Initialized - Multi-Role System with Auth');
 
-// --- Safe Storage Wrapper ---
+// --- Safe Storage Wrapper (Fixes SecurityError in Sandboxed Iframes) ---
 const SafeStorage = {
     _memory: {},
-    getItem(key) {
+    _isAvailable: null,
+    _checkAvailability() {
+        if (this._isAvailable !== null) return this._isAvailable;
         try {
-            return window.localStorage.getItem(key);
+            // Try to touch localStorage to see if it throws SecurityError
+            const x = '__storage_test__';
+            window.localStorage.setItem(x, x);
+            window.localStorage.removeItem(x);
+            this._isAvailable = true;
         } catch (e) {
-            console.warn('LocalStorage access failed, using in-memory fallback:', e.message);
-            return this._memory[key] || null;
+            console.warn('LocalStorage is not available (Sandboxed). Using memory fallback.');
+            this._isAvailable = false;
         }
+        return this._isAvailable;
+    },
+    getItem(key) {
+        if (this._checkAvailability()) {
+            return window.localStorage.getItem(key);
+        }
+        return this._memory[key] || null;
     },
     setItem(key, value) {
-        try {
+        if (this._checkAvailability()) {
             window.localStorage.setItem(key, value);
-        } catch (e) {
+        } else {
             this._memory[key] = value;
         }
     },
     removeItem(key) {
-        try {
-             window.localStorage.removeItem(key);
-        } catch (e) {
+        if (this._checkAvailability()) {
+            window.localStorage.removeItem(key);
+        } else {
             delete this._memory[key];
         }
     }
@@ -47,95 +60,6 @@ let mapState = {
 
 let driverAnimationId = null;
 let driverRequestTimeout = null;
-
-// --- Elements (Global) ---
-const roleSelectionModal = document.getElementById('role-selection-modal');
-const authModal = document.getElementById('auth-modal');
-
-// --- Elements (Passenger) ---
-const passengerUIContainer = document.getElementById('passenger-ui-container');
-const passengerTopBar = document.getElementById('passenger-top-bar');
-const destInput = document.getElementById('dest-input');
-const currentLocInput = document.getElementById('current-loc-input');
-const backBtn = document.getElementById('back-btn');
-const mainPanel = document.getElementById('main-panel');
-const requestBtn = document.getElementById('request-btn');
-const userMarker = document.getElementById('user-marker');
-const destMarker = document.getElementById('dest-marker');
-const profileBtn = document.getElementById('profile-btn');
-const menuBtn = document.getElementById('menu-btn');
-const closeMenuBtn = document.getElementById('close-menu-btn');
-const sideMenu = document.getElementById('side-menu');
-const menuOverlay = document.getElementById('menu-overlay');
-const tripHistoryContainer = document.getElementById('trip-history-container');
-const toastNotification = document.getElementById('toast-notification');
-const toastMessage = document.getElementById('toast-message');
-
-// --- Elements (Auth) ---
-const authPhoneForm = document.getElementById('auth-phone-form');
-const authEmailForm = document.getElementById('auth-email-form');
-const authOtpSection = document.getElementById('auth-otp-section');
-const authTabBg = document.getElementById('auth-tab-bg');
-const tabPhone = document.getElementById('tab-phone');
-const tabEmail = document.getElementById('tab-email');
-const phoneInput = document.getElementById('phone-input');
-const emailInput = document.getElementById('email-input');
-const sendOtpBtn = document.getElementById('send-otp-btn');
-const otpPhoneDisplay = document.getElementById('otp-phone-display');
-const otpInputs = document.querySelectorAll('.otp-input');
-
-// --- Elements (Driver) ---
-const driverUIContainer = document.getElementById('driver-ui-container');
-const driverStatusWaiting = document.getElementById('driver-status-waiting');
-const driverIncomingRequest = document.getElementById('driver-incoming-request');
-const driverActiveTrip = document.getElementById('driver-active-trip');
-
-// --- Elements (Admin) ---
-const adminUIContainer = document.getElementById('admin-ui-container');
-const adminTripsTable = document.getElementById('admin-trips-table');
-
-// Chat Elements
-const chatInput = document.getElementById('chat-input');
-const chatMessages = document.getElementById('chat-messages');
-
-// Profile & Sidebar Elements
-const profileName = document.getElementById('profile-name');
-const profileAvatar = document.getElementById('profile-avatar');
-const profileRating = document.getElementById('profile-rating');
-const profileBalance = document.getElementById('profile-balance');
-const profilePoints = document.getElementById('profile-points');
-const sidebarName = document.getElementById('sidebar-name');
-const sidebarAvatar = document.getElementById('sidebar-avatar');
-const sidebarRating = document.getElementById('sidebar-rating');
-const sidebarBalance = document.getElementById('sidebar-balance');
-const navAvatar = document.getElementById('nav-avatar');
-const rideDestText = document.getElementById('ride-dest-text');
-
-// Driver Tracking Elements
-const activeDriverMarker = document.getElementById('active-driver');
-const driverRouteLine = document.getElementById('driver-route-line');
-const etaDisplay = document.getElementById('eta-display');
-const rideEtaDisplay = document.getElementById('ride-eta-display');
-const driverLabelText = document.getElementById('driver-label-text');
-
-// Map Elements
-const mapContainer = document.getElementById('map-container');
-const mapWorld = document.getElementById('map-world');
-const zoomInBtn = document.getElementById('zoom-in');
-const zoomOutBtn = document.getElementById('zoom-out');
-const centerMapBtn = document.getElementById('center-map');
-
-// Sections
-const sections = {
-    destination: document.getElementById('state-destination'),
-    rideSelect: document.getElementById('state-ride-select'),
-    loading: document.getElementById('state-loading'),
-    driver: document.getElementById('state-driver'),
-    inRide: document.getElementById('state-in-ride'),
-    rating: document.getElementById('state-rating'),
-    profile: document.getElementById('state-profile'),
-    chat: document.getElementById('state-chat')
-};
 
 // --- DATABASE SIMULATION SERVICE ---
 const DB = {
@@ -225,14 +149,18 @@ const DB = {
     }
 };
 
-// --- GLOBAL FUNCTIONS (WINDOW) ---
+// --- GLOBAL FUNCTIONS (EXPOSED TO WINDOW) ---
+// Defined immediately to avoid ReferenceErrors in HTML
 
 window.selectRole = function(role) {
     currentUserRole = role;
     
+    const roleModal = document.getElementById('role-selection-modal');
     // Animate out role selection
-    roleSelectionModal.classList.add('opacity-0', 'pointer-events-none');
-    setTimeout(() => roleSelectionModal.classList.add('hidden'), 500);
+    if(roleModal) {
+        roleModal.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => roleModal.classList.add('hidden'), 500);
+    }
 
     if (role === 'passenger') {
         // Check for existing session (Auto Login)
@@ -249,62 +177,69 @@ window.selectRole = function(role) {
     }
 };
 
-// --- AUTH FUNCTIONS ---
-
 window.openAuthModal = function() {
-    authModal.classList.remove('hidden');
-    // Small delay to allow display:block to apply before opacity transition
+    const am = document.getElementById('auth-modal');
+    if(!am) return;
+    am.classList.remove('hidden');
     setTimeout(() => {
-        authModal.classList.remove('opacity-0', 'pointer-events-none');
+        am.classList.remove('opacity-0', 'pointer-events-none');
     }, 50);
     
-    // Reset state
     switchAuthTab('phone');
-    authOtpSection.classList.add('hidden');
-    authPhoneForm.classList.remove('hidden');
-    phoneInput.value = '';
-    emailInput.value = '';
+    document.getElementById('auth-otp-section').classList.add('hidden');
+    document.getElementById('auth-phone-form').classList.remove('hidden');
+    document.getElementById('phone-input').value = '';
 };
 
 window.closeAuthModal = function() {
-    authModal.classList.add('opacity-0', 'pointer-events-none');
+    const am = document.getElementById('auth-modal');
+    if(!am) return;
+    am.classList.add('opacity-0', 'pointer-events-none');
     setTimeout(() => {
-        authModal.classList.add('hidden');
-        // If closed without login, go back to role selection
+        am.classList.add('hidden');
         if (!DB.hasSession()) {
-            roleSelectionModal.classList.remove('hidden');
-            setTimeout(() => roleSelectionModal.classList.remove('opacity-0', 'pointer-events-none'), 50);
+            const rs = document.getElementById('role-selection-modal');
+            if(rs) {
+                rs.classList.remove('hidden');
+                setTimeout(() => rs.classList.remove('opacity-0', 'pointer-events-none'), 50);
+            }
         }
     }, 300);
 };
 
 window.switchAuthTab = function(type) {
+    const bg = document.getElementById('auth-tab-bg');
+    const tPhone = document.getElementById('tab-phone');
+    const tEmail = document.getElementById('tab-email');
+    const fPhone = document.getElementById('auth-phone-form');
+    const fEmail = document.getElementById('auth-email-form');
+    const fOtp = document.getElementById('auth-otp-section');
+
     if (type === 'phone') {
-        authTabBg.style.transform = 'translateX(0)';
-        tabPhone.classList.replace('text-gray-500', 'text-indigo-600');
-        tabEmail.classList.replace('text-indigo-600', 'text-gray-500');
-        authPhoneForm.classList.remove('hidden');
-        authEmailForm.classList.add('hidden');
-        authOtpSection.classList.add('hidden');
+        bg.style.transform = 'translateX(0)';
+        tPhone.classList.replace('text-gray-500', 'text-indigo-600');
+        tEmail.classList.replace('text-indigo-600', 'text-gray-500');
+        fPhone.classList.remove('hidden');
+        fEmail.classList.add('hidden');
+        fOtp.classList.add('hidden');
     } else {
-        authTabBg.style.transform = 'translateX(-100%)';
-        tabPhone.classList.replace('text-indigo-600', 'text-gray-500');
-        tabEmail.classList.replace('text-gray-500', 'text-indigo-600');
-        authPhoneForm.classList.add('hidden');
-        authEmailForm.classList.remove('hidden');
-        authOtpSection.classList.add('hidden');
+        bg.style.transform = 'translateX(-100%)';
+        tPhone.classList.replace('text-indigo-600', 'text-gray-500');
+        tEmail.classList.replace('text-gray-500', 'text-indigo-600');
+        fPhone.classList.add('hidden');
+        fEmail.classList.remove('hidden');
+        fOtp.classList.add('hidden');
     }
 };
 
 window.sendOTP = function() {
-    const phone = phoneInput.value;
+    const phone = document.getElementById('phone-input').value;
     if (!phone || phone.length < 9) {
         showToast('يرجى إدخال رقم هاتف صحيح');
         return;
     }
 
-    // Simulate API Call
-    const btn = sendOtpBtn;
+    const btn = document.getElementById('send-otp-btn');
     const originalText = btn.innerHTML;
     btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري الإرسال...';
     btn.disabled = true;
@@ -313,11 +248,10 @@ window.sendOTP = function() {
         btn.innerHTML = originalText;
         btn.disabled = false;
         
-        authPhoneForm.classList.add('hidden');
-        authOtpSection.classList.remove('hidden');
-        otpPhoneDisplay.innerText = "+966 " + phone;
+        document.getElementById('auth-phone-form').classList.add('hidden');
+        document.getElementById('auth-otp-section').classList.remove('hidden');
+        document.getElementById('otp-phone-display').innerText = "+966 " + phone;
         
-        // Auto focus first OTP input
         const firstOtp = document.querySelector('.otp-input');
         if(firstOtp) firstOtp.focus();
         
@@ -326,16 +260,14 @@ window.sendOTP = function() {
 };
 
 window.verifyOTP = function() {
-    // Validate OTP inputs (mock validation)
     let otpCode = '';
-    otpInputs.forEach(input => otpCode += input.value);
+    document.querySelectorAll('.otp-input').forEach(input => otpCode += input.value);
     
     if (otpCode.length < 4) {
         showToast('يرجى إدخال الرمز كاملاً');
         return;
     }
 
-    // Simulate Verification
     const btn = document.querySelector('#auth-otp-section button');
     const originalText = btn.innerText;
     btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري التحقق...';
@@ -347,49 +279,13 @@ window.verifyOTP = function() {
 };
 
 window.loginWithEmail = function() {
-    const email = emailInput.value;
+    const email = document.getElementById('email-input').value;
     if (!email || !email.includes('@')) {
         showToast('يرجى إدخال بريد إلكتروني صحيح');
         return;
     }
-    
-    // Simulate Login
     loginSuccess();
 };
-
-function loginSuccess() {
-    closeAuthModal();
-    DB.saveSession(); // Save session automatically
-    showToast('تم تسجيل الدخول بنجاح');
-    setTimeout(() => {
-        initPassengerMode();
-    }, 500);
-}
-
-window.logoutUser = function() {
-    DB.clearSession();
-    window.location.reload();
-};
-
-// --- OTP Input Logic ---
-otpInputs.forEach((input, index) => {
-    input.addEventListener('input', (e) => {
-        if (input.value.length === 1) {
-            if (index < otpInputs.length - 1) {
-                otpInputs[index + 1].focus();
-            }
-        }
-    });
-    
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Backspace' && input.value.length === 0) {
-            if (index > 0) {
-                otpInputs[index - 1].focus();
-            }
-        }
-    });
-});
-
 
 window.selectCar = function(element, type) {
     document.querySelectorAll('.car-select').forEach(el => {
@@ -401,29 +297,36 @@ window.selectCar = function(element, type) {
     const prices = { 'economy': 25, 'family': 45, 'luxury': 75 };
     currentTripPrice = prices[type];
 
-    if (requestBtn) {
-        requestBtn.disabled = false;
+    const reqBtn = document.getElementById('request-btn');
+    if (reqBtn) {
+        reqBtn.disabled = false;
         const names = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر' };
-        requestBtn.querySelector('span').innerText = `اطلب ${names[type]}`;
-        requestBtn.classList.add('animate-pulse');
-        setTimeout(() => requestBtn.classList.remove('animate-pulse'), 500);
+        reqBtn.querySelector('span').innerText = `اطلب ${names[type]}`;
+        reqBtn.classList.add('animate-pulse');
+        setTimeout(() => reqBtn.classList.remove('animate-pulse'), 500);
     }
 };
 
 window.resetApp = function() {
     if (currentUserRole !== 'passenger') return;
 
+    const destInput = document.getElementById('dest-input');
     if (destInput) destInput.value = '';
     currentCarType = null;
-    if (requestBtn) {
-        requestBtn.disabled = true;
-        requestBtn.querySelector('span').innerText = 'اطلب سيارة';
+    
+    const reqBtn = document.getElementById('request-btn');
+    if (reqBtn) {
+        reqBtn.disabled = true;
+        reqBtn.querySelector('span').innerText = 'اطلب سيارة';
     }
+    const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.classList.add('hidden');
     
     document.querySelectorAll('.car-select').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.star-btn').forEach(b => { b.classList.remove('text-yellow-400'); b.classList.add('text-gray-300'); });
 
+    const userMarker = document.getElementById('user-marker');
+    const destMarker = document.getElementById('dest-marker');
     if (userMarker) userMarker.classList.remove('opacity-0');
     if (destMarker) destMarker.classList.add('hidden');
     
@@ -433,13 +336,28 @@ window.resetApp = function() {
 };
 
 window.confirmDestination = function(destination) {
+    const userMarker = document.getElementById('user-marker');
+    const backBtn = document.getElementById('back-btn');
+    const reqBtn = document.getElementById('request-btn');
+
     if (userMarker) userMarker.classList.add('opacity-0'); 
     if (backBtn) backBtn.classList.remove('hidden');
     switchSection('rideSelect');
-    if (requestBtn) requestBtn.querySelector('span').innerText = 'اختر نوع السيارة';
+    if (reqBtn) reqBtn.querySelector('span').innerText = 'اختر نوع السيارة';
 };
 
 window.switchSection = function(name) {
+    const sections = {
+        destination: document.getElementById('state-destination'),
+        rideSelect: document.getElementById('state-ride-select'),
+        loading: document.getElementById('state-loading'),
+        driver: document.getElementById('state-driver'),
+        inRide: document.getElementById('state-in-ride'),
+        rating: document.getElementById('state-rating'),
+        profile: document.getElementById('state-profile'),
+        chat: document.getElementById('state-chat')
+    };
+
     const currentVisible = Object.keys(sections).find(key => sections[key] && !sections[key].classList.contains('hidden'));
     if(currentVisible && name === 'chat') {
         previousState = currentVisible;
@@ -455,6 +373,7 @@ window.switchSection = function(name) {
     if(target) {
         target.classList.remove('hidden');
         target.classList.add('slide-up-enter');
+        // Force reflow
         void target.offsetWidth;
         target.classList.add('slide-up-enter-active');
         target.classList.remove('slide-up-enter');
@@ -468,8 +387,10 @@ window.switchSection = function(name) {
 
 window.openChat = function() {
     switchSection('chat');
-    if(chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
-    if(chatInput) setTimeout(() => chatInput.focus(), 300);
+    const msgs = document.getElementById('chat-messages');
+    const inp = document.getElementById('chat-input');
+    if(msgs) msgs.scrollTop = msgs.scrollHeight;
+    if(inp) setTimeout(() => inp.focus(), 300);
 };
 
 window.closeChat = function() {
@@ -477,6 +398,8 @@ window.closeChat = function() {
 };
 
 window.sendChatMessage = function() {
+    const chatInput = document.getElementById('chat-input');
+    const chatMessages = document.getElementById('chat-messages');
     const text = chatInput.value.trim();
     if(!text) return;
 
@@ -497,28 +420,25 @@ window.sendChatMessage = function() {
     simulateDriverResponse(text);
 };
 
-// --- Driver Mode Specific Functions ---
 window.driverRejectRequest = function() {
-    driverIncomingRequest.classList.add('hidden');
-    driverStatusWaiting.classList.remove('hidden');
+    document.getElementById('driver-incoming-request').classList.add('hidden');
+    document.getElementById('driver-status-waiting').classList.remove('hidden');
     showToast('تم رفض الطلب');
     scheduleMockRequest();
 };
 
 window.driverAcceptRequest = function() {
-    driverIncomingRequest.classList.add('hidden');
-    driverActiveTrip.classList.remove('hidden');
+    document.getElementById('driver-incoming-request').classList.add('hidden');
+    document.getElementById('driver-active-trip').classList.remove('hidden');
     showToast('تم قبول الطلب! اذهب للراكب');
-    // Here we could animate the map to the passenger
 };
 
 window.driverEndTrip = function() {
-    driverActiveTrip.classList.add('hidden');
-    driverStatusWaiting.classList.remove('hidden');
+    document.getElementById('driver-active-trip').classList.add('hidden');
+    document.getElementById('driver-status-waiting').classList.remove('hidden');
     showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
     triggerConfetti();
     
-    // Record mock trip for stats
     DB.addTrip({
         id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
         date: new Date().toISOString(),
@@ -533,45 +453,58 @@ window.driverEndTrip = function() {
     scheduleMockRequest();
 };
 
+window.logoutUser = function() {
+    DB.clearSession();
+    window.location.reload();
+};
+
 // --- Helper Functions ---
 
+function loginSuccess() {
+    window.closeAuthModal();
+    DB.saveSession(); 
+    showToast('تم تسجيل الدخول بنجاح');
+    setTimeout(() => {
+        initPassengerMode();
+    }, 500);
+}
+
 function initPassengerMode() {
-    passengerUIContainer.classList.remove('hidden');
-    passengerTopBar.classList.remove('hidden');
+    document.getElementById('passenger-ui-container').classList.remove('hidden');
+    document.getElementById('passenger-top-bar').classList.remove('hidden');
     centerMap();
     updateUIWithUserData();
 }
 
 function initDriverMode() {
-    driverUIContainer.classList.remove('hidden');
-    // Hide Passenger specifics
-    if(userMarker) userMarker.classList.add('hidden');
+    document.getElementById('driver-ui-container').classList.remove('hidden');
+    const um = document.getElementById('user-marker');
+    if(um) um.classList.add('hidden');
     centerMap();
     scheduleMockRequest();
 }
 
 function initAdminMode() {
-    adminUIContainer.classList.remove('hidden');
-    // Render Admin Data
+    document.getElementById('admin-ui-container').classList.remove('hidden');
     renderAdminTrips();
 }
 
 function scheduleMockRequest() {
-    // Simulate a request coming in after 5-10 seconds
     if (driverRequestTimeout) clearTimeout(driverRequestTimeout);
     driverRequestTimeout = setTimeout(() => {
-        if (currentUserRole === 'driver' && !driverStatusWaiting.classList.contains('hidden')) {
-            driverStatusWaiting.classList.add('hidden');
-            driverIncomingRequest.classList.remove('hidden');
-            // Play sound ideally
+        const waiting = document.getElementById('driver-status-waiting');
+        if (currentUserRole === 'driver' && waiting && !waiting.classList.contains('hidden')) {
+            waiting.classList.add('hidden');
+            document.getElementById('driver-incoming-request').classList.remove('hidden');
         }
     }, 5000);
 }
 
 function renderAdminTrips() {
-    if (!adminTripsTable) return;
+    const table = document.getElementById('admin-trips-table');
+    if (!table) return;
     const trips = DB.getTrips();
-    adminTripsTable.innerHTML = '';
+    table.innerHTML = '';
     
     trips.forEach(trip => {
         const html = `
@@ -584,11 +517,12 @@ function renderAdminTrips() {
                 <span class="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold">${trip.status}</span>
             </td>
         </tr>`;
-        adminTripsTable.insertAdjacentHTML('beforeend', html);
+        table.insertAdjacentHTML('beforeend', html);
     });
 }
 
 function simulateDriverResponse(userText) {
+    const chatMessages = document.getElementById('chat-messages');
     const typingId = 'typing-' + Date.now();
     const typingHtml = `
     <div id="${typingId}" class="flex items-start msg-enter">
@@ -627,6 +561,8 @@ function simulateDriverResponse(userText) {
 }
 
 function showToast(message) {
+    const toastNotification = document.getElementById('toast-notification');
+    const toastMessage = document.getElementById('toast-message');
     if(toastNotification && toastMessage) {
         toastMessage.innerText = message;
         toastNotification.style.transform = 'translate(-50%, 120px)';
@@ -642,26 +578,26 @@ function updateUIWithUserData() {
     const user = DB.getUser();
     if (!user) return;
 
-    if(sidebarName) sidebarName.innerText = `أهلاً، ${user.name.split(' ')[0]}`;
-    if(sidebarRating) sidebarRating.innerText = user.rating;
-    if(sidebarBalance) sidebarBalance.innerText = `${user.balance} ر.س`;
-    if(sidebarAvatar) sidebarAvatar.src = user.avatar;
-    if(navAvatar) navAvatar.src = user.avatar;
-
-    if(profileName) profileName.innerText = user.name;
-    if(profileAvatar) profileAvatar.src = user.avatar;
-    if(profileRating) profileRating.innerText = user.rating;
-    if(profileBalance) profileBalance.innerText = user.balance;
-    if(profilePoints) profilePoints.innerText = user.points;
+    ['sidebar-name', 'profile-name'].forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.innerText = id.includes('sidebar') ? `أهلاً، ${user.name.split(' ')[0]}` : user.name;
+    });
+    ['sidebar-rating', 'profile-rating'].forEach(id => { const el = document.getElementById(id); if(el) el.innerText = user.rating; });
+    ['sidebar-balance', 'profile-balance'].forEach(id => { const el = document.getElementById(id); if(el) el.innerText = id.includes('sidebar') ? `${user.balance} ر.س` : user.balance; });
+    ['sidebar-avatar', 'nav-avatar', 'profile-avatar'].forEach(id => { const el = document.getElementById(id); if(el) el.src = user.avatar; });
+    
+    const pp = document.getElementById('profile-points');
+    if(pp) pp.innerText = user.points;
 }
 
 function renderTripHistory() {
-    if (!tripHistoryContainer) return;
+    const container = document.getElementById('trip-history-container');
+    if (!container) return;
     const trips = DB.getTrips();
-    tripHistoryContainer.innerHTML = '';
+    container.innerHTML = '';
 
     if (trips.length === 0) {
-        tripHistoryContainer.innerHTML = '<div class="text-center text-gray-400 py-4">لا توجد رحلات سابقة</div>';
+        container.innerHTML = '<div class="text-center text-gray-400 py-4">لا توجد رحلات سابقة</div>';
         return;
     }
 
@@ -686,7 +622,7 @@ function renderTripHistory() {
                  <span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">مكتملة</span>
              </div>
         </div>`;
-        tripHistoryContainer.insertAdjacentHTML('beforeend', html);
+        container.insertAdjacentHTML('beforeend', html);
     });
 }
 
@@ -698,11 +634,15 @@ function centerMap() {
 }
 
 function updateMapTransform() {
+    const mapWorld = document.getElementById('map-world');
     if (mapWorld) mapWorld.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
 }
 
 function toggleMenu() {
+    const sideMenu = document.getElementById('side-menu');
+    const menuOverlay = document.getElementById('menu-overlay');
     if (!sideMenu || !menuOverlay) return;
+    
     const isOpen = sideMenu.classList.contains('sidebar-open');
     if (isOpen) {
         sideMenu.classList.remove('sidebar-open');
@@ -714,12 +654,16 @@ function toggleMenu() {
     }
 }
 
+// --- Map Drag Logic ---
 function startDrag(e) {
     if (e.target.closest('.pointer-events-auto')) return;
+    const mapContainer = document.getElementById('map-container');
     
     mapState.isDragging = true;
-    mapContainer.classList.add('grabbing-cursor');
-    mapContainer.classList.remove('grab-cursor');
+    if(mapContainer) {
+        mapContainer.classList.add('grabbing-cursor');
+        mapContainer.classList.remove('grab-cursor');
+    }
     
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -743,6 +687,7 @@ function drag(e) {
     
     updateMapTransform();
     
+    const currentLocInput = document.getElementById('current-loc-input');
     if (currentUserRole === 'passenger' && Math.random() > 0.9 && currentLocInput) {
         currentLocInput.value = "جاري تحديد الموقع...";
     }
@@ -750,10 +695,13 @@ function drag(e) {
 
 function endDrag(e) {
     if (!mapState.isDragging) return;
+    const mapContainer = document.getElementById('map-container');
     
     mapState.isDragging = false;
-    mapContainer.classList.remove('grabbing-cursor');
-    mapContainer.classList.add('grab-cursor');
+    if(mapContainer) {
+        mapContainer.classList.remove('grabbing-cursor');
+        mapContainer.classList.add('grab-cursor');
+    }
     
     const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
     const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
@@ -762,8 +710,9 @@ function endDrag(e) {
     
     if (dist < 5) {
         handleMapClick(clientX, clientY);
-    } else if (currentUserRole === 'passenger' && currentLocInput) {
-        currentLocInput.value = "شارع الملك عبدالله، حي النخيل";
+    } else if (currentUserRole === 'passenger') {
+        const currentLocInput = document.getElementById('current-loc-input');
+        if(currentLocInput) currentLocInput.value = "شارع الملك عبدالله، حي النخيل";
     }
 }
 
@@ -771,6 +720,10 @@ function handleMapClick(cx, cy) {
     // Only handle click for destination setting in Passenger Mode
     if (currentUserRole !== 'passenger') return;
 
+    const mapWorld = document.getElementById('map-world');
+    const destMarker = document.getElementById('dest-marker');
+    const destInput = document.getElementById('dest-input');
+    
     const rect = mapWorld.getBoundingClientRect();
     const relX = (cx - rect.left) / mapState.scale;
     const relY = (cy - rect.top) / mapState.scale;
@@ -787,6 +740,11 @@ function handleMapClick(cx, cy) {
 
 // --- Driver Tracking Logic (Visuals) ---
 function startDriverTracking() {
+    const activeDriverMarker = document.getElementById('active-driver');
+    const driverRouteLine = document.getElementById('driver-route-line');
+    const etaDisplay = document.getElementById('eta-display');
+    const driverLabelText = document.getElementById('driver-label-text');
+    
     const viewportCenterX = window.innerWidth / 2;
     const viewportCenterY = window.innerHeight / 2;
     
@@ -854,12 +812,20 @@ function startDriverTracking() {
 function startRide(startX, startY) {
     window.switchSection('inRide');
     
-    if(rideDestText) {
+    const rideDestText = document.getElementById('ride-dest-text');
+    const destInput = document.getElementById('dest-input');
+    const activeDriverMarker = document.getElementById('active-driver');
+    const driverRouteLine = document.getElementById('driver-route-line');
+    const rideEtaDisplay = document.getElementById('ride-eta-display');
+    const driverLabelText = document.getElementById('driver-label-text');
+
+    if(rideDestText && destInput) {
         rideDestText.innerText = destInput.value.includes("خريطة") ? "وجهة محددة" : (destInput.value || "فندق الريتز كارلتون");
     }
 
     let destX, destY;
-    if (!destMarker.classList.contains('hidden')) {
+    const destMarker = document.getElementById('dest-marker');
+    if (destMarker && !destMarker.classList.contains('hidden')) {
         destX = parseFloat(destMarker.style.left);
         destY = parseFloat(destMarker.style.top);
     }
@@ -918,6 +884,7 @@ function startRide(startX, startY) {
 }
 
 function finishTrip() {
+    const rideDestText = document.getElementById('ride-dest-text');
     const newTrip = {
         id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
         date: new Date().toISOString(),
@@ -933,18 +900,22 @@ function finishTrip() {
     DB.addTrip(newTrip);
 
     const user = DB.getUser();
-    DB.updateUser({
-        balance: user.balance - currentTripPrice,
-        points: user.points + 25
-    });
+    if(user) {
+        DB.updateUser({
+            balance: user.balance - (currentTripPrice || 25),
+            points: user.points + 25
+        });
+    }
 
     showToast('تم حفظ الرحلة وخصم المبلغ من المحفظة');
 }
 
 function stopDriverTracking() {
     if (driverAnimationId) cancelAnimationFrame(driverAnimationId);
-    activeDriverMarker.classList.add('hidden');
-    driverRouteLine.classList.add('opacity-0');
+    const activeDriverMarker = document.getElementById('active-driver');
+    const driverRouteLine = document.getElementById('driver-route-line');
+    if(activeDriverMarker) activeDriverMarker.classList.add('hidden');
+    if(driverRouteLine) driverRouteLine.classList.add('opacity-0');
 }
 
 function triggerConfetti() {
@@ -985,6 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Map Interactions
+    const mapContainer = document.getElementById('map-container');
     if (mapContainer) {
         mapContainer.addEventListener('mousedown', startDrag);
         mapContainer.addEventListener('touchstart', startDrag, { passive: false });
@@ -997,6 +969,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('touchend', endDrag);
 
     // Zoom Controls
+    const zoomInBtn = document.getElementById('zoom-in');
+    const zoomOutBtn = document.getElementById('zoom-out');
+    const centerMapBtn = document.getElementById('center-map');
+
     if (zoomInBtn) zoomInBtn.addEventListener('click', () => {
         mapState.scale = Math.min(mapState.scale + 0.2, 2.5);
         updateMapTransform();
@@ -1010,18 +986,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (centerMapBtn) centerMapBtn.addEventListener('click', () => {
         centerMap();
         if (currentUserRole === 'passenger') {
-            userMarker.classList.remove('hidden');
-            destMarker.classList.add('hidden');
+            const userMarker = document.getElementById('user-marker');
+            const destMarker = document.getElementById('dest-marker');
+            if(userMarker) userMarker.classList.remove('hidden');
+            if(destMarker) destMarker.classList.add('hidden');
             window.resetApp();
         }
     });
 
     // UI Controls
+    const menuBtn = document.getElementById('menu-btn');
+    const closeMenuBtn = document.getElementById('close-menu-btn');
+    const menuOverlay = document.getElementById('menu-overlay');
+    
     if (menuBtn) menuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
     if (closeMenuBtn) closeMenuBtn.addEventListener('click', toggleMenu);
     if (menuOverlay) menuOverlay.addEventListener('click', toggleMenu);
     document.querySelectorAll('#side-menu a').forEach(link => link.addEventListener('click', toggleMenu));
 
+    const destInput = document.getElementById('dest-input');
     if (destInput) {
         destInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && destInput.value.trim() !== '') window.confirmDestination(destInput.value);
@@ -1031,6 +1014,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const requestBtn = document.getElementById('request-btn');
     if (requestBtn) requestBtn.addEventListener('click', () => {
         if (!currentCarType) return;
         window.switchSection('loading');
@@ -1040,19 +1024,40 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 3000);
     });
 
+    const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.addEventListener('click', window.resetApp);
 
+    const profileBtn = document.getElementById('profile-btn');
     if (profileBtn) profileBtn.addEventListener('click', () => {
         window.switchSection('profile');
-        backBtn.classList.remove('hidden');
+        if(backBtn) backBtn.classList.remove('hidden');
     });
 
-    // Chat Input Listener
+    const chatInput = document.getElementById('chat-input');
     if (chatInput) {
         chatInput.addEventListener('keydown', (e) => {
              if (e.key === 'Enter') window.sendChatMessage();
         });
     }
+    
+    const otpInputs = document.querySelectorAll('.otp-input');
+    otpInputs.forEach((input, index) => {
+        input.addEventListener('input', (e) => {
+            if (input.value.length === 1) {
+                if (index < otpInputs.length - 1) {
+                    otpInputs[index + 1].focus();
+                }
+            }
+        });
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && input.value.length === 0) {
+                if (index > 0) {
+                    otpInputs[index - 1].focus();
+                }
+            }
+        });
+    });
 
     document.querySelectorAll('.star-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
