@@ -186,12 +186,21 @@
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }
       }
+
+      /* Auth Modal Transition */
+      .scale-in-center {
+          animation: scale-in 0.3s cubic-bezier(0.250, 0.460, 0.450, 0.940) both;
+      }
+      @keyframes scale-in {
+          0% { transform: scale(0.8); opacity: 0; }
+          100% { transform: scale(1); opacity: 1; }
+      }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
     
     <!-- LOGIN / ROLE SELECTION MODAL (Initial Screen) -->
-    <div id="role-selection-modal" class="fixed inset-0 z-[100] bg-gradient-to-br from-indigo-900 to-slate-900 flex flex-col items-center justify-center p-6">
+    <div id="role-selection-modal" class="fixed inset-0 z-[100] bg-gradient-to-br from-indigo-900 to-slate-900 flex flex-col items-center justify-center p-6 transition-opacity duration-500">
         <div class="text-center mb-10">
             <div class="w-24 h-24 bg-white/10 rounded-3xl mx-auto flex items-center justify-center backdrop-blur-md border border-white/20 shadow-2xl mb-6 animate-bounce">
                 <i class="fas fa-taxi text-5xl text-white"></i>
@@ -230,6 +239,121 @@
         </div>
 
         <p class="mt-12 text-white/30 text-xs">© 2024 Akwadra Taxi Demo</p>
+    </div>
+
+    <!-- AUTH MODAL (Passenger Login) -->
+    <div id="auth-modal" class="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4 transition-all duration-300 opacity-0 pointer-events-none">
+        <div class="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl relative scale-in-center transform transition-all">
+            
+            <!-- Decorative Header -->
+            <div class="h-40 bg-gradient-to-br from-indigo-600 to-purple-700 flex flex-col items-center justify-center relative overflow-hidden">
+                <div class="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
+                <div class="absolute bottom-0 left-0 w-32 h-32 bg-indigo-500/30 rounded-full translate-y-1/2 -translate-x-1/2 blur-xl"></div>
+                
+                <div class="relative z-10 text-center">
+                    <div class="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
+                        <i class="fas fa-user-circle text-3xl text-white"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold text-white tracking-wide">تسجيل الدخول</h2>
+                    <p class="text-indigo-200 text-sm">أهلاً بك في تاكسي أكوادرا</p>
+                </div>
+
+                <button onclick="closeAuthModal()" class="absolute top-4 left-4 w-10 h-10 bg-white/10 rounded-full flex items-center justify-center text-white hover:bg-white/20 transition-colors backdrop-blur">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <!-- Auth Body -->
+            <div class="p-8 bg-white">
+                <!-- Tabs -->
+                <div class="flex bg-gray-50 p-1.5 rounded-2xl mb-8 relative">
+                    <div class="w-1/2 h-full absolute top-0 bottom-0 bg-white shadow-sm rounded-xl transition-all duration-300 ease-out" id="auth-tab-bg"></div>
+                    <button onclick="switchAuthTab('phone')" id="tab-phone" class="flex-1 py-2.5 text-sm font-bold text-indigo-600 relative z-10 transition-colors flex items-center justify-center gap-2">
+                        <i class="fas fa-mobile-alt"></i> رقم الجوال
+                    </button>
+                    <button onclick="switchAuthTab('email')" id="tab-email" class="flex-1 py-2.5 text-sm font-bold text-gray-500 relative z-10 transition-colors flex items-center justify-center gap-2">
+                        <i class="fas fa-envelope"></i> الإيميل
+                    </button>
+                </div>
+
+                <!-- Phone Login Form -->
+                <div id="auth-phone-form" class="space-y-6">
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold text-gray-500 mr-1">رقم الهاتف</label>
+                        <div class="flex items-center bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus-within:ring-2 ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
+                            <span class="text-gray-400 font-bold border-l border-gray-300 pl-3 ml-3 flex items-center gap-1">
+                                <img src="https://flagcdn.com/w20/sa.png" class="w-5 rounded-sm" alt="SA">
+                                +966
+                            </span>
+                            <input type="tel" id="phone-input" placeholder="55 123 4567" class="bg-transparent flex-1 outline-none text-gray-800 font-bold placeholder-gray-300 ltr-input" dir="ltr">
+                        </div>
+                    </div>
+
+                    <button onclick="sendOTP()" id="send-otp-btn" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2">
+                        <span>إرسال رمز التحقق</span>
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                </div>
+
+                <!-- Email Login Form -->
+                <div id="auth-email-form" class="hidden space-y-4">
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold text-gray-500 mr-1">البريد الإلكتروني</label>
+                        <div class="flex items-center bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus-within:ring-2 ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
+                            <i class="fas fa-at text-gray-400 ml-3"></i>
+                            <input type="email" id="email-input" placeholder="name@example.com" class="bg-transparent flex-1 outline-none text-gray-800 font-bold placeholder-gray-300">
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold text-gray-500 mr-1">كلمة المرور</label>
+                        <div class="flex items-center bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus-within:ring-2 ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
+                            <i class="fas fa-lock text-gray-400 ml-3"></i>
+                            <input type="password" id="password-input" placeholder="••••••••" class="bg-transparent flex-1 outline-none text-gray-800 font-bold placeholder-gray-300">
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="checkbox" checked class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500">
+                            <span class="mr-2 text-xs font-bold text-gray-500">تذكرني</span>
+                        </label>
+                        <a href="#" class="text-xs font-bold text-indigo-600 hover:underline">نسيت كلمة المرور؟</a>
+                    </div>
+
+                    <button onclick="loginWithEmail()" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2">
+                        <span>دخول</span>
+                        <i class="fas fa-sign-in-alt"></i>
+                    </button>
+                </div>
+
+                <!-- OTP Verification (Hidden) -->
+                <div id="auth-otp-section" class="hidden space-y-6 text-center">
+                    <div class="mb-4">
+                        <p class="text-gray-500 text-sm">تم إرسال الرمز إلى <span id="otp-phone-display" class="font-bold text-gray-800 dir-ltr"></span></p>
+                        <button onclick="switchAuthTab('phone')" class="text-xs text-indigo-600 font-bold mt-1 hover:underline">تغيير الرقم؟</button>
+                    </div>
+
+                    <div class="flex justify-center gap-3 dir-ltr">
+                        <input type="text" maxlength="1" class="otp-input w-12 h-14 border-2 border-gray-200 rounded-xl text-center text-2xl font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 outline-none transition-all">
+                        <input type="text" maxlength="1" class="otp-input w-12 h-14 border-2 border-gray-200 rounded-xl text-center text-2xl font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 outline-none transition-all">
+                        <input type="text" maxlength="1" class="otp-input w-12 h-14 border-2 border-gray-200 rounded-xl text-center text-2xl font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 outline-none transition-all">
+                        <input type="text" maxlength="1" class="otp-input w-12 h-14 border-2 border-gray-200 rounded-xl text-center text-2xl font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 outline-none transition-all">
+                    </div>
+
+                    <button onclick="verifyOTP()" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:scale-[1.02] active:scale-95 transition-all mt-4">
+                        تحقق ودخول
+                    </button>
+
+                    <p class="text-xs text-gray-400 mt-4">
+                        لم يصلك الرمز؟ <button class="text-indigo-600 font-bold hover:underline">إعادة إرسال</button>
+                    </p>
+                </div>
+
+                <p class="text-center text-xs text-gray-400 mt-6">
+                    باستخدامك للتطبيق أنت توافق على <a href="#" class="underline hover:text-gray-600">الشروط والأحكام</a>
+                </p>
+            </div>
+        </div>
     </div>
 
     <!-- Map Container (Interactive) - Shared by User and Driver -->
@@ -396,7 +520,7 @@
 
         <!-- Menu Footer -->
         <div class="p-6 border-t border-gray-100 bg-gray-50">
-             <button onclick="window.location.reload()" class="flex items-center text-red-500 hover:text-red-700 transition-colors w-full group">
+             <button onclick="logoutUser()" class="flex items-center text-red-500 hover:text-red-700 transition-colors w-full group">
                  <i class="fas fa-sign-out-alt w-8 text-center ml-2 group-hover:rotate-180 transition-transform duration-500"></i>
                  <span class="font-bold">تسجيل الخروج</span>
              </button>
@@ -589,402 +713,4 @@
                         <div class="text-left">
                             <div class="bg-gray-50 px-4 py-2 rounded-xl border border-gray-200 text-center shadow-sm">
                                 <p class="text-xs text-gray-500 font-bold uppercase">تويوتا كامري</p>
-                                <p class="font-extrabold text-xl text-gray-800 tracking-wider mt-1">ABC 123</p>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="flex space-x-4 space-x-reverse">
-                        <button class="flex-1 bg-green-500 text-white py-4 rounded-2xl font-bold hover:bg-green-600 transition-colors shadow-lg shadow-green-200 flex justify-center items-center transform active:scale-95">
-                            <i class="fas fa-phone-alt ml-2"></i> اتصال
-                        </button>
-                        <button onclick="openChat()" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-2xl font-bold hover:bg-gray-200 transition-colors flex justify-center items-center transform active:scale-95">
-                            <i class="fas fa-comment-alt ml-2"></i> محادثة
-                        </button>
-                    </div>
-                    
-                    <button class="mt-6 w-full text-red-500 py-3 text-sm font-bold hover:bg-red-50 rounded-xl transition-colors" onclick="resetApp()">
-                        إلغاء الرحلة
-                    </button>
-                </div>
-            </div>
-
-            <!-- NEW State: Chat Interface -->
-            <div id="state-chat" class="hidden flex flex-col bg-white h-full relative" style="height: 500px;">
-                <!-- Header -->
-                <div class="p-4 border-b border-gray-100 flex items-center justify-between bg-white z-10 shadow-sm">
-                    <div class="flex items-center">
-                        <button onclick="closeChat()" class="p-2 -mr-2 text-gray-500 hover:text-indigo-600 transition-colors">
-                            <i class="fas fa-arrow-right"></i>
-                        </button>
-                        <div class="mr-3 relative">
-                             <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" class="w-10 h-10 rounded-full border border-gray-200 bg-gray-100">
-                             <div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></div>
-                        </div>
-                        <div class="mr-3">
-                            <h4 class="font-bold text-sm text-gray-800">أحمد محمد</h4>
-                            <span class="text-xs text-green-500 font-bold flex items-center"><i class="fas fa-circle text-[6px] ml-1"></i> متصل الآن</span>
-                        </div>
-                    </div>
-                    <button class="w-9 h-9 bg-gray-50 rounded-full flex items-center justify-center text-indigo-600 hover:bg-indigo-50 transition-colors">
-                        <i class="fas fa-phone text-sm"></i>
-                    </button>
-                </div>
-                
-                <!-- Messages Area -->
-                <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 relative">
-                     <!-- Decorative background pattern for chat -->
-                     <div class="absolute inset-0 opacity-5 pointer-events-none" style="background-image: radial-gradient(#6366f1 1px, transparent 1px); background-size: 20px 20px;"></div>
-                     
-                     <div class="text-center mb-4">
-                         <span class="text-[10px] text-gray-400 bg-white border border-gray-100 px-3 py-1 rounded-full shadow-sm font-bold">اليوم</span>
-                     </div>
-                     
-                     <!-- Initial Driver Message -->
-                     <div class="flex items-start">
-                         <div class="bg-white border border-gray-100 rounded-2xl rounded-tr-none px-4 py-2.5 shadow-sm text-sm text-gray-700 max-w-[85%]">
-                             مرحباً بك! أنا في طريقي إليك، سأصل خلال دقائق إن شاء الله 🚗
-                             <div class="text-[10px] text-gray-400 mt-1 text-left">الآن</div>
-                         </div>
-                     </div>
-                </div>
-
-                <!-- Input Area -->
-                <div class="p-3 border-t border-gray-100 bg-white">
-                    <div class="flex items-center bg-gray-100 rounded-2xl px-2 py-1.5 focus-within:ring-2 ring-indigo-500/20 transition-all">
-                        <button class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-white transition-all flex items-center justify-center">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                        <input type="text" id="chat-input" placeholder="اكتب رسالة..." class="bg-transparent flex-1 outline-none text-sm text-gray-700 px-2 font-medium h-9">
-                        <button onclick="sendChatMessage()" class="w-9 h-9 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-300 hover:scale-105 active:scale-95 transition-all flex items-center justify-center">
-                            <i class="fas fa-paper-plane text-xs transform -rotate-45 translate-x-0.5"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- State 6: In Ride -->
-            <div id="state-in-ride" class="hidden p-0 bg-white">
-                <div class="bg-gradient-to-r from-emerald-500 to-teal-600 p-6 text-white flex justify-between items-center rounded-t-[2.5rem] shadow-lg relative overflow-hidden">
-                    <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-xl"></div>
-                    <div class="relative z-10">
-                        <p class="text-emerald-100 text-sm font-medium mb-1">في الطريق إلى الوجهة</p>
-                        <h3 class="text-3xl font-bold" id="ride-eta-display">12 دقيقة</h3>
-                    </div>
-                    <div class="relative z-10 bg-white/20 px-4 py-1.5 rounded-full text-sm font-bold backdrop-blur border border-white/20">
-                         <i class="fas fa-route ml-1"></i> جاري الرحلة
-                    </div>
-                </div>
-                <div class="p-6">
-                    <div class="flex items-center p-4 bg-gray-50 rounded-2xl border border-gray-100 mb-6">
-                        <div class="w-12 h-12 rounded-full bg-white flex items-center justify-center text-gray-600 shadow-sm">
-                            <i class="fas fa-map-pin text-red-500"></i>
-                        </div>
-                        <div class="mr-4">
-                            <p class="text-xs text-gray-400 font-bold uppercase">الوجهة</p>
-                            <p class="font-bold text-gray-800 text-lg" id="ride-dest-text">فندق الريتز كارلتون</p>
-                        </div>
-                    </div>
-                    
-                    <div class="grid grid-cols-2 gap-4">
-                        <button class="flex flex-col items-center justify-center p-4 bg-gray-100 rounded-2xl hover:bg-gray-200 transition-colors group">
-                             <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-gray-600 mb-2 shadow-sm group-hover:scale-110 transition-transform">
-                                 <i class="fas fa-share-alt"></i>
-                             </div>
-                             <span class="text-xs font-bold text-gray-600">مشاركة الرحلة</span>
-                        </button>
-                        <button class="flex flex-col items-center justify-center p-4 bg-red-50 rounded-2xl hover:bg-red-100 transition-colors group">
-                             <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-red-500 mb-2 shadow-sm group-hover:scale-110 transition-transform">
-                                 <i class="fas fa-shield-alt"></i>
-                             </div>
-                             <span class="text-xs font-bold text-red-600">طوارئ</span>
-                        </button>
-                    </div>
-                    
-                    <!-- In Ride Chat Button -->
-                    <button onclick="openChat()" class="w-full mt-4 flex items-center justify-center p-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-100 transition-colors">
-                        <i class="fas fa-comment-alt ml-2"></i> محادثة مع السائق
-                    </button>
-                </div>
-            </div>
-
-            <!-- State 7: Rating -->
-            <div id="state-rating" class="hidden p-8 text-center bg-white">
-                <div class="w-24 h-24 mx-auto rounded-full p-1 bg-gradient-to-tr from-yellow-400 to-yellow-200 mb-4 shadow-xl">
-                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" alt="Driver" class="w-full h-full rounded-full bg-white border-4 border-white">
-                </div>
-                <h2 class="text-2xl font-extrabold text-gray-800 mb-1">كيف كانت رحلتك؟</h2>
-                <p class="text-gray-500 mb-8">مع الكابتن أحمد</p>
-                
-                <div class="flex justify-center gap-2 mb-8" id="star-container">
-                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="1"><i class="fas fa-star"></i></button>
-                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="2"><i class="fas fa-star"></i></button>
-                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="3"><i class="fas fa-star"></i></button>
-                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="4"><i class="fas fa-star"></i></button>
-                    <button class="text-4xl text-gray-300 hover:text-yellow-400 transition-colors transform hover:scale-125 focus:text-yellow-400 focus:scale-110 star-btn" data-rating="5"><i class="fas fa-star"></i></button>
-                </div>
-
-                <div class="flex gap-3 overflow-x-auto no-scrollbar pb-2 mb-8 justify-center">
-                    <button class="px-4 py-2 rounded-full border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 whitespace-nowrap">سيارة نظيفة</button>
-                    <button class="px-4 py-2 rounded-full border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 whitespace-nowrap">قيادة آمنة</button>
-                    <button class="px-4 py-2 rounded-full border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 whitespace-nowrap">تعامل راقٍ</button>
-                </div>
-
-                <button onclick="resetApp()" class="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-lg hover:bg-black transition-colors transform active:scale-95">
-                    إرسال التقييم
-                </button>
-            </div>
-
-            <!-- State 5: User Profile -->
-            <div id="state-profile" class="hidden p-0 bg-white h-full overflow-y-auto no-scrollbar pb-10">
-                <div class="bg-gradient-to-br from-indigo-600 to-purple-800 p-8 rounded-b-[3rem] shadow-xl relative text-white text-center pb-16">
-                    <div class="absolute top-0 right-0 w-48 h-48 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-                    <div class="relative z-10">
-                         <div class="w-28 h-28 mx-auto rounded-full p-1.5 bg-white/20 backdrop-blur mb-4">
-                             <img id="profile-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Abdullah" alt="User" class="w-full h-full rounded-full bg-white">
-                         </div>
-                         <h2 class="text-3xl font-bold" id="profile-name">عبدالله أحمد</h2>
-                         <div class="flex justify-center items-center mt-2 space-x-3 space-x-reverse text-indigo-100">
-                             <span class="bg-white/20 px-4 py-1 rounded-full text-xs font-bold backdrop-blur border border-white/10" id="profile-status">عضو ذهبي</span>
-                             <span class="flex items-center font-bold"><i class="fas fa-star text-yellow-300 ml-1"></i> <span id="profile-rating">4.85</span></span>
-                         </div>
-                    </div>
-                </div>
-                <div class="grid grid-cols-2 gap-5 px-8 -mt-12 relative z-20 mb-8">
-                    <div class="bg-white p-5 rounded-2xl shadow-lg border border-gray-100 text-center hover:transform hover:-translate-y-1 transition-transform cursor-pointer group">
-                         <div class="text-gray-400 text-xs font-bold mb-2 uppercase tracking-wide">المحفظة</div>
-                         <div class="text-2xl font-extrabold text-indigo-600 group-hover:scale-110 transition-transform inline-block"><span id="profile-balance">150</span> <span class="text-sm">ر.س</span></div>
-                    </div>
-                    <div class="bg-white p-5 rounded-2xl shadow-lg border border-gray-100 text-center hover:transform hover:-translate-y-1 transition-transform cursor-pointer group">
-                         <div class="text-gray-400 text-xs font-bold mb-2 uppercase tracking-wide">النقاط</div>
-                         <div class="text-2xl font-extrabold text-purple-600 group-hover:scale-110 transition-transform inline-block" id="profile-points">450</div>
-                    </div>
-                </div>
-                <div class="px-8">
-                    <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center">
-                        <span class="w-1 h-6 bg-indigo-500 rounded-full ml-3"></span>
-                         سجل الرحلات الأخيرة
-                    </h3>
-                    <!-- Trip History Container -->
-                    <div class="space-y-4" id="trip-history-container">
-                        <!-- Dynamic Content Will Be Inserted Here -->
-                    </div>
-                    
-                    <div class="mt-8 border-t border-gray-100 pt-6">
-                        <button class="w-full flex items-center justify-between p-4 text-gray-600 hover:bg-gray-50 rounded-2xl transition-colors group">
-                            <span class="flex items-center font-bold"><i class="fas fa-cog ml-4 text-gray-400 group-hover:rotate-90 transition-transform"></i> الإعدادات</span>
-                            <i class="fas fa-chevron-left text-xs text-gray-300"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <!-- =============================================
-         DRIVER UI COMPONENTS
-    ============================================== -->
-    <div id="driver-ui-container" class="absolute inset-0 z-50 pointer-events-none hidden flex flex-col justify-end">
-        <!-- Driver Status Bar -->
-        <div class="absolute top-0 left-0 right-0 p-4 flex justify-between items-center bg-white/80 backdrop-blur-md shadow-sm pointer-events-auto">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-indigo-100 border border-indigo-200 overflow-hidden">
-                     <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" alt="Driver">
-                </div>
-                <div>
-                    <h3 class="font-bold text-sm text-gray-800">الكابتن أحمد</h3>
-                    <div class="flex items-center gap-1">
-                         <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                         <span class="text-xs text-green-600 font-bold">متصل الآن</span>
-                    </div>
-                </div>
-            </div>
-            <button onclick="window.location.reload()" class="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
-                تسجيل خروج
-            </button>
-        </div>
-
-        <!-- Driver Controls (Bottom Sheet) -->
-        <div class="pointer-events-auto bg-white rounded-t-3xl shadow-[0_-5px_30px_rgba(0,0,0,0.1)] p-6 pb-8 transition-transform transform translate-y-0" id="driver-controls">
-            <!-- Status: Waiting -->
-            <div id="driver-status-waiting" class="text-center py-4">
-                <div class="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
-                    <i class="fas fa-satellite-dish text-2xl"></i>
-                </div>
-                <h2 class="text-xl font-bold text-gray-800">بانتظار الطلبات...</h2>
-                <p class="text-gray-500 text-sm mt-1">أنت متصل في منطقة الرياض</p>
-            </div>
-
-            <!-- Incoming Request (Hidden by default) -->
-            <div id="driver-incoming-request" class="hidden">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                        <i class="fas fa-bell text-yellow-500 animate-swing"></i> طلب جديد!
-                    </h3>
-                    <span class="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-1 rounded-md">يبعد 5 دقائق</span>
-                </div>
-                
-                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
-                    <div class="flex items-center gap-3 mb-3 border-b border-gray-200 pb-3">
-                        <div class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-gray-400">
-                            <i class="fas fa-user"></i>
-                        </div>
-                        <div>
-                            <div class="font-bold text-gray-800">راكب #4922</div>
-                            <div class="text-xs text-gray-400">⭐ 4.8 (رحلة نقدية)</div>
-                        </div>
-                        <div class="mr-auto font-bold text-xl text-indigo-600">25 ر.س</div>
-                    </div>
-                    <div class="space-y-2">
-                        <div class="flex items-center gap-2">
-                            <div class="w-2 h-2 bg-indigo-500 rounded-full"></div>
-                            <span class="text-xs font-bold text-gray-500">من:</span>
-                            <span class="text-sm font-bold text-gray-800">موقع الراكب الحالي</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <div class="w-2 h-2 bg-red-500 rounded-full"></div>
-                            <span class="text-xs font-bold text-gray-500">إلى:</span>
-                            <span class="text-sm font-bold text-gray-800">برج المملكة</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex gap-3">
-                    <button onclick="driverRejectRequest()" class="flex-1 bg-red-50 text-red-500 font-bold py-3 rounded-xl hover:bg-red-100 transition-colors">تجاهل</button>
-                    <button onclick="driverAcceptRequest()" class="flex-[2] bg-indigo-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-indigo-700 hover:shadow-indigo-300 transition-all transform active:scale-95">قبول الطلب (15ث)</button>
-                </div>
-            </div>
-
-            <!-- Active Trip Mode (Hidden by default) -->
-            <div id="driver-active-trip" class="hidden">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="font-bold text-gray-800">جاري الرحلة</h3>
-                    <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-bold">نشطة</span>
-                </div>
-                <div class="grid grid-cols-2 gap-3 mb-4">
-                    <button class="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold text-sm hover:bg-indigo-100 transition-colors flex flex-col items-center gap-1">
-                        <i class="fas fa-location-arrow"></i> الملاحة
-                    </button>
-                    <button class="bg-gray-100 text-gray-600 py-3 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors flex flex-col items-center gap-1">
-                         <i class="fas fa-phone"></i> اتصال بالراكب
-                    </button>
-                </div>
-                <button onclick="driverEndTrip()" class="w-full bg-green-500 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-green-600 transition-all">
-                    إنهاء الرحلة وتحصيل المبلغ
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- =============================================
-         ADMIN UI COMPONENTS (Full Screen Dashboard)
-    ============================================== -->
-    <div id="admin-ui-container" class="fixed inset-0 z-50 bg-gray-100 hidden overflow-y-auto">
-        <!-- Admin Sidebar -->
-        <div class="fixed inset-y-0 right-0 w-64 bg-slate-900 text-white hidden md:flex flex-col">
-            <div class="p-6 border-b border-slate-800">
-                <h1 class="text-xl font-bold tracking-wider">أكوادرا <span class="text-indigo-400">أدمن</span></h1>
-            </div>
-            <nav class="flex-1 p-4 space-y-1">
-                <a href="#" class="flex items-center gap-3 px-4 py-3 bg-indigo-600 rounded-xl text-white font-bold">
-                    <i class="fas fa-chart-pie w-6 text-center"></i> لوحة التحكم
-                </a>
-                <a href="#" class="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
-                    <i class="fas fa-users w-6 text-center"></i> السائقين
-                </a>
-                <a href="#" class="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
-                    <i class="fas fa-user-friends w-6 text-center"></i> الركاب
-                </a>
-                <a href="#" class="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
-                    <i class="fas fa-wallet w-6 text-center"></i> المالية
-                </a>
-            </nav>
-            <div class="p-4 border-t border-slate-800">
-                <button onclick="window.location.reload()" class="flex items-center gap-3 text-red-400 hover:text-red-300 transition-colors text-sm font-bold">
-                    <i class="fas fa-sign-out-alt"></i> تسجيل الخروج
-                </button>
-            </div>
-        </div>
-
-        <!-- Mobile Header -->
-        <div class="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center">
-            <span class="font-bold">لوحة التحكم</span>
-            <button onclick="window.location.reload()" class="text-red-400"><i class="fas fa-sign-out-alt"></i></button>
-        </div>
-
-        <!-- Main Content -->
-        <div class="md:mr-64 p-6 md:p-10 space-y-8">
-            <!-- Stats Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <!-- Stat Card 1 -->
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.1s">
-                    <div>
-                        <p class="text-xs font-bold text-gray-400 uppercase">إجمالي الرحلات</p>
-                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">1,240</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
-                        <i class="fas fa-route text-xl"></i>
-                    </div>
-                </div>
-                <!-- Stat Card 2 -->
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.2s">
-                    <div>
-                        <p class="text-xs font-bold text-gray-400 uppercase">السائقين النشطين</p>
-                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">58</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-green-50 text-green-600 rounded-xl flex items-center justify-center">
-                        <i class="fas fa-car text-xl"></i>
-                    </div>
-                </div>
-                <!-- Stat Card 3 -->
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.3s">
-                    <div>
-                        <p class="text-xs font-bold text-gray-400 uppercase">الإيرادات اليوم</p>
-                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">4,850</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center">
-                        <i class="fas fa-dollar-sign text-xl"></i>
-                    </div>
-                </div>
-                <!-- Stat Card 4 -->
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between admin-panel-enter" style="animation-delay: 0.4s">
-                    <div>
-                        <p class="text-xs font-bold text-gray-400 uppercase">مستخدمين جدد</p>
-                        <h3 class="text-3xl font-extrabold text-gray-800 mt-1">+12</h3>
-                    </div>
-                    <div class="w-12 h-12 bg-yellow-50 text-yellow-500 rounded-xl flex items-center justify-center">
-                        <i class="fas fa-user-plus text-xl"></i>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Recent Trips Table -->
-            <div class="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden admin-panel-enter" style="animation-delay: 0.5s">
-                <div class="p-6 border-b border-gray-100 flex justify-between items-center">
-                    <h3 class="font-bold text-lg text-gray-800">أحدث الرحلات</h3>
-                    <button class="text-indigo-600 text-sm font-bold hover:bg-indigo-50 px-3 py-1 rounded-lg transition-colors">عرض الكل</button>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-right">
-                        <thead class="bg-gray-50 text-gray-400 text-xs uppercase font-bold">
-                            <tr>
-                                <th class="px-6 py-4">معرف الرحلة</th>
-                                <th class="px-6 py-4">السائق</th>
-                                <th class="px-6 py-4">الراكب</th>
-                                <th class="px-6 py-4">التكلفة</th>
-                                <th class="px-6 py-4">الحالة</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-100 text-sm font-medium text-gray-600" id="admin-trips-table">
-                            <!-- Rows populated by JS -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="script.js"></script>
-</body>
-</html>
+                                <p class=
