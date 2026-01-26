@@ -351,8 +351,8 @@ function startDriverTrackingLive() {
     });
     
     // Initial driver location: offset from pickup
-    const offsetLat = 0.01; // ~1km
-    const offsetLng = 0.01;
+    const offsetLat = 0.04; // ~4km for realistic timing
+    const offsetLng = 0.04;
     driverLocation = {
         lat: currentPickup.lat + offsetLat,
         lng: currentPickup.lng + offsetLng
@@ -1159,9 +1159,9 @@ function haversineKm(a, b) {
 
 function computeTripEstimates() {
     if (!currentPickup || !currentDestination) return { distanceKm: 0, etaMin: 0 };
-    const distanceKm = Math.round(haversineKm(currentPickup, currentDestination) * 10) / 10; // 0.1 km precision
-    const avgSpeedKmh = 30; // urban estimate
-    const etaMin = Math.max(1, Math.round((distanceKm / avgSpeedKmh) * 60));
+    const distanceKm = Math.round(haversineKm(currentPickup, currentDestination) * 10) / 10;
+    const avgSpeedKmh = 25; // slower for realistic 10-15 min ETA
+    const etaMin = Math.max(10, Math.min(15, Math.round((distanceKm / avgSpeedKmh) * 60)));
     return { distanceKm, etaMin };
 }
 
@@ -1214,7 +1214,11 @@ window.requestRide = function() {
     switchSection('loading');
     // After a short delay, show driver found
     setTimeout(() => {
-        etaSeconds = est.etaMin * 60;
+        // Realistic ETA between 10-15 minutes
+        const minETA = 10 * 60; // 10 minutes
+        const maxETA = 15 * 60; // 15 minutes
+        const calculatedETA = est.etaMin * 60;
+        etaSeconds = Math.max(minETA, Math.min(maxETA, calculatedETA));
         
         // Update trip info in driver section
         const carTypeNames = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر', 'delivery': 'توصيل' };
@@ -1228,7 +1232,7 @@ window.requestRide = function() {
         
         // Show helpful message
         showToast('✅ تم العثور على كابتن! شاهد السيارة على الخريطة', 4000);
-    }, 2000);
+    }, 500);
 };
 
 function loginSuccess() {
@@ -1293,7 +1297,7 @@ function scheduleMockRequest() {
             waiting.classList.add('hidden');
             document.getElementById('driver-incoming-request').classList.remove('hidden');
         }
-    }, 5000);
+    }, 1000);
 }
 
 function renderAdminTrips() {
@@ -1316,6 +1320,233 @@ function renderAdminTrips() {
         table.insertAdjacentHTML('beforeend', html);
     });
 }
+
+// Render trip history (for profile and full history pages)
+function renderTripHistory(containerId = 'trip-history-container', limit = 3) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    const trips = DB.getTrips();
+    const displayTrips = limit ? trips.slice(0, limit) : trips;
+    
+    container.innerHTML = '';
+    
+    if (displayTrips.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-center py-8">لا توجد رحلات</p>';
+        return;
+    }
+    
+    displayTrips.forEach(trip => {
+        const tripDate = new Date(trip.date);
+        const day = tripDate.getDate();
+        const monthNames = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        const month = monthNames[tripDate.getMonth()];
+        const year = tripDate.getFullYear();
+        const hours = tripDate.getHours().toString().padStart(2, '0');
+        const minutes = tripDate.getMinutes().toString().padStart(2, '0');
+        const formattedDate = `${day} ${month} ${year}`;
+        const formattedTime = `${hours}:${minutes}`;
+        
+        const statusClasses = trip.status === 'completed' 
+            ? 'bg-green-100 text-green-700' 
+            : 'bg-red-100 text-red-700';
+        const statusText = trip.status === 'completed' ? 'مكتملة' : 'ملغية';
+        
+        const stars = '⭐'.repeat(trip.rating || 0);
+        
+        const html = `
+        <div class="bg-white border-2 border-gray-200 rounded-2xl p-4 hover:shadow-lg transition-all cursor-pointer" onclick="showTripDetails('${trip.id}')">
+            <div class="flex justify-between items-start mb-3">
+                <div>
+                    <p class="text-xs text-gray-500 font-bold">${formattedDate} • ${formattedTime}</p>
+                    <p class="font-bold text-gray-800">${trip.id}</p>
+                </div>
+                <span class="${statusClasses} px-3 py-1 rounded-full text-xs font-bold">
+                    ${statusText}
+                </span>
+            </div>
+            
+            <div class="flex items-start gap-3 mb-2">
+                <div class="flex flex-col items-center">
+                    <div class="w-2 h-2 rounded-full bg-indigo-600"></div>
+                    <div class="w-0.5 h-6 bg-gray-300"></div>
+                    <div class="w-2 h-2 rounded-full bg-red-500"></div>
+                </div>
+                <div class="flex-1">
+                    <p class="text-sm text-gray-600">${trip.pickup}</p>
+                    <p class="text-sm text-gray-600 mt-3">${trip.dropoff}</p>
+                </div>
+            </div>
+            
+            <div class="flex justify-between items-center mt-3 pt-3 border-t border-gray-200">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-user-circle text-gray-400"></i>
+                    <span class="text-sm font-bold text-gray-700">${trip.driver}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-yellow-500">${stars}</span>
+                    <span class="text-lg font-extrabold text-indigo-600">${trip.cost} ر.س</span>
+                </div>
+            </div>
+        </div>`;
+        
+        container.insertAdjacentHTML('beforeend', html);
+    });
+}
+
+// Show all trips with statistics
+window.renderAllTrips = function() {
+    const trips = DB.getTrips();
+    const container = document.getElementById('all-trips-container');
+    const emptyState = document.getElementById('empty-trips-state');
+    
+    if (trips.length === 0) {
+        container.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+        return;
+    }
+    
+    container.classList.remove('hidden');
+    emptyState.classList.add('hidden');
+    
+    // Update statistics
+    const totalTrips = trips.length;
+    const totalSpent = trips.reduce((sum, t) => sum + (t.cost || 0), 0);
+    const avgRating = trips.reduce((sum, t) => sum + (t.rating || 0), 0) / totalTrips;
+    
+    document.getElementById('total-trips-count').innerText = totalTrips;
+    document.getElementById('total-spent').innerText = totalSpent;
+    document.getElementById('avg-rating').innerText = avgRating.toFixed(1);
+    
+    // Render trips
+    renderTripHistory('all-trips-container', null);
+};
+
+// Filter trips
+window.filterTrips = function(filter) {
+    const trips = DB.getTrips();
+    const container = document.getElementById('all-trips-container');
+    
+    // Update filter buttons
+    document.querySelectorAll('.trip-filter-btn').forEach(btn => {
+        if (btn.dataset.filter === filter) {
+            btn.classList.remove('bg-gray-100', 'text-gray-600');
+            btn.classList.add('bg-indigo-600', 'text-white', 'active');
+        } else {
+            btn.classList.remove('bg-indigo-600', 'text-white', 'active');
+            btn.classList.add('bg-gray-100', 'text-gray-600');
+        }
+    });
+    
+    // Filter trips
+    const filteredTrips = filter === 'all' 
+        ? trips 
+        : trips.filter(t => t.status === filter);
+    
+    // Re-render
+    container.innerHTML = '';
+    filteredTrips.forEach(trip => {
+        const tripDate = new Date(trip.date);
+        const day = tripDate.getDate();
+        const monthNames = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        const month = monthNames[tripDate.getMonth()];
+        const hours = tripDate.getHours().toString().padStart(2, '0');
+        const minutes = tripDate.getMinutes().toString().padStart(2, '0');
+        const formattedDate = `${day} ${month} ${hours}:${minutes}`;
+        
+        const statusClasses = trip.status === 'completed' 
+            ? 'bg-green-100 text-green-700' 
+            : 'bg-red-100 text-red-700';
+        const statusText = trip.status === 'completed' ? 'مكتملة' : 'ملغية';
+        const stars = '⭐'.repeat(trip.rating || 0);
+        
+        const html = `
+        <div class="bg-white border-2 border-gray-200 rounded-2xl p-4 hover:shadow-lg transition-all cursor-pointer" onclick="showTripDetails('${trip.id}')">
+            <div class="flex justify-between items-start mb-3">
+                <div>
+                    <p class="text-xs text-gray-500 font-bold">${formattedDate}</p>
+                    <p class="font-bold text-gray-800">${trip.id}</p>
+                </div>
+                <span class="${statusClasses} px-3 py-1 rounded-full text-xs font-bold">${statusText}</span>
+            </div>
+            <div class="flex items-start gap-3 mb-2">
+                <div class="flex flex-col items-center">
+                    <div class="w-2 h-2 rounded-full bg-indigo-600"></div>
+                    <div class="w-0.5 h-6 bg-gray-300"></div>
+                    <div class="w-2 h-2 rounded-full bg-red-500"></div>
+                </div>
+                <div class="flex-1">
+                    <p class="text-sm text-gray-600">${trip.pickup}</p>
+                    <p class="text-sm text-gray-600 mt-3">${trip.dropoff}</p>
+                </div>
+            </div>
+            <div class="flex justify-between items-center mt-3 pt-3 border-t border-gray-200">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-user-circle text-gray-400"></i>
+                    <span class="text-sm font-bold text-gray-700">${trip.driver}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-yellow-500">${stars}</span>
+                    <span class="text-lg font-extrabold text-indigo-600">${trip.cost} ر.س</span>
+                </div>
+            </div>
+        </div>`;
+        
+        container.insertAdjacentHTML('beforeend', html);
+    });
+};
+
+// Show trip details
+window.showTripDetails = function(tripId) {
+    const trips = DB.getTrips();
+    const trip = trips.find(t => t.id === tripId);
+    
+    if (!trip) return;
+    
+    // Fill in details
+    const tripDate = new Date(trip.date);
+    const day = tripDate.getDate();
+    const monthNames = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    const month = monthNames[tripDate.getMonth()];
+    const year = tripDate.getFullYear();
+    const hours = tripDate.getHours().toString().padStart(2, '0');
+    const minutes = tripDate.getMinutes().toString().padStart(2, '0');
+    const formattedDate = `${day} ${month} ${year} - ${hours}:${minutes}`;
+    
+    document.getElementById('trip-detail-id').innerText = trip.id;
+    document.getElementById('trip-detail-date').innerText = formattedDate;
+    document.getElementById('trip-detail-pickup').innerText = trip.pickup;
+    document.getElementById('trip-detail-dropoff').innerText = trip.dropoff;
+    document.getElementById('trip-detail-driver-name').innerText = trip.driver;
+    document.getElementById('trip-detail-cost').innerText = `${trip.cost} ر.س`;
+    
+    const carTypes = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر', 'delivery': 'توصيل' };
+    document.getElementById('trip-detail-car-info').innerText = `تويوتا كامري • ${carTypes[trip.car] || trip.car}`;
+    
+    const paymentMethods = { 'wallet': 'محفظة إلكترونية', 'cash': 'نقداً', 'card': 'بطاقة ائتمان' };
+    document.getElementById('trip-detail-payment-method').innerText = paymentMethods[trip.paymentMethod] || trip.paymentMethod;
+    
+    // Status badge
+    const statusBadge = document.getElementById('trip-detail-status');
+    if (trip.status === 'completed') {
+        statusBadge.className = 'inline-block px-4 py-2 rounded-full bg-green-100 text-green-700 font-bold text-sm';
+        statusBadge.innerHTML = '<i class="fas fa-check-circle ml-1"></i> مكتملة';
+    } else {
+        statusBadge.className = 'inline-block px-4 py-2 rounded-full bg-red-100 text-red-700 font-bold text-sm';
+        statusBadge.innerHTML = '<i class="fas fa-times-circle ml-1"></i> ملغية';
+    }
+    
+    // Rating stars
+    const ratingContainer = document.getElementById('trip-detail-user-rating');
+    ratingContainer.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+        const starClass = i <= (trip.rating || 0) ? 'fas fa-star text-yellow-400' : 'fas fa-star text-gray-300';
+        ratingContainer.innerHTML += `<i class="${starClass} text-lg"></i>`;
+    }
+    
+    // Switch to details view
+    switchSection('trip-details');
+};
 
 function simulateDriverResponse(userText) {
     const chatMessages = document.getElementById('chat-messages');
@@ -2418,9 +2649,9 @@ const originalSwitchSection = window.switchSection;
 window.switchSection = function(section) {
     originalSwitchSection(section);
     
-    if (section === 'profile') {
-        loadTripHistory();
+    if (section === 'profile' && currentUser && currentUser.role === 'passenger') {
+        renderTripHistory('trip-history-container', 3);
     } else if (section === 'trip-history') {
-        loadAllTrips();
+        renderAllTrips();
     }
 };
