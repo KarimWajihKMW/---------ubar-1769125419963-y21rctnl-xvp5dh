@@ -2073,6 +2073,12 @@ document.addEventListener('DOMContentLoaded', () => {
         DB.init();
         centerMap();
         animateAmbientCars();
+        
+        // Show role selection modal on startup
+        const roleModal = document.getElementById('role-selection-modal');
+        if (roleModal) {
+            roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+        }
     } catch (e) {
         console.error('Initialization error:', e);
     }
