@@ -681,6 +681,7 @@ const DB = {
 // Defined immediately to avoid ReferenceErrors in HTML
 
 window.selectRole = function(role) {
+    console.log('✅ selectRole called with:', role);
     currentUserRole = role;
     
     const roleModal = document.getElementById('role-selection-modal');
@@ -691,14 +692,18 @@ window.selectRole = function(role) {
     }
 
     if (role === 'passenger') {
+        console.log('🧑 Passenger selected');
         // Check for existing session (Auto Login)
         if (DB.hasSession()) {
+            console.log('📱 Has session, init passenger mode');
             initPassengerMode();
         } else {
+            console.log('🔐 No session, show auth modal');
             // Show Auth Modal
             openAuthModal();
         }
     } else if (role === 'driver' || role === 'admin') {
+        console.log('🚗/📊 Driver or Admin selected:', role);
         openRoleLoginModal(role);
     }
 };
@@ -735,8 +740,13 @@ window.closeAuthModal = function() {
 
 // Role-specific login modal (driver/admin)
 function openRoleLoginModal(role) {
+    console.log('🔑 openRoleLoginModal called for:', role);
     const modal = document.getElementById('role-login-modal');
-    if (!modal) return;
+    if (!modal) {
+        console.error('❌ role-login-modal not found!');
+        return;
+    }
+    console.log('✅ Modal found, setting up...');
     modal.dataset.role = role;
     const titles = { driver: 'تسجيل دخول الكابتن', admin: 'تسجيل دخول الإدارة', passenger: 'تسجيل الدخول' };
     const hints = {
