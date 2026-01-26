@@ -2,8 +2,7 @@ console.log('Akwadra Super Builder Initialized - Multi-Role System with Auth');
 
 // ==================== CRITICAL: Define window functions FIRST ====================
 // These must be available immediately for onclick handlers in HTML
-
-window.selectRole = function(role) {
+const selectRoleImpl = function(role) {
     console.log('✅ selectRole called with:', role);
     if (typeof currentUserRole === 'undefined') {
         console.warn('⚠️ currentUserRole not yet defined, defining now');
@@ -43,6 +42,19 @@ window.selectRole = function(role) {
         }
     }
 };
+
+// Assign real implementation and flush any queued calls from stub (index head)
+window.selectRole = selectRoleImpl;
+if (window.__pendingRoleQueue && Array.isArray(window.__pendingRoleQueue)) {
+    while (window.__pendingRoleQueue.length) {
+        const r = window.__pendingRoleQueue.shift();
+        try {
+            selectRoleImpl(r);
+        } catch (e) {
+            console.error('Error processing queued role', r, e);
+        }
+    }
+}
 
 console.log('✅ window.selectRole defined');
 
