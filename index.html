@@ -1007,9 +1007,19 @@
                               <p class="font-bold text-gray-800" id="ride-dest-text">فندق الريتز كارلتون</p>
                           </div>
                       </div>
-                      <button class="w-full mt-8 border border-gray-200 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-50 transition-colors">
-                          مشاركة تفاصيل الرحلة
-                      </button>
+                      <div class="space-y-3 mt-8">
+                          <button onclick="endTripEarly()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-green-200 hover:shadow-xl transform hover:scale-[1.02] transition-all">
+                              <i class="fas fa-flag-checkered ml-2"></i>
+                              وصلت - إنهاء الرحلة
+                          </button>
+                          <button onclick="openChat()" class="w-full border border-gray-200 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-50 transition-colors">
+                              💬 مراسلة السائق
+                          </button>
+                          <button onclick="shareRide()" class="w-full border border-gray-200 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-50 transition-colors">
+                              <i class="fas fa-share-alt ml-2"></i>
+                              مشاركة تفاصيل الرحلة
+                          </button>
+                      </div>
                  </div>
             </div>
 

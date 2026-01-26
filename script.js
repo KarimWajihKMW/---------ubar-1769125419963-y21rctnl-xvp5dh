@@ -447,6 +447,9 @@ function animateDriverToPickup() {
             showToast('🎉 وصل الكابتن! استعد للركوب');
             if (routePolyline) routePolyline.remove();
             switchSection('in-ride');
+            
+            // Start trip to destination
+            startTripToDestination();
         }
     }
     
@@ -480,19 +483,80 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
     return R * c; // Distance in meters
 }
 
-function updateDriverDistance(meters) {
-    const distanceEl = document.getElementById('driver-distance');
-    if (!distanceEl) return;
+// Simulate trip from pickup to destination
+function startTripToDestination() {
+    showToast('🚗 بدأت الرحلة إلى الوجهة');
     
-    if (meters < 1000) {
-        distanceEl.innerText = `على بُعد ${Math.round(meters)} متر`;
-    } else {
-        distanceEl.innerText = `على بُعد ${(meters / 1000).toFixed(1)} كم`;
+    // Simulate trip duration (30-60 seconds for demo)
+    const tripDuration = 45000; // 45 seconds
+    let remainingSeconds = Math.floor(tripDuration / 1000);
+    
+    // Update ETA countdown
+    const etaDisplay = document.getElementById('ride-eta-display');
+    if (etaDisplay) {
+        etaDisplay.innerText = `${Math.floor(remainingSeconds / 60)} د ${remainingSeconds % 60} ث`;
     }
+    
+    const countdown = setInterval(() => {
+        remainingSeconds--;
+        if (etaDisplay && remainingSeconds > 0) {
+            const mins = Math.floor(remainingSeconds / 60);
+            const secs = remainingSeconds % 60;
+            etaDisplay.innerText = `${mins} د ${secs} ث`;
+        }
+        
+        if (remainingSeconds <= 0) {
+            clearInterval(countdown);
+        }
+    }, 1000);
+    
+    // When trip ends, show payment
+    setTimeout(() => {
+        clearInterval(countdown);
+        showToast('✅ وصلت إلى وجهتك!', 3000);
+        
+        // Prepare payment screen
+        updatePaymentSummary();
+        
+        // Show payment method selection
+        setTimeout(() => {
+            window.switchSection('payment-method');
+            showToast('💳 اختر طريقة الدفع لإنهاء الرحلة');
+        }, 2000);
+    }, tripDuration);
 }
 
-function startETACountdown() {
-    if (etaCountdown) clearInterval(etaCountdown);
+// End trip manually
+window.endTripEarly = function() {
+    showToast('✅ تم إنهاء الرحلة');
+    updatePaymentSummary();
+    setTimeout(() => {
+        window.switchSection('payment-method');
+        showToast('💳 اختر طريقة الدفع');
+    }, 500);
+};
+
+// Share ride details
+window.shareRide = function() {
+    const rideDetails = `
+🚗 تفاصيل رحلتي مع أكوادرا تاكسي
+من: ${document.getElementById('current-loc-input').value || 'موقعك الحالي'}
+إلى: ${document.getElementById('dest-input').value || 'الوجهة'}
+السائق: أحمد محمد ⭐ 4.9
+    `.trim();
+    
+    if (navigator.share) {
+        navigator.share({
+            title: 'رحلتي مع أكوادرا',
+            text: rideDetails
+        }).catch(err => console.log('Error sharing', err));
+    } else {
+        // Fallback: copy to clipboard
+        navigator.clipboard.writeText(rideDetails).then(() => {
+            showToast('✅ تم نسخ التفاصيل');
+        });
+    }
+};
     
     etaCountdown = setInterval(() => {
         if (etaSeconds > 0) {
