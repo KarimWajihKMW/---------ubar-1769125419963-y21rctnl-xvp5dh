@@ -330,7 +330,7 @@
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 w-full max-w-5xl">
             <!-- Passenger Role -->
-            <button onclick="selectRole('passenger')" class="role-card bg-white/10 backdrop-blur-md p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/10 hover:bg-white/20 active:scale-95 group text-center transition-transform">
+            <button data-role="passenger" onclick="selectRole('passenger')" class="role-card bg-white/10 backdrop-blur-md p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/10 hover:bg-white/20 active:scale-95 group text-center transition-transform">
                 <div class="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-tr from-blue-500 to-cyan-400 rounded-2xl mx-auto flex items-center justify-center mb-4 sm:mb-6 shadow-lg group-hover:scale-110 transition-transform">
                     <i class="fas fa-user text-2xl sm:text-3xl text-white"></i>
                 </div>
@@ -339,7 +339,7 @@
             </button>
 
             <!-- Driver Role -->
-            <button onclick="selectRole('driver')" class="role-card bg-white/10 backdrop-blur-md p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/10 hover:bg-white/20 active:scale-95 group text-center transition-transform">
+            <button data-role="driver" onclick="selectRole('driver')" class="role-card bg-white/10 backdrop-blur-md p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/10 hover:bg-white/20 active:scale-95 group text-center transition-transform">
                 <div class="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-2xl mx-auto flex items-center justify-center mb-4 sm:mb-6 shadow-lg group-hover:scale-110 transition-transform">
                     <i class="fas fa-steering-wheel text-2xl sm:text-3xl text-white"></i>
                 </div>
@@ -348,7 +348,7 @@
             </button>
 
             <!-- Admin Role -->
-            <button onclick="selectRole('admin')" class="role-card bg-white/10 backdrop-blur-md p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/10 hover:bg-white/20 active:scale-95 group text-center transition-transform">
+            <button data-role="admin" onclick="selectRole('admin')" class="role-card bg-white/10 backdrop-blur-md p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/10 hover:bg-white/20 active:scale-95 group text-center transition-transform">
                 <div class="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-tr from-purple-500 to-pink-400 rounded-2xl mx-auto flex items-center justify-center mb-4 sm:mb-6 shadow-lg group-hover:scale-110 transition-transform">
                     <i class="fas fa-chart-line text-2xl sm:text-3xl text-white"></i>
                 </div>

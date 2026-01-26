@@ -2110,6 +2110,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (roleModal) {
             roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
         }
+
+        // Bind role buttons even if inline onclick is blocked by CSP
+        document.querySelectorAll('.role-card').forEach(btn => {
+            const role = btn.dataset.role;
+            if (!role) return;
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (typeof window.selectRole === 'function') {
+                    window.selectRole(role);
+                }
+            });
+        });
     } catch (e) {
         console.error('Initialization error:', e);
     }
