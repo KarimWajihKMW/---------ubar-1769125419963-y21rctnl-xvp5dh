@@ -382,6 +382,10 @@ function animateDriverToPickup() {
             ]);
         }
         
+        // Calculate distance remaining
+        const distanceMeters = calculateDistance(currentLat, currentLng, endLat, endLng);
+        updateDriverDistance(distanceMeters);
+        
         // Calculate bearing for car rotation
         const bearing = calculateBearing(currentLat, currentLng, endLat, endLng);
         const carEl = driverMarkerL.getElement();
@@ -394,8 +398,9 @@ function animateDriverToPickup() {
             requestAnimationFrame(moveStep);
         } else {
             // Driver arrived
-            showToast('وصل الكابتن!');
+            showToast('🎉 وصل الكابتن! استعد للركوب');
             if (routePolyline) routePolyline.remove();
+            switchSection('in-ride');
         }
     }
     
@@ -412,6 +417,32 @@ function calculateBearing(lat1, lng1, lat2, lng2) {
               Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLng);
     const bearing = toDeg(Math.atan2(y, x));
     return (bearing + 360) % 360;
+}
+
+function calculateDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371000; // Earth radius in meters
+    const toRad = deg => deg * Math.PI / 180;
+    
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in meters
+}
+
+function updateDriverDistance(meters) {
+    const distanceEl = document.getElementById('driver-distance');
+    if (!distanceEl) return;
+    
+    if (meters < 1000) {
+        distanceEl.innerText = `على بُعد ${Math.round(meters)} متر`;
+    } else {
+        distanceEl.innerText = `على بُعد ${(meters / 1000).toFixed(1)} كم`;
+    }
 }
 
 function startETACountdown() {
@@ -981,6 +1012,29 @@ window.switchSection = function(name) {
     }
 };
 
+window.cancelRide = function() {
+    if (!confirm('هل أنت متأكد من إلغاء الرحلة؟\nقد يتم فرض رسوم إلغاء.')) return;
+    
+    // Clear driver marker and route
+    if (driverMarkerL) driverMarkerL.remove();
+    if (routePolyline) routePolyline.remove();
+    if (etaCountdown) clearInterval(etaCountdown);
+    
+    showToast('⚠️ تم إلغاء الرحلة');
+    
+    setTimeout(() => {
+        switchSection('destination');
+    }, 1000);
+};
+
+window.callDriver = function() {
+    showToast('📞 جاري الاتصال بالكابتن...');
+    // In real app, would initiate phone call
+    setTimeout(() => {
+        showToast('☎️ رقم الكابتن: 0501234567', 5000);
+    }, 1000);
+};
+
 window.openChat = function() {
     switchSection('chat');
     const msgs = document.getElementById('chat-messages');
@@ -1128,10 +1182,19 @@ window.requestRide = function() {
     // After a short delay, show driver found
     setTimeout(() => {
         etaSeconds = est.etaMin * 60;
+        
+        // Update trip info in driver section
+        const carTypeNames = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر', 'delivery': 'توصيل' };
+        document.getElementById('trip-car-type') && (document.getElementById('trip-car-type').innerText = carTypeNames[currentCarType] || currentCarType);
+        document.getElementById('trip-price-display') && (document.getElementById('trip-price-display').innerText = `${currentTripPrice} ر.س`);
         document.getElementById('eta-display') && (document.getElementById('eta-display').innerText = formatETA(etaSeconds));
+        
         switchSection('driver');
         startDriverTrackingLive();
         startETACountdown();
+        
+        // Show helpful message
+        showToast('✅ تم العثور على كابتن! شاهد السيارة على الخريطة', 4000);
     }, 2000);
 };
 
