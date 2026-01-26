@@ -666,8 +666,15 @@ window.submitRoleLogin = function() {
     if (password !== account.password) {
         loginAttempts++;
         showToast('❌ كلمة المرور غير صحيحة');
-        passInput.style.borderColor = 'red';
-        setTimeout(() => passInput.style.borderColor = '', 2000);
+        const parent = passInput.parentElement;
+        if (parent) {
+            parent.style.backgroundColor = '#fee';
+            parent.style.borderColor = 'red';
+            setTimeout(() => {
+                parent.style.backgroundColor = '';
+                parent.style.borderColor = '';
+            }, 2000);
+        }
         passInput.focus();
         
         // Show correct credentials after 3 failed attempts
@@ -778,8 +785,15 @@ window.loginWithEmail = function() {
     }
     if (!email.includes('@')) {
         showToast('⚠️ البريد الإلكتروني غير صحيح (يجب أن يحتوي على @)');
-        emailInput.style.borderColor = 'red';
-        setTimeout(() => emailInput.style.borderColor = '', 2000);
+        const parent = emailInput.parentElement;
+        if (parent) {
+            parent.style.backgroundColor = '#fef3cd';
+            parent.style.borderColor = '#ff9800';
+            setTimeout(() => {
+                parent.style.backgroundColor = '';
+                parent.style.borderColor = '';
+            }, 2000);
+        }
         emailInput.focus();
         return;
     }
@@ -794,10 +808,26 @@ window.loginWithEmail = function() {
     
     // Check email validity
     if (!account || email.toLowerCase() !== account.email.toLowerCase()) {
+        loginAttempts++;
         showToast('❌ البريد الإلكتروني غير صحيح');
-        emailInput.style.borderColor = 'red';
-        setTimeout(() => emailInput.style.borderColor = '', 2000);
+        const parent = emailInput.parentElement;
+        if (parent) {
+            parent.style.backgroundColor = '#fee';
+            parent.style.borderColor = 'red';
+            setTimeout(() => {
+                parent.style.backgroundColor = '';
+                parent.style.borderColor = '';
+            }, 2000);
+        }
         emailInput.focus();
+        
+        // Show correct credentials after 3 failed attempts
+        if (loginAttempts >= 3) {
+            setTimeout(() => {
+                showToast(`🔑 للتجربة: ${account.email} / ${account.password}`, 8000);
+                loginAttempts = 0;
+            }, 1000);
+        }
         return;
     }
     
@@ -805,8 +835,15 @@ window.loginWithEmail = function() {
     if (password !== account.password) {
         loginAttempts++;
         showToast('❌ كلمة المرور غير صحيحة');
-        passwordInput.style.borderColor = 'red';
-        setTimeout(() => passwordInput.style.borderColor = '', 2000);
+        const parent = passwordInput.parentElement;
+        if (parent) {
+            parent.style.backgroundColor = '#fee';
+            parent.style.borderColor = 'red';
+            setTimeout(() => {
+                parent.style.backgroundColor = '';
+                parent.style.borderColor = '';
+            }, 2000);
+        }
         passwordInput.focus();
         
         // Show correct credentials after 3 failed attempts
