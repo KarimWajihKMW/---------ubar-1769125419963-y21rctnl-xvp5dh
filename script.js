@@ -147,18 +147,31 @@ let etaSeconds = 0;
 
 function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
-    if (!mapDiv) return;
-    if (leafletMap) {
-        leafletMap.invalidateSize();
+    if (!mapDiv) {
+        console.error('Leaflet map div not found!');
         return;
     }
+    if (leafletMap) {
+        leafletMap.invalidateSize();
+        console.log('Leaflet map already initialized, resizing...');
+        return;
+    }
+    
+    console.log('Initializing Leaflet map...');
+    
     // Egypt center fallback
     const egyptCenter = [26.8206, 30.8025];
-    leafletMap = L.map('leaflet-map', { zoomControl: false }).setView(egyptCenter, 6);
+    leafletMap = L.map('leaflet-map', { 
+        zoomControl: false,
+        attributionControl: true
+    }).setView(egyptCenter, 6);
+    
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '© OpenStreetMap'
     }).addTo(leafletMap);
+    
+    console.log('✅ Leaflet map initialized successfully');
 
     // Custom controls hookup
     const zi = document.getElementById('zoom-in');
@@ -311,9 +324,23 @@ window.savePlaceAs = function(event, type) {
 function startDriverTrackingLive() {
     if (!leafletMap || !currentPickup) return;
     
+    // Hide the decorative map-world layer to show Leaflet map
+    const mapWorld = document.getElementById('map-world');
+    if (mapWorld) mapWorld.style.display = 'none';
+    
+    // Make sure Leaflet map is visible
+    const leafletMapEl = document.getElementById('leaflet-map');
+    if (leafletMapEl) {
+        leafletMapEl.style.display = 'block';
+        leafletMapEl.style.zIndex = '1';
+    }
+    
     // Clear any existing driver marker
     if (driverMarkerL) driverMarkerL.remove();
     if (routePolyline) routePolyline.remove();
+    
+    // Invalidate map size to ensure proper rendering
+    leafletMap.invalidateSize();
     
     // Create driver marker with custom icon (car)
     const carIcon = L.divIcon({
@@ -332,7 +359,9 @@ function startDriverTrackingLive() {
     };
     
     driverMarkerL = L.marker([driverLocation.lat, driverLocation.lng], { icon: carIcon }).addTo(leafletMap);
-    driverMarkerL.bindPopup('السيارة قادمة إليك').openPopup();
+    driverMarkerL.bindPopup('🚗 السيارة قادمة إليك').openPopup();
+    
+    console.log('✅ Driver marker added at:', driverLocation);
     
     // Draw route line
     routePolyline = L.polyline([
@@ -340,12 +369,16 @@ function startDriverTrackingLive() {
         [currentPickup.lat, currentPickup.lng]
     ], { color: '#4f46e5', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(leafletMap);
     
+    console.log('✅ Route line drawn');
+    
     // Fit map to show both driver and pickup
     const bounds = L.latLngBounds([
         [driverLocation.lat, driverLocation.lng],
         [currentPickup.lat, currentPickup.lng]
     ]);
     leafletMap.fitBounds(bounds, { padding: [50, 50] });
+    
+    console.log('✅ Map fitted to bounds, starting animation...');
     
     // Animate driver moving to pickup
     animateDriverToPickup();

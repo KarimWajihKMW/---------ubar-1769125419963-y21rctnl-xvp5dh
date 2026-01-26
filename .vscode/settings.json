@@ -8,6 +8,10 @@
             "matchCommandLine": true
         },
         "git add": true,
-        "git commit": true
+        "git commit": true,
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node -c script\\.js 2>&1 \\|\\| echo \"Syntax check done\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }
