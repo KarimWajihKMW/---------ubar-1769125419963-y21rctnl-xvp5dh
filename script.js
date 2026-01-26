@@ -614,7 +614,10 @@ window.shareRide = function() {
             showToast('✅ تم نسخ التفاصيل');
         });
     }
-};
+}
+
+function startETACountdown() {
+    if (etaCountdown) clearInterval(etaCountdown);
     
     etaCountdown = setInterval(() => {
         if (etaSeconds > 0) {
