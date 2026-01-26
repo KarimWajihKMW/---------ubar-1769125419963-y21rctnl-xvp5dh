@@ -1,5 +1,51 @@
 console.log('Akwadra Super Builder Initialized - Multi-Role System with Auth');
 
+// ==================== CRITICAL: Define window functions FIRST ====================
+// These must be available immediately for onclick handlers in HTML
+
+window.selectRole = function(role) {
+    console.log('✅ selectRole called with:', role);
+    if (typeof currentUserRole === 'undefined') {
+        console.warn('⚠️ currentUserRole not yet defined, defining now');
+        window.currentUserRole = role;
+    } else {
+        currentUserRole = role;
+    }
+    
+    const roleModal = document.getElementById('role-selection-modal');
+    // Animate out role selection
+    if(roleModal) {
+        roleModal.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => roleModal.classList.add('hidden'), 500);
+    }
+
+    if (role === 'passenger') {
+        console.log('🧑 Passenger selected');
+        // Check for existing session (Auto Login)
+        if (typeof DB !== 'undefined' && DB.hasSession()) {
+            console.log('📱 Has session, init passenger mode');
+            initPassengerMode();
+        } else {
+            console.log('🔐 No session, show auth modal');
+            // Show Auth Modal
+            if (typeof openAuthModal === 'function') {
+                openAuthModal();
+            } else {
+                setTimeout(() => window.openAuthModal && window.openAuthModal(), 100);
+            }
+        }
+    } else if (role === 'driver' || role === 'admin') {
+        console.log('🚗/📊 Driver or Admin selected:', role);
+        if (typeof openRoleLoginModal === 'function') {
+            openRoleLoginModal(role);
+        } else {
+            setTimeout(() => window.openRoleLoginModal && window.openRoleLoginModal(role), 100);
+        }
+    }
+};
+
+console.log('✅ window.selectRole defined');
+
 // --- Safe Storage Wrapper (Fixes SecurityError in Sandboxed Iframes) ---
 const SafeStorage = {
     _memory: {},
@@ -678,35 +724,10 @@ const DB = {
 };
 
 // --- GLOBAL FUNCTIONS (EXPOSED TO WINDOW) ---
-// Defined immediately to avoid ReferenceErrors in HTML
+// REMOVED: window.selectRole is now defined at top of file for immediate availability
 
-window.selectRole = function(role) {
-    console.log('✅ selectRole called with:', role);
-    currentUserRole = role;
-    
-    const roleModal = document.getElementById('role-selection-modal');
-    // Animate out role selection
-    if(roleModal) {
-        roleModal.classList.add('opacity-0', 'pointer-events-none');
-        setTimeout(() => roleModal.classList.add('hidden'), 500);
-    }
+// Other window functions defined here
 
-    if (role === 'passenger') {
-        console.log('🧑 Passenger selected');
-        // Check for existing session (Auto Login)
-        if (DB.hasSession()) {
-            console.log('📱 Has session, init passenger mode');
-            initPassengerMode();
-        } else {
-            console.log('🔐 No session, show auth modal');
-            // Show Auth Modal
-            openAuthModal();
-        }
-    } else if (role === 'driver' || role === 'admin') {
-        console.log('🚗/📊 Driver or Admin selected:', role);
-        openRoleLoginModal(role);
-    }
-};
 
 window.openAuthModal = function() {
     const am = document.getElementById('auth-modal');
