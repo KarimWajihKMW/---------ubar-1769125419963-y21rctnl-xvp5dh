@@ -2,6 +2,11 @@
     "chat.tools.terminal.autoApprove": {
         "git reset": true,
         "git push": true,
-        "git rev-parse": true
+        "git rev-parse": true,
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && python3 -m http\\.server 8000$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "git add": true
     }
 }

@@ -1246,10 +1246,15 @@ function toggleMenu() {
     }
 }
 
-// --- Map Drag Logic ---
+// --- Map Drag Logic (Enhanced for Mobile Touch) ---
 function startDrag(e) {
     if (e.target.closest('.pointer-events-auto')) return;
     const mapContainer = document.getElementById('map-container');
+    
+    // Prevent default touch behavior to avoid scrolling
+    if (e.touches) {
+        e.preventDefault();
+    }
     
     mapState.isDragging = true;
     if(mapContainer) {
@@ -1265,11 +1270,19 @@ function startDrag(e) {
     
     mapState.clickStartX = clientX;
     mapState.clickStartY = clientY;
+    
+    // Store the last position for momentum
+    mapState.lastX = clientX;
+    mapState.lastY = clientY;
 }
 
 function drag(e) {
     if (!mapState.isDragging) return;
-    e.preventDefault();
+    
+    // Prevent scrolling on mobile while dragging
+    if (e.touches) {
+        e.preventDefault();
+    }
     
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -1278,6 +1291,10 @@ function drag(e) {
     mapState.y = clientY - mapState.startY;
     
     updateMapTransform();
+    
+    // Update last position for momentum
+    mapState.lastX = clientX;
+    mapState.lastY = clientY;
     
     const currentLocInput = document.getElementById('current-loc-input');
     if (currentUserRole === 'passenger' && Math.random() > 0.9 && currentLocInput) {
