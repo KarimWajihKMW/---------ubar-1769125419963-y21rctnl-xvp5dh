@@ -324,16 +324,29 @@ window.savePlaceAs = function(event, type) {
 function startDriverTrackingLive() {
     if (!leafletMap || !currentPickup) return;
     
-    // Hide the decorative map-world layer to show Leaflet map
+    // Hide the decorative map-world layer
     const mapWorld = document.getElementById('map-world');
     if (mapWorld) mapWorld.style.display = 'none';
     
-    // Make sure Leaflet map is visible
+    // Move Leaflet map to driver view container
     const leafletMapEl = document.getElementById('leaflet-map');
-    if (leafletMapEl) {
+    const driverMapView = document.getElementById('driver-map-view');
+    
+    if (leafletMapEl && driverMapView) {
+        // Temporarily detach and reattach to new container
+        driverMapView.appendChild(leafletMapEl);
         leafletMapEl.style.display = 'block';
+        leafletMapEl.style.position = 'absolute';
+        leafletMapEl.style.inset = '0';
         leafletMapEl.style.zIndex = '1';
+        leafletMapEl.style.width = '100%';
+        leafletMapEl.style.height = '100%';
     }
+    
+    // Invalidate map size after moving
+    setTimeout(() => {
+        if (leafletMap) leafletMap.invalidateSize();
+    }, 100);
     
     // Clear any existing driver marker
     if (driverMarkerL) driverMarkerL.remove();

@@ -887,20 +887,29 @@
             </div>
 
             <!-- State 4: Driver Found -->
-            <div id="state-driver" class="hidden p-0 bg-white">
-                <div class="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 sm:p-6 text-white flex justify-between items-center rounded-t-[2.5rem] shadow-lg relative overflow-hidden">
-                    <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-xl"></div>
-                    <div class="relative z-10">
-                        <p class="text-indigo-100 text-xs sm:text-sm font-medium mb-1">🚗 الكابتن في الطريق إليك</p>
-                        <h3 class="text-2xl sm:text-3xl font-bold" id="eta-display">-- د -- ث</h3>
-                        <p class="text-indigo-200 text-xs mt-1" id="driver-distance">على بُعد -- متر</p>
+            <div id="state-driver" class="hidden p-0 bg-white flex flex-col h-full">
+                <!-- Map Section - Top Half -->
+                <div class="relative h-[45vh] bg-gray-200 overflow-hidden">
+                    <!-- Map will show here -->
+                    <div id="driver-map-view" class="absolute inset-0 z-1"></div>
+                    
+                    <!-- Floating ETA Card -->
+                    <div class="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/95 backdrop-blur px-6 py-3 rounded-2xl shadow-xl border-2 border-indigo-200">
+                        <div class="text-center">
+                            <p class="text-xs text-indigo-600 font-bold mb-1">⏱️ الكابتن يصل خلال</p>
+                            <h3 class="text-2xl font-extrabold text-indigo-600" id="eta-display">-- د -- ث</h3>
+                            <p class="text-xs text-gray-600 mt-1" id="driver-distance">على بُعد -- متر</p>
+                        </div>
                     </div>
-                    <div class="relative z-10 bg-green-500/90 px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold backdrop-blur border border-white/20 animate-pulse shadow-lg">
-                        قادم إليك
+                    
+                    <!-- Status Badge -->
+                    <div class="absolute top-4 right-4 z-10 bg-green-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg animate-pulse">
+                        🚗 قادم إليك
                     </div>
                 </div>
                 
-                <div class="p-4 sm:p-6">
+                <!-- Info Section - Bottom Half -->
+                <div class="flex-1 p-4 sm:p-6 overflow-y-auto bg-white">
                     <!-- Driver Info Card -->
                     <div class="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-200">
                         <div class="flex items-center">
