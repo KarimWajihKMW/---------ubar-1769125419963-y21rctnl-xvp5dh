@@ -60,6 +60,7 @@ let mapState = {
 
 let driverAnimationId = null;
 let driverRequestTimeout = null;
+let loginAttempts = 0; // Track failed login attempts
 
 // Demo role accounts for gated access per role
 const roleAccounts = {
@@ -641,14 +642,46 @@ window.submitRoleLogin = function() {
     const password = passInput ? passInput.value.trim() : '';
     const account = roleAccounts[role];
 
-    if (!email || !password) {
-        showToast('يرجى إدخال البريد وكلمة المرور');
+    if (!email) {
+        showToast('⚠️ يرجى إدخال البريد الإلكتروني');
+        emailInput.focus();
         return;
     }
-    if (!account || email.toLowerCase() !== account.email.toLowerCase() || password !== account.password) {
-        showToast('بيانات الدخول غير صحيحة لهذا الدور');
+    if (!password) {
+        showToast('⚠️ يرجى إدخال كلمة المرور');
+        passInput.focus();
         return;
     }
+    
+    // Check email validity
+    if (!account || email.toLowerCase() !== account.email.toLowerCase()) {
+        showToast('❌ البريد الإلكتروني غير صحيح');
+        emailInput.style.borderColor = 'red';
+        setTimeout(() => emailInput.style.borderColor = '', 2000);
+        emailInput.focus();
+        return;
+    }
+    
+    // Check password validity
+    if (password !== account.password) {
+        loginAttempts++;
+        showToast('❌ كلمة المرور غير صحيحة');
+        passInput.style.borderColor = 'red';
+        setTimeout(() => passInput.style.borderColor = '', 2000);
+        passInput.focus();
+        
+        // Show correct credentials after 3 failed attempts
+        if (loginAttempts >= 3) {
+            setTimeout(() => {
+                showToast(`🔑 للتجربة: ${account.email} / ${account.password}`, 8000);
+                loginAttempts = 0;
+            }, 1000);
+        }
+        return;
+    }
+    
+    // Reset attempts on successful login
+    loginAttempts = 0;
 
     DB.saveSession();
     closeRoleLoginModal();
@@ -733,23 +766,61 @@ window.verifyOTP = function() {
 };
 
 window.loginWithEmail = function() {
-    const email = document.getElementById('email-input').value;
-    const password = document.getElementById('password-input').value;
-    if (!email || !email.includes('@')) {
-        showToast('يرجى إدخال بريد إلكتروني صحيح');
+    const emailInput = document.getElementById('email-input');
+    const passwordInput = document.getElementById('password-input');
+    const email = emailInput.value.trim();
+    const password = passwordInput.value.trim();
+    
+    if (!email) {
+        showToast('⚠️ يرجى إدخال البريد الإلكتروني');
+        emailInput.focus();
+        return;
+    }
+    if (!email.includes('@')) {
+        showToast('⚠️ البريد الإلكتروني غير صحيح (يجب أن يحتوي على @)');
+        emailInput.style.borderColor = 'red';
+        setTimeout(() => emailInput.style.borderColor = '', 2000);
+        emailInput.focus();
         return;
     }
     if (!password) {
-        showToast('أدخل كلمة المرور');
+        showToast('⚠️ يرجى إدخال كلمة المرور');
+        passwordInput.focus();
         return;
     }
 
     // Passenger login only via this modal
     const account = roleAccounts.passenger;
-    if (!account || email.toLowerCase() !== account.email.toLowerCase() || password !== account.password) {
-        showToast('بيانات الراكب غير صحيحة');
+    
+    // Check email validity
+    if (!account || email.toLowerCase() !== account.email.toLowerCase()) {
+        showToast('❌ البريد الإلكتروني غير صحيح');
+        emailInput.style.borderColor = 'red';
+        setTimeout(() => emailInput.style.borderColor = '', 2000);
+        emailInput.focus();
         return;
     }
+    
+    // Check password validity
+    if (password !== account.password) {
+        loginAttempts++;
+        showToast('❌ كلمة المرور غير صحيحة');
+        passwordInput.style.borderColor = 'red';
+        setTimeout(() => passwordInput.style.borderColor = '', 2000);
+        passwordInput.focus();
+        
+        // Show correct credentials after 3 failed attempts
+        if (loginAttempts >= 3) {
+            setTimeout(() => {
+                showToast(`🔑 للتجربة: ${account.email} / ${account.password}`, 8000);
+                loginAttempts = 0;
+            }, 1000);
+        }
+        return;
+    }
+    
+    // Reset attempts on successful login
+    loginAttempts = 0;
 
     loginSuccess();
 };
@@ -1152,7 +1223,7 @@ function simulateDriverResponse(userText) {
     }, 2500);
 }
 
-function showToast(message) {
+function showToast(message, duration = 3000) {
     const toastNotification = document.getElementById('toast-notification');
     const toastMessage = document.getElementById('toast-message');
     if(toastNotification && toastMessage) {
@@ -1162,7 +1233,7 @@ function showToast(message) {
         setTimeout(() => {
             toastNotification.style.transform = 'translate(-50%, 0)';
             toastNotification.style.opacity = '0';
-        }, 3000);
+        }, duration);
     }
 }
 
