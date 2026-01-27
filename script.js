@@ -1397,6 +1397,9 @@ function initPassengerMode() {
     initLeafletMap();
     updateUIWithUserData();
     
+    // Initialize sample trips if none exist
+    initializeSampleTrips();
+    
     // Load saved places
     savedPlaces.load();
     
