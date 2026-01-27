@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>خريطة مصر - أكوادرا تاكسي</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Cairo', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        .map-container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        .map-controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .control-btn {
+            background: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #333;
+        }
+        
+        .control-btn:hover {
+            background: #f0f0f0;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        }
+        
+        .control-btn.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        .search-box {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+            width: 300px;
+        }
+        
+        .search-box input {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-family: 'Cairo', sans-serif;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .search-box button {
+            padding: 12px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .search-box button:hover {
+            background: #764ba2;
+        }
+        
+        .info-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            padding: 20px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+            z-index: 999;
+        }
+        
+        .info-panel.active {
+            transform: translateY(0);
+        }
+        
+        .close-panel {
+            float: left;
+            cursor: pointer;
+            font-size: 1.2em;
+            color: #666;
+        }
+        
+        .city-item {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        
+        .city-item:hover {
+            background: #f5f5f5;
+        }
+        
+        .city-name {
+            font-weight: 700;
+            color: #333;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+        
+        .city-info {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .legend {
+            position: fixed;
+            bottom: 240px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 999;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+        
+        .legend-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+        }
+        
+        .trips-counter {
+            position: fixed;
+            top: 150px;
+            right: 20px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 999;
+            text-align: center;
+        }
+        
+        .counter-number {
+            font-size: 2em;
+            font-weight: 800;
+            color: #667eea;
+        }
+        
+        .counter-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .popup-custom {
+            font-family: 'Cairo', sans-serif;
+        }
+        
+        .popup-title {
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+        
+        .popup-content {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        @media (max-width: 768px) {
+            .map-controls {
+                top: 10px;
+                right: 10px;
+                gap: 5px;
+            }
+            
+            .control-btn {
+                padding: 10px 15px;
+                font-size: 0.9em;
+            }
+            
+            .search-box {
+                width: 200px;
+                left: 10px;
+                top: 10px;
+            }
+            
+            .legend {
+                bottom: 230px;
+                right: 10px;
+            }
+            
+            .trips-counter {
+                top: 130px;
+                right: 10px;
+                padding: 12px 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="map-container">
+        <div id="map"></div>
+        
+        <!-- Search Box -->
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="ابحث عن مدينة...">
+            <button onclick="searchCity()"><i class="fas fa-search"></i></button>
+        </div>
+        
+        <!-- Map Controls -->
+        <div class="map-controls">
+            <button class="control-btn" onclick="showAllCities()">
+                <i class="fas fa-map-marked-alt"></i> جميع المدن
+            </button>
+            <button class="control-btn" onclick="toggleTripsLayer()" id="tripsBtn">
+                <i class="fas fa-car"></i> الرحلات
+            </button>
+            <button class="control-btn" onclick="zoomToEgypt()">
+                <i class="fas fa-expand"></i> عرض كامل
+            </button>
+            <button class="control-btn" onclick="goBack()">
+                <i class="fas fa-arrow-right"></i> رجوع
+            </button>
+        </div>
+        
+        <!-- Trips Counter -->
+        <div class="trips-counter">
+            <div class="counter-number" id="tripsCount">0</div>
+            <div class="counter-label">رحلة نشطة</div>
+        </div>
+        
+        <!-- Legend -->
+        <div class="legend">
+            <strong style="display: block; margin-bottom: 10px;">وسائل الإيضاح</strong>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #667eea;"></div>
+                <span>مدينة رئيسية</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #28a745;"></div>
+                <span>رحلة نشطة</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ff9800;"></div>
+                <span>رحلة معلقة</span>
+            </div>
+        </div>
+        
+        <!-- Info Panel -->
+        <div class="info-panel" id="infoPanel">
+            <span class="close-panel" onclick="closeInfoPanel()">✕</span>
+            <div id="panelContent"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([26.8206, 30.8025], 6);
+        
+        // Add tile layer (OpenStreetMap)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+        
+        // Egypt major cities with coordinates
+        const egyptCities = [
+            { name: 'القاهرة', lat: 30.0444, lng: 31.2357, drivers: 342, trips: 1250, population: '20.1 مليون' },
+            { name: 'الإسكندرية', lat: 31.2001, lng: 29.9187, drivers: 180, trips: 620, population: '5.2 مليون' },
+            { name: 'الجيزة', lat: 30.0131, lng: 31.4898, drivers: 156, trips: 540, population: '4.3 مليون' },
+            { name: 'شبرا الخيمة', lat: 30.1247, lng: 31.2425, drivers: 98, trips: 350, population: '1.3 مليون' },
+            { name: 'حلوان', lat: 29.8638, lng: 31.3459, drivers: 87, trips: 280, population: '880 ألف' },
+            { name: 'السويس', lat: 29.9668, lng: 32.5498, drivers: 76, trips: 210, population: '693 ألف' },
+            { name: 'بورسعيد', lat: 31.2604, lng: 32.2841, drivers: 65, trips: 190, population: '604 ألف' },
+            { name: 'المنصورة', lat: 31.0461, lng: 31.3800, drivers: 92, trips: 310, population: '475 ألف' },
+            { name: 'طنطا', lat: 30.7869, lng: 31.0011, drivers: 78, trips: 260, population: '460 ألف' },
+            { name: 'أسيوط', lat: 27.1817, lng: 31.1860, drivers: 54, trips: 180, population: '417 ألف' },
+            { name: 'سوهاج', lat: 26.5553, lng: 31.6947, drivers: 43, trips: 140, population: '305 ألف' },
+            { name: 'الأقصر', lat: 25.6872, lng: 32.6396, drivers: 38, trips: 130, population: '506 ألف' },
+            { name: 'أسوان', lat: 24.0889, lng: 32.9397, drivers: 29, trips: 95, population: '290 ألف' },
+            { name: 'الفيوم', lat: 29.3084, lng: 30.8406, drivers: 45, trips: 150, population: '329 ألف' },
+            { name: 'بني سويف', lat: 29.0694, lng: 31.0975, drivers: 36, trips: 120, population: '293 ألف' }
+        ];
+        
+        // Sample active trips
+        const activeTrips = [
+            { id: 1, from: 'القاهرة', to: 'الجيزة', lat1: 30.0444, lng1: 31.2357, lat2: 30.0131, lng2: 31.4898, status: 'active' },
+            { id: 2, from: 'الإسكندرية', to: 'بورسعيد', lat1: 31.2001, lng1: 29.9187, lat2: 31.2604, lng2: 32.2841, status: 'active' },
+            { id: 3, from: 'الجيزة', to: 'القاهرة', lat1: 30.0131, lng1: 31.4898, lat2: 30.0444, lng2: 31.2357, status: 'pending' },
+            { id: 4, from: 'شبرا الخيمة', to: 'القاهرة', lat1: 30.1247, lng1: 31.2425, lat2: 30.0444, lng2: 31.2357, status: 'active' },
+            { id: 5, from: 'حلوان', to: 'الجيزة', lat1: 29.8638, lng1: 31.3459, lat2: 30.0131, lng2: 31.4898, status: 'active' }
+        ];
+        
+        let markers = [];
+        let tripMarkers = [];
+        let polylines = [];
+        let tripsVisible = false;
+        
+        // Create custom icons
+        const cityIcon = L.icon({
+            iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDQwIDQwIj48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSIyMCIgZmlsbD0iIzY2N2VlYSIvPjwvc3ZnPg==',
+            iconSize: [40, 40],
+            iconAnchor: [20, 40],
+            popupAnchor: [0, -40]
+        });
+        
+        const tripIcon = L.icon({
+            iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzNiIgaGVpZ2h0PSIzNiIgdmlld0JveD0iMCAwIDM2IDM2Ij48Y2lyY2xlIGN4PSIxOCIgY3k9IjE4IiByPSIxOCIgZmlsbD0iIzI4YTc0NSIvPjx0ZXh0IHg9IjE4IiB5PSIyMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0id2hpdGUiPvCdkrg8L3RleHQ+PC9zdmc+',
+            iconSize: [36, 36],
+            iconAnchor: [18, 36],
+            popupAnchor: [0, -36]
+        });
+        
+        // Add city markers
+        function addCityMarkers() {
+            egyptCities.forEach(city => {
+                const marker = L.marker([city.lat, city.lng], { icon: cityIcon })
+                    .bindPopup(`
+                        <div class="popup-custom">
+                            <div class="popup-title">${city.name}</div>
+                            <div class="popup-content">
+                                <p>👥 السائقين: ${city.drivers}</p>
+                                <p>🚗 الرحلات: ${city.trips}</p>
+                                <p>👨‍👩‍👧‍👦 السكان: ${city.population}</p>
+                            </div>
+                        </div>
+                    `)
+                    .on('click', function() {
+                        showCityDetails(city);
+                    });
+                marker.addTo(map);
+                markers.push(marker);
+            });
+        }
+        
+        // Add trip routes
+        function addTrips() {
+            activeTrips.forEach(trip => {
+                const color = trip.status === 'active' ? '#28a745' : '#ff9800';
+                
+                // Add polyline
+                const polyline = L.polyline(
+                    [[trip.lat1, trip.lng1], [trip.lat2, trip.lng2]],
+                    { color: color, weight: 3, opacity: 0.7, dashArray: '5, 5' }
+                ).addTo(map);
+                polylines.push(polyline);
+                
+                // Add start marker
+                const startMarker = L.marker([trip.lat1, trip.lng1], { 
+                    icon: L.icon({
+                        iconUrl: `data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNiIgZmlsbD0iIzI4YTc0NSIvPjx0ZXh0IHg9IjE2IiB5PSIyMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0id2hpdGUiPkE8L3RleHQ+PC9zdmc+`,
+                        iconSize: [32, 32]
+                    })
+                })
+                .bindPopup(`<div class="popup-custom"><strong>${trip.from}</strong><br>من هنا: 📍</div>`)
+                .addTo(map);
+                tripMarkers.push(startMarker);
+                
+                // Add end marker
+                const endMarker = L.marker([trip.lat2, trip.lng2], { 
+                    icon: L.icon({
+                        iconUrl: `data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNiIgZmlsbD0iI2ZmOTgwMCIvPjx0ZXh0IHg9IjE2IiB5PSIyMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCIgZmlsbD0id2hpdGUiPkI8L3RleHQ+PC9zdmc+`,
+                        iconSize: [32, 32]
+                    })
+                })
+                .bindPopup(`<div class="popup-custom"><strong>${trip.to}</strong><br>إلى هنا: 🏁</div>`)
+                .addTo(map);
+                tripMarkers.push(endMarker);
+            });
+        }
+        
+        // Toggle trips visibility
+        function toggleTripsLayer() {
+            tripsVisible = !tripsVisible;
+            const btn = document.getElementById('tripsBtn');
+            
+            if (tripsVisible) {
+                addTrips();
+                btn.classList.add('active');
+                updateTripsCounter();
+            } else {
+                tripMarkers.forEach(m => map.removeLayer(m));
+                polylines.forEach(p => map.removeLayer(p));
+                tripMarkers = [];
+                polylines = [];
+                btn.classList.remove('active');
+            }
+        }
+        
+        // Update trips counter
+        function updateTripsCounter() {
+            document.getElementById('tripsCount').textContent = activeTrips.length;
+        }
+        
+        // Show all cities
+        function showAllCities() {
+            const bounds = L.latLngBounds(egyptCities.map(c => [c.lat, c.lng]));
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
+        
+        // Zoom to Egypt
+        function zoomToEgypt() {
+            map.setView([26.8206, 30.8025], 6);
+        }
+        
+        // Search city
+        function searchCity() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const city = egyptCities.find(c => c.name.includes(searchTerm));
+            
+            if (city) {
+                map.setView([city.lat, city.lng], 12);
+                showCityDetails(city);
+            } else {
+                alert('لم يتم العثور على المدينة');
+            }
+        }
+        
+        // Show city details
+        function showCityDetails(city) {
+            const panel = document.getElementById('infoPanel');
+            const content = document.getElementById('panelContent');
+            
+            content.innerHTML = `
+                <div class="city-item">
+                    <div class="city-name">${city.name}</div>
+                    <div class="city-info">
+                        <p><strong>👥 السائقين المسجلين:</strong> ${city.drivers}</p>
+                        <p><strong>🚗 إجمالي الرحلات:</strong> ${city.trips}</p>
+                        <p><strong>👨‍👩‍👧‍👦 عدد السكان:</strong> ${city.population}</p>
+                        <p><strong>⭐ متوسط التقييم:</strong> 4.7/5</p>
+                        <p><strong>💰 متوسط الرحلة:</strong> 45 ر.س</p>
+                    </div>
+                </div>
+            `;
+            
+            panel.classList.add('active');
+        }
+        
+        // Close info panel
+        function closeInfoPanel() {
+            document.getElementById('infoPanel').classList.remove('active');
+        }
+        
+        // Go back
+        function goBack() {
+            window.location.href = 'menu.html';
+        }
+        
+        // Initialize
+        function init() {
+            addCityMarkers();
+            showAllCities();
+            updateTripsCounter();
+        }
+        
+        window.addEventListener('DOMContentLoaded', init);
+        
+        // Search on Enter
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('searchInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') searchCity();
+            });
+        });
+    </script>
+</body>
+</html>
