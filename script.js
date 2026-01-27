@@ -1825,10 +1825,13 @@ window.toggleFieldVisibility = function(inputId, buttonEl) {
         input.dataset.originalType = currentType;
     }
 
-    const isHidden = currentType === 'password';
     const originalType = input.dataset.originalType || 'text';
-    const nextType = isHidden ? originalType : 'password';
+    const showType = originalType === 'password' ? 'text' : originalType;
+    const hideType = 'password';
+    const isVisible = input.dataset.visible === 'true';
+    const nextType = isVisible ? hideType : showType;
     input.setAttribute('type', nextType);
+    input.dataset.visible = String(!isVisible);
 
     if (buttonEl) {
         const icon = buttonEl.querySelector('i');
@@ -1836,8 +1839,9 @@ window.toggleFieldVisibility = function(inputId, buttonEl) {
             icon.classList.toggle('fa-eye', !isHidden);
             icon.classList.toggle('fa-eye-slash', isHidden);
         }
-        buttonEl.setAttribute('aria-label', isHidden ? 'إخفاء' : 'إظهار');
-        buttonEl.setAttribute('title', isHidden ? 'إخفاء' : 'إظهار');
+        const nowVisible = !isVisible;
+        buttonEl.setAttribute('aria-label', nowVisible ? 'إخفاء' : 'إظهار');
+        buttonEl.setAttribute('title', nowVisible ? 'إخفاء' : 'إظهار');
     }
 };
 
