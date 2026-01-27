@@ -1816,6 +1816,31 @@ function showToast(message, duration = 3000) {
     }
 }
 
+window.toggleFieldVisibility = function(inputId, buttonEl) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    const currentType = input.getAttribute('type') || 'text';
+    if (!input.dataset.originalType) {
+        input.dataset.originalType = currentType;
+    }
+
+    const isHidden = currentType === 'password';
+    const originalType = input.dataset.originalType || 'text';
+    const nextType = isHidden ? originalType : 'password';
+    input.setAttribute('type', nextType);
+
+    if (buttonEl) {
+        const icon = buttonEl.querySelector('i');
+        if (icon) {
+            icon.classList.toggle('fa-eye', !isHidden);
+            icon.classList.toggle('fa-eye-slash', isHidden);
+        }
+        buttonEl.setAttribute('aria-label', isHidden ? 'إخفاء' : 'إظهار');
+        buttonEl.setAttribute('title', isHidden ? 'إخفاء' : 'إظهار');
+    }
+};
+
 function updateUIWithUserData() {
     const user = DB.getUser();
     if (!user) return;
