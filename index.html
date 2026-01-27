@@ -679,7 +679,7 @@
                 <i class="fas fa-history w-8 text-center ml-2 text-gray-400 group-hover:text-indigo-600 transition-colors"></i>
                 <span class="font-bold group-hover:translate-x-[-5px] transition-transform">رحلاتي</span>
             </a>
-            <a href="#" class="flex items-center px-8 py-3.5 text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-r-[5px] border-transparent hover:border-indigo-600 transition-all group">
+            <a href="#" onclick="switchSection('offers')" class="flex items-center px-8 py-3.5 text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-r-[5px] border-transparent hover:border-indigo-600 transition-all group">
                 <i class="fas fa-gift w-8 text-center ml-2 text-gray-400 group-hover:text-indigo-600 transition-colors"></i>
                 <span class="font-bold group-hover:translate-x-[-5px] transition-transform">العروض</span>
                 <span class="mr-auto w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
@@ -1346,6 +1346,29 @@
                     </div>
                     <h3 class="text-xl font-bold text-gray-800 mb-2">لا توجد رحلات</h3>
                     <p class="text-gray-500 text-sm">ابدأ رحلتك الأولى الآن!</p>
+                </div>
+            </div>
+
+            <!-- State 9.5: Offers -->
+            <div id="state-offers" class="hidden px-6 pb-8 max-h-[80vh] overflow-y-auto no-scrollbar">
+                <div class="flex items-center justify-between mb-6">
+                    <button onclick="window.switchSection('profile')" class="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600">
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                    <h2 class="text-2xl font-extrabold text-gray-800">العروض</h2>
+                    <div class="w-10"></div>
+                </div>
+
+                <div id="offers-container" class="space-y-4">
+                    <!-- Offers will be injected here -->
+                </div>
+
+                <div id="empty-offers-state" class="hidden text-center py-12">
+                    <div class="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i class="fas fa-gift text-3xl text-gray-400"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-2">لا توجد عروض حالياً</h3>
+                    <p class="text-gray-500 text-sm">تابعنا قريباً لعروض جديدة.</p>
                 </div>
             </div>
 

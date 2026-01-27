@@ -636,56 +636,31 @@ const DB = {
     keySession: 'akwadra_session_active',
 
     init() {
-        // Seed User Data if not exists
-        if (!SafeStorage.getItem(this.keyUser)) {
-            const defaultUser = {
-                name: "عبد الله أحمد",
-                balance: 150,
-                points: 450,
-                rating: 4.85,
-                status: "عضو ذهبي",
-                avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Abdullah"
-            };
-            SafeStorage.setItem(this.keyUser, JSON.stringify(defaultUser));
-        }
-
-        // Seed Trip History if not exists
-        if (!SafeStorage.getItem(this.keyTrips)) {
-            const defaultTrips = [
-                {
-                    id: 'TR-8854',
-                    date: new Date(Date.now() - 86400000).toISOString(),
-                    pickup: "العمل",
-                    dropoff: "المنزل",
-                    cost: 25,
-                    status: "completed",
-                    car: "economy",
-                    driver: "أحمد محمد",
-                    passenger: "عبد الله أحمد",
-                    paymentMethod: "wallet",
-                    rating: 5
-                },
-                {
-                    id: 'TR-1290',
-                    date: new Date(Date.now() - 172800000).toISOString(),
-                    pickup: "المطار",
-                    dropoff: "فندق النرجس",
-                    cost: 80,
-                    status: "completed",
-                    car: "luxury",
-                    driver: "سالم العلي",
-                    passenger: "سارة خالد",
-                    paymentMethod: "card",
-                    rating: 4
-                }
-            ];
-            SafeStorage.setItem(this.keyTrips, JSON.stringify(defaultTrips));
-        }
+        // No local seeding; rely on API data
     },
 
     getUser() {
         const data = SafeStorage.getItem(this.keyUser);
         return data ? JSON.parse(data) : null;
+    },
+
+    setUser(userData) {
+        if (!userData) return null;
+        const normalized = {
+            id: userData.id,
+            name: userData.name || 'مستخدم',
+            email: userData.email,
+            phone: userData.phone,
+            role: userData.role || 'passenger',
+            balance: userData.balance ?? 0,
+            points: userData.points ?? 0,
+            rating: userData.rating ?? 5,
+            status: userData.status || 'عضو جديد',
+            avatar: userData.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userData.name || 'User')}`
+        };
+        SafeStorage.setItem(this.keyUser, JSON.stringify(normalized));
+        updateUIWithUserData();
+        return normalized;
     },
 
     updateUser(updates) {
@@ -700,6 +675,51 @@ const DB = {
     getTrips() {
         const data = SafeStorage.getItem(this.keyTrips);
         return data ? JSON.parse(data) : [];
+    },
+
+    setTrips(trips) {
+        SafeStorage.setItem(this.keyTrips, JSON.stringify(trips || []));
+    },
+
+    normalizeTrip(apiTrip, passengerName) {
+        return {
+            id: apiTrip.id,
+            date: apiTrip.completed_at || apiTrip.cancelled_at || apiTrip.created_at,
+            pickup: apiTrip.pickup_location,
+            dropoff: apiTrip.dropoff_location,
+            cost: Number(apiTrip.cost || 0),
+            status: apiTrip.status,
+            car: apiTrip.car_type || 'economy',
+            driver: apiTrip.driver_name || 'غير محدد',
+            passenger: passengerName || 'غير محدد',
+            paymentMethod: apiTrip.payment_method || 'cash',
+            rating: apiTrip.rating || 0
+        };
+    },
+
+    async fetchTrips({ userId, role } = {}) {
+        try {
+            const params = new URLSearchParams();
+            params.set('limit', '200');
+            if (role === 'passenger' && userId) {
+                params.set('user_id', String(userId));
+            }
+
+            const response = await fetch(`/api/trips?${params.toString()}`);
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || 'Failed to fetch trips');
+            }
+
+            const user = this.getUser();
+            const passengerName = user?.name;
+            const mapped = result.data.map(trip => this.normalizeTrip(trip, passengerName));
+            this.setTrips(mapped);
+            return mapped;
+        } catch (error) {
+            console.error('Failed to fetch trips:', error);
+            return this.getTrips();
+        }
     },
 
     addTrip(trip) {
@@ -872,8 +892,9 @@ window.submitRoleLogin = async function() {
         // Reset attempts on successful login
         loginAttempts = 0;
         
-        // Save user data to DB
+        // Save user data
         DB.currentUser = userData;
+        DB.setUser(userData);
         DB.saveSession();
         
         showToast(`✅ مرحباً ${userData.name}`);
@@ -1043,8 +1064,9 @@ window.loginWithEmail = async function() {
         // Reset attempts on successful login
         loginAttempts = 0;
         
-        // Save user data to DB
+        // Save user data
         DB.currentUser = userData;
+        DB.setUser(userData);
         
         showToast(`✅ مرحباً ${userData.name}`);
         loginSuccess();
@@ -1143,7 +1165,10 @@ window.switchSection = function(name) {
         inRide: document.getElementById('state-in-ride'),
         rating: document.getElementById('state-rating'),
         profile: document.getElementById('state-profile'),
-        chat: document.getElementById('state-chat')
+        chat: document.getElementById('state-chat'),
+        'trip-history': document.getElementById('state-trip-history'),
+        'trip-details': document.getElementById('state-trip-details'),
+        offers: document.getElementById('state-offers')
     };
 
     const currentVisible = Object.keys(sections).find(key => sections[key] && !sections[key].classList.contains('hidden'));
@@ -1428,11 +1453,20 @@ function scheduleMockRequest() {
     }, 1000);
 }
 
-function renderAdminTrips() {
+async function renderAdminTrips() {
     const table = document.getElementById('admin-trips-table');
     if (!table) return;
+    table.innerHTML = '<tr><td class="px-6 py-6 text-gray-500" colspan="5">جاري تحميل الرحلات...</td></tr>';
+
+    const user = DB.getUser();
+    await DB.fetchTrips({ role: user?.role || 'admin' });
     const trips = DB.getTrips();
+
     table.innerHTML = '';
+    if (!trips.length) {
+        table.innerHTML = '<tr><td class="px-6 py-6 text-gray-500" colspan="5">لا توجد رحلات</td></tr>';
+        return;
+    }
     
     trips.forEach(trip => {
         const html = `
@@ -1450,13 +1484,22 @@ function renderAdminTrips() {
 }
 
 // Render trip history (for profile and full history pages)
-function renderTripHistory(containerId = 'trip-history-container', limit = 3) {
+async function renderTripHistory(containerId = 'trip-history-container', limit = 3) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    
+
+    container.innerHTML = '<p class="text-gray-500 text-center py-8">جاري تحميل الرحلات...</p>';
+
+    const user = DB.getUser();
+    if (!user) {
+        container.innerHTML = '<p class="text-gray-500 text-center py-8">يرجى تسجيل الدخول لعرض الرحلات</p>';
+        return;
+    }
+
+    await DB.fetchTrips({ userId: user.id, role: user.role });
     const trips = DB.getTrips();
     const displayTrips = limit ? trips.slice(0, limit) : trips;
-    
+
     container.innerHTML = '';
     
     if (displayTrips.length === 0) {
@@ -1523,19 +1566,35 @@ function renderTripHistory(containerId = 'trip-history-container', limit = 3) {
 }
 
 // Show all trips with statistics
-window.renderAllTrips = function() {
-    const trips = DB.getTrips();
+window.renderAllTrips = async function() {
     const container = document.getElementById('all-trips-container');
     const emptyState = document.getElementById('empty-trips-state');
-    
-    if (trips.length === 0) {
-        container.classList.add('hidden');
-        emptyState.classList.remove('hidden');
+
+    if (container) {
+        container.classList.remove('hidden');
+        container.innerHTML = '<p class="text-gray-500 text-center py-8">جاري تحميل الرحلات...</p>';
+    }
+    if (emptyState) emptyState.classList.add('hidden');
+
+    const user = DB.getUser();
+    if (!user) {
+        if (container) {
+            container.innerHTML = '<p class="text-gray-500 text-center py-8">يرجى تسجيل الدخول لعرض الرحلات</p>';
+        }
         return;
     }
-    
-    container.classList.remove('hidden');
-    emptyState.classList.add('hidden');
+
+    await DB.fetchTrips({ userId: user.id, role: user.role });
+    const trips = DB.getTrips();
+
+    if (!trips.length) {
+        if (container) container.classList.add('hidden');
+        if (emptyState) emptyState.classList.remove('hidden');
+        return;
+    }
+
+    if (container) container.classList.remove('hidden');
+    if (emptyState) emptyState.classList.add('hidden');
     
     // Update statistics
     const totalTrips = trips.length;
@@ -1547,7 +1606,35 @@ window.renderAllTrips = function() {
     document.getElementById('avg-rating').innerText = avgRating.toFixed(1);
     
     // Render trips
-    renderTripHistory('all-trips-container', null);
+    await renderTripHistory('all-trips-container', null);
+};
+
+// Render offers
+window.renderOffers = function() {
+    const container = document.getElementById('offers-container');
+    const emptyState = document.getElementById('empty-offers-state');
+    if (!container || !emptyState) return;
+
+    const offers = [];
+
+    container.innerHTML = '';
+    if (!offers.length) {
+        emptyState.classList.remove('hidden');
+        return;
+    }
+
+    emptyState.classList.add('hidden');
+    offers.forEach(offer => {
+        const html = `
+        <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="font-bold text-gray-800">${offer.title}</h3>
+                <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold">${offer.badge}</span>
+            </div>
+            <p class="text-sm text-gray-600">${offer.description}</p>
+        </div>`;
+        container.insertAdjacentHTML('beforeend', html);
+    });
 };
 
 // Filter trips
@@ -2795,9 +2882,12 @@ const originalSwitchSection = window.switchSection;
 window.switchSection = function(section) {
     originalSwitchSection(section);
     
-    if (section === 'profile' && currentUser && currentUser.role === 'passenger') {
+    const user = DB.getUser();
+    if (section === 'profile' && user && user.role === 'passenger') {
         renderTripHistory('trip-history-container', 3);
     } else if (section === 'trip-history') {
         renderAllTrips();
+    } else if (section === 'offers') {
+        renderOffers();
     }
 };
