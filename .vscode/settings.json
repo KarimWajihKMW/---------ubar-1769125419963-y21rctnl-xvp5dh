@@ -12,31 +12,6 @@
         "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node -c script\\.js 2>&1 \\|\\| echo \"Syntax check done\"$/": {
             "approve": true,
             "matchCommandLine": true
-        },
-        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && python3 -m http\\.server 8080$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "npm install": true,
-        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node setup-db\\.js$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && cat > check-db\\.js << 'EOF'\nconst pool = require\\('\\./db'\\);\n\nasync function checkTables\\(\\) \\{\n    try \\{\n        // Check users table structure\n        const usersCheck = await pool\\.query\\(`\n            SELECT column_name, data_type \n            FROM information_schema\\.columns \n            WHERE table_name = 'users';\n        `\\);\n        console\\.log\\('Users table columns:', usersCheck\\.rows\\);\n        \n        // Check trips table structure\n        const tripsCheck = await pool\\.query\\(`\n            SELECT column_name, data_type \n            FROM information_schema\\.columns \n            WHERE table_name = 'trips';\n        `\\);\n        console\\.log\\('\\\\nTrips table columns:', tripsCheck\\.rows\\);\n        \n        // Check if tables exist\n        const tables = await pool\\.query\\(`\n            SELECT table_name \n            FROM information_schema\\.tables \n            WHERE table_schema = 'public';\n        `\\);\n        console\\.log\\('\\\\nExisting tables:', tables\\.rows\\.map\\(r => r\\.table_name\\)\\);\n        \n    \\} catch \\(err\\) \\{\n        console\\.error\\('Error:', err\\);\n    \\} finally \\{\n        process\\.exit\\(0\\);\n    \\}\n\\}\n\ncheckTables\\(\\);\nEOF\nnode check-db\\.js$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node setup-db\\.js 2>&1$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node server\\.js$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && sleep 2 && node test-api\\.js$/": {
-            "approve": true,
-            "matchCommandLine": true
         }
     }
 }
