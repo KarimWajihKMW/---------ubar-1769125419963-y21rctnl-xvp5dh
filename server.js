@@ -1,15 +1,52 @@
 const express = require('express');
 const cors = require('cors');
 const pool = require('./db');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = /jpeg|jpg|png|pdf/;
+        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        const mimetype = allowedTypes.test(file.mimetype);
+        
+        if (mimetype && extname) {
+            return cb(null, true);
+        } else {
+            cb(new Error('Only .png, .jpg, .jpeg and .pdf files are allowed!'));
+        }
+    }
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
+app.use('/uploads', express.static(uploadsDir));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -316,6 +353,193 @@ app.get('/api/drivers', async (req, res) => {
         });
     } catch (err) {
         console.error('Error fetching drivers:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Register new driver
+app.post('/api/drivers/register', upload.fields([
+    { name: 'id_card_photo', maxCount: 1 },
+    { name: 'drivers_license', maxCount: 1 },
+    { name: 'vehicle_license', maxCount: 1 }
+]), async (req, res) => {
+    try {
+        const { name, phone, email, password, car_type, car_plate } = req.body;
+        
+        // Validate required fields
+        if (!name || !phone || !email || !password) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Name, phone, email, and password are required' 
+            });
+        }
+        
+        // Validate required documents
+        if (!req.files || !req.files.id_card_photo || !req.files.drivers_license || !req.files.vehicle_license) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'All three documents (ID card, driver\'s license, vehicle license) are required' 
+            });
+        }
+        
+        // Check if driver already exists
+        const existingDriver = await pool.query(
+            'SELECT * FROM drivers WHERE phone = $1 OR email = $2',
+            [phone, email]
+        );
+        
+        if (existingDriver.rows.length > 0) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Driver with this phone or email already exists' 
+            });
+        }
+        
+        // Get file paths
+        const id_card_photo = `/uploads/${req.files.id_card_photo[0].filename}`;
+        const drivers_license = `/uploads/${req.files.drivers_license[0].filename}`;
+        const vehicle_license = `/uploads/${req.files.vehicle_license[0].filename}`;
+        
+        // Insert new driver
+        const result = await pool.query(`
+            INSERT INTO drivers (
+                name, phone, email, password, car_type, car_plate,
+                id_card_photo, drivers_license, vehicle_license,
+                approval_status, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'offline')
+            RETURNING id, name, phone, email, car_type, car_plate, 
+                      id_card_photo, drivers_license, vehicle_license,
+                      approval_status, created_at
+        `, [name, phone, email, password, car_type || 'economy', car_plate || '',
+            id_card_photo, drivers_license, vehicle_license]);
+        
+        res.status(201).json({
+            success: true,
+            message: 'Driver registration submitted. Waiting for admin approval.',
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error registering driver:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get driver registration status
+app.get('/api/drivers/status/:phone', async (req, res) => {
+    try {
+        const { phone } = req.params;
+        
+        const result = await pool.query(
+            `SELECT id, name, phone, email, car_type, car_plate, 
+                    approval_status, rejection_reason, created_at, approved_at
+             FROM drivers WHERE phone = $1`,
+            [phone]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Driver not found' 
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error fetching driver status:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get pending driver registrations (admin only)
+app.get('/api/drivers/pending', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT id, name, phone, email, car_type, car_plate,
+                    id_card_photo, drivers_license, vehicle_license,
+                    approval_status, created_at
+             FROM drivers 
+             WHERE approval_status = 'pending'
+             ORDER BY created_at DESC`
+        );
+        
+        res.json({
+            success: true,
+            data: result.rows
+        });
+    } catch (err) {
+        console.error('Error fetching pending drivers:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Approve or reject driver registration (admin only)
+app.patch('/api/drivers/:id/approval', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { approval_status, rejection_reason, approved_by } = req.body;
+        
+        if (!['approved', 'rejected'].includes(approval_status)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Invalid approval status. Must be "approved" or "rejected"' 
+            });
+        }
+        
+        let query = `
+            UPDATE drivers 
+            SET approval_status = $1, 
+                updated_at = CURRENT_TIMESTAMP
+        `;
+        const params = [approval_status];
+        let paramCount = 1;
+        
+        if (approval_status === 'approved') {
+            query += `, approved_at = CURRENT_TIMESTAMP, status = 'offline'`;
+            if (approved_by) {
+                paramCount++;
+                query += `, approved_by = $${paramCount}`;
+                params.push(approved_by);
+            }
+        } else if (approval_status === 'rejected' && rejection_reason) {
+            paramCount++;
+            query += `, rejection_reason = $${paramCount}`;
+            params.push(rejection_reason);
+        }
+        
+        paramCount++;
+        query += ` WHERE id = $${paramCount} RETURNING *`;
+        params.push(parseInt(id));
+        
+        const result = await pool.query(query, params);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Driver not found' 
+            });
+        }
+        
+        // Also create/update user account if approved
+        if (approval_status === 'approved') {
+            const driver = result.rows[0];
+            await pool.query(`
+                INSERT INTO users (phone, name, email, password, role)
+                VALUES ($1, $2, $3, $4, 'driver')
+                ON CONFLICT (phone) DO UPDATE 
+                SET role = 'driver', email = $3, name = $2
+            `, [driver.phone, driver.name, driver.email, driver.password]);
+        }
+        
+        res.json({
+            success: true,
+            message: `Driver ${approval_status === 'approved' ? 'approved' : 'rejected'} successfully`,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error updating driver approval:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });

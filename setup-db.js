@@ -33,8 +33,17 @@ async function setupDatabase() {
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(100) NOT NULL,
                 phone VARCHAR(20) UNIQUE NOT NULL,
+                email VARCHAR(100) UNIQUE,
+                password VARCHAR(255),
                 car_type VARCHAR(50) DEFAULT 'economy',
                 car_plate VARCHAR(20),
+                id_card_photo TEXT,
+                drivers_license TEXT,
+                vehicle_license TEXT,
+                approval_status VARCHAR(20) DEFAULT 'pending',
+                approved_by INTEGER,
+                approved_at TIMESTAMP,
+                rejection_reason TEXT,
                 rating DECIMAL(3, 2) DEFAULT 5.00,
                 total_trips INTEGER DEFAULT 0,
                 status VARCHAR(20) DEFAULT 'offline',
@@ -85,16 +94,16 @@ async function setupDatabase() {
         
         // Insert sample drivers with realistic data
         await client.query(`
-            INSERT INTO drivers (name, phone, car_type, car_plate, rating, total_trips, status)
+            INSERT INTO drivers (name, phone, email, password, car_type, car_plate, rating, total_trips, status, approval_status, approved_at)
             VALUES 
-                ('أحمد عبدالله المالكي', '0501234567', 'economy', 'أ ب ج 1234', 4.85, 342, 'online'),
-                ('محمد علي الشهري', '0507654321', 'family', 'س ع د 5678', 4.92, 587, 'online'),
-                ('خالد أحمد القحطاني', '0509876543', 'luxury', 'ت ك م 9012', 4.78, 215, 'offline'),
-                ('عمر يوسف الدوسري', '0502345678', 'economy', 'ن ه و 3456', 4.65, 158, 'online'),
-                ('سعيد حسن العتيبي', '0508765432', 'family', 'ل م ر 7890', 4.88, 423, 'online'),
-                ('فهد سعد الزهراني', '0503456789', 'luxury', 'ط ي ك 2345', 4.95, 672, 'offline'),
-                ('ناصر عبدالرحمن الغامدي', '0506789012', 'economy', 'ف ص ق 6789', 4.72, 289, 'online'),
-                ('ياسر محمود السبيعي', '0509012345', 'family', 'ش ض ظ 0123', 4.81, 394, 'offline')
+                ('أحمد عبدالله المالكي', '0501234567', 'driver1@ubar.sa', '12345678', 'economy', 'أ ب ج 1234', 4.85, 342, 'online', 'approved', CURRENT_TIMESTAMP - INTERVAL '30 days'),
+                ('محمد علي الشهري', '0507654321', 'driver2@ubar.sa', '12345678', 'family', 'س ع د 5678', 4.92, 587, 'online', 'approved', CURRENT_TIMESTAMP - INTERVAL '60 days'),
+                ('خالد أحمد القحطاني', '0509876543', 'driver3@ubar.sa', '12345678', 'luxury', 'ت ك م 9012', 4.78, 215, 'offline', 'approved', CURRENT_TIMESTAMP - INTERVAL '90 days'),
+                ('عمر يوسف الدوسري', '0502345678', 'driver4@ubar.sa', '12345678', 'economy', 'ن ه و 3456', 4.65, 158, 'online', 'approved', CURRENT_TIMESTAMP - INTERVAL '45 days'),
+                ('سعيد حسن العتيبي', '0508765432', 'driver5@ubar.sa', '12345678', 'family', 'ل م ر 7890', 4.88, 423, 'online', 'approved', CURRENT_TIMESTAMP - INTERVAL '75 days'),
+                ('فهد سعد الزهراني', '0503456789', 'driver6@ubar.sa', '12345678', 'luxury', 'ط ي ك 2345', 4.95, 672, 'offline', 'approved', CURRENT_TIMESTAMP - INTERVAL '120 days'),
+                ('ناصر عبدالرحمن الغامدي', '0506789012', 'driver7@ubar.sa', '12345678', 'economy', 'ف ص ق 6789', 4.72, 289, 'online', 'approved', CURRENT_TIMESTAMP - INTERVAL '20 days'),
+                ('ياسر محمود السبيعي', '0509012345', 'driver8@ubar.sa', '12345678', 'family', 'ش ض ظ 0123', 4.81, 394, 'offline', 'approved', CURRENT_TIMESTAMP - INTERVAL '50 days')
             ON CONFLICT (phone) DO NOTHING;
         `);
         console.log('✅ Sample drivers inserted');

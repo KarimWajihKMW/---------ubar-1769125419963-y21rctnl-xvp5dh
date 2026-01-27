@@ -37,6 +37,23 @@
             "approve": true,
             "matchCommandLine": true
         },
-        "pkill": true
+        "pkill": true,
+        "npm install": true,
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node server\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node test-driver-registration\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^pkill -f \"node server\\.js\" && sleep 1 && cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node server\\.js &$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^sleep 2 && cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node test-driver-registration\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }
