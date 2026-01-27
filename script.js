@@ -1827,7 +1827,7 @@ window.toggleFieldVisibility = function(inputId, buttonEl) {
 
     const isHidden = currentType === 'password';
     const originalType = input.dataset.originalType || 'text';
-    const nextType = isHidden ? 'text' : originalType;
+    const nextType = isHidden ? originalType : 'password';
     input.setAttribute('type', nextType);
 
     if (buttonEl) {
