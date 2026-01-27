@@ -12,6 +12,31 @@
         "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node -c script\\.js 2>&1 \\|\\| echo \"Syntax check done\"$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node setup-db\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node -e \"\nconst pool = require\\('\\./db'\\);\n\\(async \\(\\) => \\{\n  try \\{\n    const users = await pool\\.query\\('SELECT id, phone, name, email, role FROM users ORDER BY id'\\);\n    console\\.log\\('📱 المستخدمين:'\\);\n    console\\.table\\(users\\.rows\\);\n    \n    const drivers = await pool\\.query\\('SELECT id, name, phone, car_type, status, rating, total_trips FROM drivers ORDER BY id LIMIT 5'\\);\n    console\\.log\\('\\\\n🚗 السائقين:'\\);\n    console\\.table\\(drivers\\.rows\\);\n    \n    const trips = await pool\\.query\\('SELECT id, user_id, driver_id, status, cost, pickup_location FROM trips ORDER BY created_at DESC LIMIT 5'\\);\n    console\\.log\\('\\\\n🚕 الرحلات:'\\);\n    console\\.table\\(trips\\.rows\\);\n    \n    await pool\\.end\\(\\);\n  \\} catch \\(err\\) \\{\n    console\\.error\\('Error:', err\\);\n  \\}\n\\}\\)\\(\\);\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node check-db\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node -e \"const pool = require\\('\\./db'\\); pool\\.query\\('SELECT id, name, email, role FROM users ORDER BY id'\\)\\.then\\(r => console\\.log\\('Users:', JSON\\.stringify\\(r\\.rows, null, 2\\)\\)\\)\\.then\\(\\(\\) => process\\.exit\\(0\\)\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node -e \"const pool = require\\('\\./db'\\); pool\\.query\\('SELECT id, pickup_location, dropoff_location, cost, status FROM trips LIMIT 5'\\)\\.then\\(r => console\\.log\\('Trips:', JSON\\.stringify\\(r\\.rows, null, 2\\)\\)\\)\\.then\\(\\(\\) => process\\.exit\\(0\\)\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node server\\.js &$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "pkill": true
     }
 }

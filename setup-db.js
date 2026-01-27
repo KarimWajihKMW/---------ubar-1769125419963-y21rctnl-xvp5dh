@@ -18,7 +18,8 @@ async function setupDatabase() {
                 id SERIAL PRIMARY KEY,
                 phone VARCHAR(20) UNIQUE NOT NULL,
                 name VARCHAR(100),
-                email VARCHAR(100),
+                email VARCHAR(100) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
                 role VARCHAR(20) DEFAULT 'passenger',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -82,120 +83,267 @@ async function setupDatabase() {
             console.log('⚠️ Some indexes may already exist');
         }
         
-        // Insert sample drivers
+        // Insert sample drivers with realistic data
         await client.query(`
             INSERT INTO drivers (name, phone, car_type, car_plate, rating, total_trips, status)
             VALUES 
-                ('أحمد محمد', '0501234567', 'economy', 'ABC 1234', 4.8, 150, 'online'),
-                ('محمد علي', '0507654321', 'family', 'XYZ 5678', 4.9, 200, 'online'),
-                ('خالد أحمد', '0509876543', 'luxury', 'LMN 9012', 4.7, 100, 'offline'),
-                ('عمر يوسف', '0502345678', 'economy', 'PQR 3456', 4.6, 80, 'online')
+                ('أحمد عبدالله المالكي', '0501234567', 'economy', 'أ ب ج 1234', 4.85, 342, 'online'),
+                ('محمد علي الشهري', '0507654321', 'family', 'س ع د 5678', 4.92, 587, 'online'),
+                ('خالد أحمد القحطاني', '0509876543', 'luxury', 'ت ك م 9012', 4.78, 215, 'offline'),
+                ('عمر يوسف الدوسري', '0502345678', 'economy', 'ن ه و 3456', 4.65, 158, 'online'),
+                ('سعيد حسن العتيبي', '0508765432', 'family', 'ل م ر 7890', 4.88, 423, 'online'),
+                ('فهد سعد الزهراني', '0503456789', 'luxury', 'ط ي ك 2345', 4.95, 672, 'offline'),
+                ('ناصر عبدالرحمن الغامدي', '0506789012', 'economy', 'ف ص ق 6789', 4.72, 289, 'online'),
+                ('ياسر محمود السبيعي', '0509012345', 'family', 'ش ض ظ 0123', 4.81, 394, 'offline')
             ON CONFLICT (phone) DO NOTHING;
         `);
         console.log('✅ Sample drivers inserted');
         
-        // Insert sample user
+        // Insert different user types: passenger, driver, admin
         await client.query(`
-            INSERT INTO users (phone, name, email, role)
-            VALUES ('0500000000', 'مستخدم تجريبي', 'test@example.com', 'passenger')
+            INSERT INTO users (phone, name, email, password, role)
+            VALUES 
+                ('0551234567', 'عبدالعزيز أحمد', 'passenger1@ubar.sa', '12345678', 'passenger'),
+                ('0552345678', 'نورة محمد', 'passenger2@ubar.sa', '12345678', 'passenger'),
+                ('0553456789', 'فاطمة سعيد', 'passenger3@ubar.sa', '12345678', 'passenger'),
+                ('0554567890', 'سارة عبدالله', 'passenger4@ubar.sa', '12345678', 'passenger'),
+                ('0501234567', 'أحمد عبدالله المالكي', 'driver1@ubar.sa', '12345678', 'driver'),
+                ('0507654321', 'محمد علي الشهري', 'driver2@ubar.sa', '12345678', 'driver'),
+                ('0509876543', 'خالد أحمد القحطاني', 'driver3@ubar.sa', '12345678', 'driver'),
+                ('0555678901', 'عبدالرحمن إبراهيم', 'admin@ubar.sa', '12345678', 'admin'),
+                ('0556789012', 'هند خالد', 'admin2@ubar.sa', '12345678', 'admin')
             ON CONFLICT (phone) DO NOTHING;
         `);
-        console.log('✅ Sample user inserted');
+        console.log('✅ Sample users inserted');
         
-        // Insert sample trips (completed and cancelled)
+        // Insert realistic trip data
         const sampleTrips = [
+            // Completed trips
             {
-                id: 'TR-' + Date.now() + '-1',
+                id: 'TR-' + (Date.now() - 86400000) + '-1',
                 user_id: 1,
                 driver_id: 1,
                 pickup_location: 'شارع الملك فهد، الرياض',
                 dropoff_location: 'حي العليا، الرياض',
+                pickup_lat: 24.7136,
+                pickup_lng: 46.6753,
+                dropoff_lat: 24.7110,
+                dropoff_lng: 46.6760,
                 car_type: 'economy',
-                cost: 35.00,
+                cost: 35.50,
                 distance: 8.5,
                 duration: 15,
                 payment_method: 'cash',
                 status: 'completed',
                 rating: 5,
-                driver_name: 'أحمد محمد',
-                completed_at: new Date(Date.now() - 86400000) // 1 day ago
+                review: 'سائق ممتاز، سيارة نظيفة',
+                driver_name: 'أحمد عبدالله المالكي',
+                completed_at: new Date(Date.now() - 86400000)
             },
             {
-                id: 'TR-' + Date.now() + '-2',
-                user_id: 1,
+                id: 'TR-' + (Date.now() - 172800000) + '-2',
+                user_id: 2,
                 driver_id: 2,
-                pickup_location: 'مطار الملك خالد',
+                pickup_location: 'مطار الملك خالد الدولي',
                 dropoff_location: 'برج المملكة',
+                pickup_lat: 24.9577,
+                pickup_lng: 46.6988,
+                dropoff_lat: 24.7119,
+                dropoff_lng: 46.6750,
                 car_type: 'family',
-                cost: 85.00,
-                distance: 35.0,
-                duration: 30,
+                cost: 95.00,
+                distance: 35.2,
+                duration: 32,
                 payment_method: 'card',
                 status: 'completed',
-                rating: 4,
-                driver_name: 'محمد علي',
-                completed_at: new Date(Date.now() - 172800000) // 2 days ago
+                rating: 5,
+                review: 'رحلة رائعة ومريحة',
+                driver_name: 'محمد علي الشهري',
+                completed_at: new Date(Date.now() - 172800000)
             },
             {
-                id: 'TR-' + Date.now() + '-3',
+                id: 'TR-' + (Date.now() - 259200000) + '-3',
                 user_id: 1,
                 driver_id: 3,
                 pickup_location: 'حي النخيل',
                 dropoff_location: 'الرياض بارك',
+                pickup_lat: 24.7243,
+                pickup_lng: 46.6511,
+                dropoff_lat: 24.8142,
+                dropoff_lng: 46.6374,
                 car_type: 'luxury',
                 cost: 125.00,
                 distance: 22.0,
                 duration: 25,
                 payment_method: 'wallet',
-                status: 'cancelled',
-                driver_name: 'خالد أحمد',
-                cancelled_at: new Date(Date.now() - 259200000) // 3 days ago
+                status: 'completed',
+                rating: 4,
+                review: 'جيد جداً',
+                driver_name: 'خالد أحمد القحطاني',
+                completed_at: new Date(Date.now() - 259200000)
             },
             {
-                id: 'TR-' + Date.now() + '-4',
-                user_id: 1,
+                id: 'TR-' + (Date.now() - 345600000) + '-4',
+                user_id: 3,
                 driver_id: 4,
                 pickup_location: 'الرياض غاليري',
                 dropoff_location: 'النخيل مول',
+                pickup_lat: 24.7744,
+                pickup_lng: 46.7385,
+                dropoff_lat: 24.7853,
+                dropoff_lng: 46.6018,
                 car_type: 'economy',
-                cost: 28.00,
-                distance: 6.5,
-                duration: 12,
+                cost: 32.00,
+                distance: 12.8,
+                duration: 18,
                 payment_method: 'cash',
                 status: 'completed',
                 rating: 5,
-                driver_name: 'عمر يوسف',
-                completed_at: new Date(Date.now() - 345600000) // 4 days ago
+                review: 'وقت ممتاز وسريع',
+                driver_name: 'عمر يوسف الدوسري',
+                completed_at: new Date(Date.now() - 345600000)
             },
             {
-                id: 'TR-' + Date.now() + '-5',
-                user_id: 1,
-                driver_id: 1,
+                id: 'TR-' + (Date.now() - 432000000) + '-5',
+                user_id: 4,
+                driver_id: 5,
                 pickup_location: 'جامعة الملك سعود',
-                dropoff_location: 'حي السفارات',
+                dropoff_location: 'حي الملز',
+                pickup_lat: 24.7243,
+                pickup_lng: 46.6189,
+                dropoff_lat: 24.6742,
+                dropoff_lng: 46.7081,
+                car_type: 'family',
+                cost: 45.50,
+                distance: 15.3,
+                duration: 22,
+                payment_method: 'card',
+                status: 'completed',
+                rating: 5,
+                review: 'خدمة ممتازة',
+                driver_name: 'سعيد حسن العتيبي',
+                completed_at: new Date(Date.now() - 432000000)
+            },
+            {
+                id: 'TR-' + (Date.now() - 518400000) + '-6',
+                user_id: 2,
+                driver_id: 1,
+                pickup_location: 'حي السفارات',
+                dropoff_location: 'مستشفى الملك فيصل التخصصي',
+                pickup_lat: 24.6905,
+                pickup_lng: 46.6863,
+                dropoff_lat: 24.6977,
+                dropoff_lng: 46.7010,
+                car_type: 'economy',
+                cost: 28.00,
+                distance: 7.2,
+                duration: 13,
+                payment_method: 'cash',
+                status: 'completed',
+                rating: 4,
+                review: 'جيد',
+                driver_name: 'أحمد عبدالله المالكي',
+                completed_at: new Date(Date.now() - 518400000)
+            },
+            {
+                id: 'TR-' + (Date.now() - 604800000) + '-7',
+                user_id: 1,
+                driver_id: 6,
+                pickup_location: 'مركز المملكة',
+                dropoff_location: 'الرياض فرونت',
+                pickup_lat: 24.7119,
+                pickup_lng: 46.6750,
+                dropoff_lat: 24.7477,
+                dropoff_lng: 46.6289,
+                car_type: 'luxury',
+                cost: 155.00,
+                distance: 28.5,
+                duration: 30,
+                payment_method: 'card',
+                status: 'completed',
+                rating: 5,
+                review: 'سائق محترف جداً، سيارة فخمة',
+                driver_name: 'فهد سعد الزهراني',
+                completed_at: new Date(Date.now() - 604800000)
+            },
+            // Cancelled trips
+            {
+                id: 'TR-' + (Date.now() - 691200000) + '-8',
+                user_id: 3,
+                driver_id: 2,
+                pickup_location: 'حي الياسمين',
+                dropoff_location: 'النخيل مول',
+                pickup_lat: 24.8073,
+                pickup_lng: 46.6683,
+                dropoff_lat: 24.7853,
+                dropoff_lng: 46.6018,
+                car_type: 'family',
+                cost: 38.00,
+                distance: 11.2,
+                duration: 16,
+                payment_method: 'cash',
+                status: 'cancelled',
+                driver_name: 'محمد علي الشهري',
+                cancelled_at: new Date(Date.now() - 691200000)
+            },
+            {
+                id: 'TR-' + (Date.now() - 777600000) + '-9',
+                user_id: 4,
+                driver_id: 7,
+                pickup_location: 'حي العزيزية',
+                dropoff_location: 'الرياض بارك',
+                pickup_lat: 24.6951,
+                pickup_lng: 46.6887,
+                dropoff_lat: 24.8142,
+                dropoff_lng: 46.6374,
                 car_type: 'economy',
                 cost: 42.00,
-                distance: 12.0,
-                duration: 18,
-                payment_method: 'card',
+                distance: 14.8,
+                duration: 20,
+                payment_method: 'wallet',
                 status: 'cancelled',
-                driver_name: 'أحمد محمد',
-                cancelled_at: new Date(Date.now() - 432000000) // 5 days ago
+                driver_name: 'ناصر عبدالرحمن الغامدي',
+                cancelled_at: new Date(Date.now() - 777600000)
+            },
+            // Recent completed trips
+            {
+                id: 'TR-' + (Date.now() - 43200000) + '-10',
+                user_id: 1,
+                driver_id: 2,
+                pickup_location: 'برج الفيصلية',
+                dropoff_location: 'منتزه الملك عبدالله',
+                pickup_lat: 24.6898,
+                pickup_lng: 46.6855,
+                dropoff_lat: 24.8073,
+                dropoff_lng: 46.7260,
+                car_type: 'family',
+                cost: 52.00,
+                distance: 18.4,
+                duration: 24,
+                payment_method: 'card',
+                status: 'completed',
+                rating: 5,
+                review: 'ممتاز كالعادة',
+                driver_name: 'محمد علي الشهري',
+                completed_at: new Date(Date.now() - 43200000)
             }
         ];
         
         for (const trip of sampleTrips) {
             await client.query(`
-                INSERT INTO trips (id, user_id, driver_id, pickup_location, dropoff_location, 
+                INSERT INTO trips (id, user_id, driver_id, pickup_location, dropoff_location,
+                    pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
                     car_type, cost, distance, duration, payment_method, status, rating, 
-                    driver_name, created_at, completed_at, cancelled_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    review, driver_name, created_at, completed_at, cancelled_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
                 ON CONFLICT (id) DO NOTHING;
             `, [
                 trip.id, trip.user_id, trip.driver_id, trip.pickup_location, 
-                trip.dropoff_location, trip.car_type, trip.cost, trip.distance, 
-                trip.duration, trip.payment_method, trip.status, trip.rating, 
-                trip.driver_name, trip.completed_at || trip.cancelled_at || new Date(),
+                trip.dropoff_location, trip.pickup_lat, trip.pickup_lng,
+                trip.dropoff_lat, trip.dropoff_lng, trip.car_type, trip.cost, 
+                trip.distance, trip.duration, trip.payment_method, trip.status, 
+                trip.rating, trip.review, trip.driver_name, 
+                trip.completed_at || trip.cancelled_at || new Date(),
                 trip.completed_at, trip.cancelled_at
             ]);
         }

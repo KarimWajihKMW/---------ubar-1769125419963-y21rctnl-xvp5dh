@@ -120,24 +120,7 @@ let driverAnimationId = null;
 let driverRequestTimeout = null;
 let loginAttempts = 0; // Track failed login attempts
 
-// Demo role accounts for gated access per role
-const roleAccounts = {
-    passenger: {
-        email: 'abdullah@example.com',
-        phone: '+201000000001',
-        password: 'P@ssw0rd123'
-    },
-    driver: {
-        email: 'driver@example.com',
-        phone: '+201000000002',
-        password: 'P@ssw0rd123'
-    },
-    admin: {
-        email: 'admin@example.com',
-        phone: '+201000000003',
-        password: 'P@ssw0rd123'
-    }
-};
+// No hardcoded demo accounts - use database authentication
 
 // Saved places storage
 const savedPlaces = {
