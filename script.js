@@ -1138,7 +1138,10 @@ window.switchSection = function(name) {
         inRide: document.getElementById('state-in-ride'),
         rating: document.getElementById('state-rating'),
         profile: document.getElementById('state-profile'),
-        chat: document.getElementById('state-chat')
+        chat: document.getElementById('state-chat'),
+        'trip-history': document.getElementById('state-trip-history'),
+        'trip-details': document.getElementById('state-trip-details'),
+        offers: document.getElementById('state-offers')
     };
 
     const currentVisible = Object.keys(sections).find(key => sections[key] && !sections[key].classList.contains('hidden'));
@@ -1165,6 +1168,25 @@ window.switchSection = function(name) {
     if(name === 'profile') {
         updateUIWithUserData();
         renderTripHistory();
+    }
+    
+    if(name === 'trip-history') {
+        updateUIWithUserData();
+        renderAllTrips();
+        updateTripStats();
+        // Close sidebar
+        const sideMenu = document.getElementById('side-menu');
+        const menuOverlay = document.getElementById('menu-overlay');
+        if (sideMenu) sideMenu.classList.remove('sidebar-open');
+        if (menuOverlay) menuOverlay.classList.remove('overlay-open');
+    }
+    
+    if(name === 'offers') {
+        // Close sidebar when opening offers
+        const sideMenu = document.getElementById('side-menu');
+        const menuOverlay = document.getElementById('menu-overlay');
+        if (sideMenu) sideMenu.classList.remove('sidebar-open');
+        if (menuOverlay) menuOverlay.classList.remove('overlay-open');
     }
 };
 
@@ -1620,57 +1642,6 @@ window.filterTrips = function(filter) {
 };
 
 // Show trip details
-window.showTripDetails = function(tripId) {
-    const trips = DB.getTrips();
-    const trip = trips.find(t => t.id === tripId);
-    
-    if (!trip) return;
-    
-    // Fill in details
-    const tripDate = new Date(trip.date);
-    const day = tripDate.getDate();
-    const monthNames = ['يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-    const month = monthNames[tripDate.getMonth()];
-    const year = tripDate.getFullYear();
-    const hours = tripDate.getHours().toString().padStart(2, '0');
-    const minutes = tripDate.getMinutes().toString().padStart(2, '0');
-    const formattedDate = `${day} ${month} ${year} - ${hours}:${minutes}`;
-    
-    document.getElementById('trip-detail-id').innerText = trip.id;
-    document.getElementById('trip-detail-date').innerText = formattedDate;
-    document.getElementById('trip-detail-pickup').innerText = trip.pickup;
-    document.getElementById('trip-detail-dropoff').innerText = trip.dropoff;
-    document.getElementById('trip-detail-driver-name').innerText = trip.driver;
-    document.getElementById('trip-detail-cost').innerText = `${trip.cost} ر.س`;
-    
-    const carTypes = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر', 'delivery': 'توصيل' };
-    document.getElementById('trip-detail-car-info').innerText = `تويوتا كامري • ${carTypes[trip.car] || trip.car}`;
-    
-    const paymentMethods = { 'wallet': 'محفظة إلكترونية', 'cash': 'نقداً', 'card': 'بطاقة ائتمان' };
-    document.getElementById('trip-detail-payment-method').innerText = paymentMethods[trip.paymentMethod] || trip.paymentMethod;
-    
-    // Status badge
-    const statusBadge = document.getElementById('trip-detail-status');
-    if (trip.status === 'completed') {
-        statusBadge.className = 'inline-block px-4 py-2 rounded-full bg-green-100 text-green-700 font-bold text-sm';
-        statusBadge.innerHTML = '<i class="fas fa-check-circle ml-1"></i> مكتملة';
-    } else {
-        statusBadge.className = 'inline-block px-4 py-2 rounded-full bg-red-100 text-red-700 font-bold text-sm';
-        statusBadge.innerHTML = '<i class="fas fa-times-circle ml-1"></i> ملغية';
-    }
-    
-    // Rating stars
-    const ratingContainer = document.getElementById('trip-detail-user-rating');
-    ratingContainer.innerHTML = '';
-    for (let i = 1; i <= 5; i++) {
-        const starClass = i <= (trip.rating || 0) ? 'fas fa-star text-yellow-400' : 'fas fa-star text-gray-300';
-        ratingContainer.innerHTML += `<i class="${starClass} text-lg"></i>`;
-    }
-    
-    // Switch to details view
-    switchSection('trip-details');
-};
-
 function simulateDriverResponse(userText) {
     const chatMessages = document.getElementById('chat-messages');
     const typingId = 'typing-' + Date.now();
@@ -2785,14 +2756,143 @@ window.showTripDetails = function(tripId) {
     window.switchSection('trip-details');
 };
 
-// Initialize trip history when profile is opened
-const originalSwitchSection = window.switchSection;
-window.switchSection = function(section) {
-    originalSwitchSection(section);
-    
-    if (section === 'profile' && currentUser && currentUser.role === 'passenger') {
-        renderTripHistory('trip-history-container', 3);
-    } else if (section === 'trip-history') {
-        renderAllTrips();
+// ==================== OFFERS FUNCTIONS ====================
+window.copyPromoCode = function(code) {
+    // Copy to clipboard
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(() => {
+            showToast(`✅ تم نسخ الرمز: ${code}`);
+        }).catch(() => {
+            // Fallback
+            fallbackCopyToClipboard(code);
+        });
+    } else {
+        fallbackCopyToClipboard(code);
     }
 };
+
+function fallbackCopyToClipboard(text) {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+        document.execCommand('copy');
+        showToast(`✅ تم نسخ الرمز: ${text}`);
+    } catch (err) {
+        showToast('⚠️ فشل النسخ، يرجى النسخ يدوياً');
+    }
+    document.body.removeChild(textArea);
+}
+
+window.closeSectionToMain = function() {
+    // Close current section and return to main (destination)
+    window.switchSection('destination');
+};
+
+// ==================== TRIP HISTORY EXTENDED FUNCTIONS ====================
+window.filterTrips = function(filter) {
+    // Update active filter button
+    document.querySelectorAll('.trip-filter-btn').forEach(btn => {
+        btn.classList.remove('active', 'bg-indigo-600', 'text-white');
+        btn.classList.add('bg-gray-100', 'text-gray-600');
+    });
+    const activeBtn = document.querySelector(`[data-filter="${filter}"]`);
+    if (activeBtn) {
+        activeBtn.classList.add('active', 'bg-indigo-600', 'text-white');
+        activeBtn.classList.remove('bg-gray-100', 'text-gray-600');
+    }
+    
+    // Render filtered trips
+    renderAllTrips(filter);
+};
+
+function renderAllTrips(filter = 'all') {
+    const container = document.getElementById('all-trips-container');
+    const emptyState = document.getElementById('empty-trips-state');
+    
+    if (!container) return;
+    
+    const trips = DB.getTrips();
+    
+    if (!trips || trips.length === 0) {
+        container.classList.add('hidden');
+        if (emptyState) emptyState.classList.remove('hidden');
+        return;
+    }
+    
+    container.classList.remove('hidden');
+    if (emptyState) emptyState.classList.add('hidden');
+    
+    // Filter trips
+    let filteredTrips = trips;
+    if (filter !== 'all') {
+        filteredTrips = trips.filter(trip => trip.status === filter);
+    }
+    
+    container.innerHTML = '';
+    
+    if (filteredTrips.length === 0) {
+        container.innerHTML = '<div class="text-center text-gray-400 py-8">لا توجد رحلات مطابقة</div>';
+        return;
+    }
+    
+    filteredTrips.forEach(trip => {
+        const date = new Date(trip.date);
+        const formattedDate = date.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' });
+        const formattedTime = date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+        
+        const statusColors = {
+            completed: 'bg-green-100 text-green-700',
+            cancelled: 'bg-red-100 text-red-700'
+        };
+        
+        const statusLabels = {
+            completed: 'مكتملة',
+            cancelled: 'ملغية'
+        };
+        
+        const statusClass = statusColors[trip.status] || statusColors.completed;
+        const statusLabel = statusLabels[trip.status] || statusLabels.completed;
+
+        const html = `
+        <div class="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all cursor-pointer group" onclick="showTripDetails('${trip.id}')">
+             <div class="flex items-center flex-1">
+                 <div class="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                     <i class="fas fa-car"></i>
+                 </div>
+                 <div class="mr-4 flex-1">
+                     <h4 class="font-bold text-gray-800 text-sm">من ${trip.pickup} إلى ${trip.dropoff}</h4>
+                     <p class="text-xs text-gray-400 mt-1 font-medium">${formattedDate} • ${formattedTime}</p>
+                 </div>
+             </div>
+             <div class="text-left">
+                 <div class="font-bold text-gray-800 mb-1">${trip.cost} ر.س</div>
+                 <span class="text-[10px] ${statusClass} px-2 py-0.5 rounded-full font-bold">${statusLabel}</span>
+             </div>
+        </div>`;
+        container.insertAdjacentHTML('beforeend', html);
+    });
+}
+
+function updateTripStats() {
+    const trips = DB.getTrips();
+    
+    if (!trips || trips.length === 0) {
+        document.getElementById('total-trips-count').innerText = '0';
+        document.getElementById('total-spent').innerText = '0';
+        document.getElementById('avg-rating').innerText = '0';
+        return;
+    }
+    
+    const totalTrips = trips.length;
+    const totalSpent = trips.reduce((sum, trip) => sum + parseFloat(trip.cost || 0), 0);
+    const avgRating = trips.reduce((sum, trip) => sum + (trip.rating || 5), 0) / totalTrips;
+    
+    document.getElementById('total-trips-count').innerText = totalTrips;
+    document.getElementById('total-spent').innerText = totalSpent.toFixed(0);
+    document.getElementById('avg-rating').innerText = avgRating.toFixed(1);
+}

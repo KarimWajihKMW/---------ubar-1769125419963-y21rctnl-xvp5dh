@@ -679,7 +679,7 @@
                 <i class="fas fa-history w-8 text-center ml-2 text-gray-400 group-hover:text-indigo-600 transition-colors"></i>
                 <span class="font-bold group-hover:translate-x-[-5px] transition-transform">رحلاتي</span>
             </a>
-            <a href="#" class="flex items-center px-8 py-3.5 text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-r-[5px] border-transparent hover:border-indigo-600 transition-all group">
+            <a href="#" onclick="switchSection('offers')" class="flex items-center px-8 py-3.5 text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-r-[5px] border-transparent hover:border-indigo-600 transition-all group">
                 <i class="fas fa-gift w-8 text-center ml-2 text-gray-400 group-hover:text-indigo-600 transition-colors"></i>
                 <span class="font-bold group-hover:translate-x-[-5px] transition-transform">العروض</span>
                 <span class="mr-auto w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
@@ -1451,6 +1451,181 @@
                     <button class="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold hover:bg-indigo-100 transition-colors">
                         <i class="fas fa-download ml-2"></i> تحميل الفاتورة
                     </button>
+                </div>
+            </div>
+
+            <!-- State 11: Offers (العروض) -->
+            <div id="state-offers" class="hidden px-6 pb-8 max-h-[80vh] overflow-y-auto no-scrollbar">
+                <div class="flex items-center justify-between mb-6">
+                    <button onclick="closeSectionToMain()" class="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600">
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                    <h2 class="text-2xl font-extrabold text-gray-800">العروض الحصرية</h2>
+                    <div class="w-10"></div>
+                </div>
+
+                <!-- Active Offers -->
+                <div class="space-y-4 mb-6">
+                    <!-- Offer 1 - First Ride Discount -->
+                    <div class="bg-gradient-to-br from-purple-600 to-indigo-600 rounded-2xl p-5 text-white shadow-xl relative overflow-hidden">
+                        <div class="absolute top-0 left-0 w-40 h-40 bg-white/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2"></div>
+                        <div class="relative z-10">
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <h3 class="text-xl font-extrabold mb-1">خصم 50% على رحلتك الأولى</h3>
+                                    <p class="text-purple-100 text-sm">وفّر حتى 25 ر.س</p>
+                                </div>
+                                <div class="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full">
+                                    <span class="text-xs font-bold">جديد</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 mb-4">
+                                <div class="flex-1 bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2 font-mono font-bold text-center tracking-wider">
+                                    FIRST50
+                                </div>
+                                <button onclick="copyPromoCode('FIRST50')" class="bg-white/20 backdrop-blur-sm p-2 rounded-lg hover:bg-white/30 transition-colors">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between text-xs text-purple-100">
+                                <span><i class="fas fa-clock ml-1"></i> صالح حتى 31 يناير 2026</span>
+                                <span><i class="fas fa-check-circle ml-1"></i> فعّال</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Offer 2 - Weekend Special -->
+                    <div class="bg-gradient-to-br from-emerald-600 to-teal-600 rounded-2xl p-5 text-white shadow-xl relative overflow-hidden">
+                        <div class="absolute bottom-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl translate-y-1/2 translate-x-1/2"></div>
+                        <div class="relative z-10">
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <h3 class="text-xl font-extrabold mb-1">عرض نهاية الأسبوع</h3>
+                                    <p class="text-emerald-100 text-sm">خصم 30% على جميع الرحلات</p>
+                                </div>
+                                <div class="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full">
+                                    <span class="text-xs font-bold">🔥 ساخن</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 mb-4">
+                                <div class="flex-1 bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2 font-mono font-bold text-center tracking-wider">
+                                    WEEKEND30
+                                </div>
+                                <button onclick="copyPromoCode('WEEKEND30')" class="bg-white/20 backdrop-blur-sm p-2 rounded-lg hover:bg-white/30 transition-colors">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between text-xs text-emerald-100">
+                                <span><i class="fas fa-calendar ml-1"></i> الخميس - السبت</span>
+                                <span><i class="fas fa-check-circle ml-1"></i> فعّال</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Offer 3 - Luxury Upgrade -->
+                    <div class="bg-gradient-to-br from-amber-600 to-orange-600 rounded-2xl p-5 text-white shadow-xl relative overflow-hidden">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
+                        <div class="relative z-10">
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <h3 class="text-xl font-extrabold mb-1">ترقية مجانية للفاخرة</h3>
+                                    <p class="text-amber-100 text-sm">احجز عادي واحصل على فاخرة</p>
+                                </div>
+                                <div class="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full">
+                                    <span class="text-xs font-bold">⭐ VIP</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 mb-4">
+                                <div class="flex-1 bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2 font-mono font-bold text-center tracking-wider">
+                                    LUXURY
+                                </div>
+                                <button onclick="copyPromoCode('LUXURY')" class="bg-white/20 backdrop-blur-sm p-2 rounded-lg hover:bg-white/30 transition-colors">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between text-xs text-amber-100">
+                                <span><i class="fas fa-clock ml-1"></i> صالح لأول 100 مستخدم</span>
+                                <span><i class="fas fa-fire ml-1"></i> متبقي 23 فقط</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Offer 4 - Referral Bonus -->
+                    <div class="bg-gradient-to-br from-pink-600 to-rose-600 rounded-2xl p-5 text-white shadow-xl relative overflow-hidden">
+                        <div class="absolute bottom-0 left-0 w-32 h-32 bg-white/10 rounded-full blur-2xl translate-y-1/2 -translate-x-1/2"></div>
+                        <div class="relative z-10">
+                            <div class="flex items-start justify-between mb-3">
+                                <div>
+                                    <h3 class="text-xl font-extrabold mb-1">برنامج إحالة الأصدقاء</h3>
+                                    <p class="text-pink-100 text-sm">احصل على 50 ر.س لكل صديق</p>
+                                </div>
+                                <div class="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full">
+                                    <span class="text-xs font-bold">💰</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 mb-4">
+                                <div class="flex-1 bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2 font-mono font-bold text-center tracking-wider">
+                                    ABD123REF
+                                </div>
+                                <button onclick="copyPromoCode('ABD123REF')" class="bg-white/20 backdrop-blur-sm p-2 rounded-lg hover:bg-white/30 transition-colors">
+                                    <i class="fas fa-share-alt"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center justify-between text-xs text-pink-100">
+                                <span><i class="fas fa-users ml-1"></i> شارك مع أصدقائك</span>
+                                <span><i class="fas fa-infinity ml-1"></i> غير محدود</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- How to Use Section -->
+                <div class="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 mb-6">
+                    <h3 class="font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                        <i class="fas fa-question-circle"></i>
+                        كيفية استخدام الرموز الترويجية
+                    </h3>
+                    <ol class="space-y-2 text-sm text-indigo-800">
+                        <li class="flex items-start gap-2">
+                            <span class="font-bold">1.</span>
+                            <span>انسخ رمز العرض بالضغط على زر النسخ</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <span class="font-bold">2.</span>
+                            <span>اختر وجهتك ونوع السيارة</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <span class="font-bold">3.</span>
+                            <span>الصق الرمز في خانة "رمز الخصم" قبل التأكيد</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <span class="font-bold">4.</span>
+                            <span>استمتع بالخصم فوراً!</span>
+                        </li>
+                    </ol>
+                </div>
+
+                <!-- Terms & Conditions -->
+                <div class="bg-gray-50 rounded-2xl p-5">
+                    <h3 class="font-bold text-gray-800 mb-3 text-sm">الشروط والأحكام</h3>
+                    <ul class="space-y-2 text-xs text-gray-600">
+                        <li class="flex items-start gap-2">
+                            <i class="fas fa-circle text-[4px] mt-1.5"></i>
+                            <span>لا يمكن الجمع بين أكثر من عرض في رحلة واحدة</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fas fa-circle text-[4px] mt-1.5"></i>
+                            <span>الخصومات قابلة للتغيير أو الإلغاء دون إشعار مسبق</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fas fa-circle text-[4px] mt-1.5"></i>
+                            <span>يطبق الخصم على الرحلات ضمن المدينة فقط</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <i class="fas fa-circle text-[4px] mt-1.5"></i>
+                            <span>لمزيد من التفاصيل، يرجى الاتصال بخدمة العملاء</span>
+                        </li>
+                    </ul>
                 </div>
             </div>
 
