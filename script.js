@@ -769,8 +769,9 @@ function openRoleLoginModal(role) {
     modal.dataset.role = role;
     const titles = { driver: 'تسجيل دخول الكابتن', admin: 'تسجيل دخول الإدارة', passenger: 'تسجيل الدخول' };
     const hints = {
-        driver: 'استخدم بيانات الكابتن: driver@example.com / P@ssw0rd123',
-        admin: 'استخدم بيانات الإدارة: admin@example.com / P@ssw0rd123'
+        driver: 'استخدم بيانات الكابتن - كلمة المرور: 12345678',
+        admin: 'استخدم بيانات الإدارة - كلمة المرور: 12345678',
+        passenger: 'استخدم بيانات الراكب - كلمة المرور: 12345678'
     };
     const titleEl = document.getElementById('role-login-title');
     const hintEl = document.getElementById('role-login-hint');
@@ -802,7 +803,7 @@ function closeRoleLoginModal() {
     }, 250);
 }
 
-window.submitRoleLogin = function() {
+window.submitRoleLogin = async function() {
     const modal = document.getElementById('role-login-modal');
     if (!modal) return;
     const role = modal.dataset.role || 'driver';
@@ -810,7 +811,6 @@ window.submitRoleLogin = function() {
     const passInput = document.getElementById('role-login-password');
     const email = emailInput ? emailInput.value.trim() : '';
     const password = passInput ? passInput.value.trim() : '';
-    const account = roleAccounts[role];
 
     if (!email) {
         showToast('⚠️ يرجى إدخال البريد الإلكتروني');
@@ -823,51 +823,72 @@ window.submitRoleLogin = function() {
         return;
     }
     
-    // Check email validity
-    if (!account || email.toLowerCase() !== account.email.toLowerCase()) {
-        showToast('❌ البريد الإلكتروني غير صحيح');
-        emailInput.style.borderColor = 'red';
-        setTimeout(() => emailInput.style.borderColor = '', 2000);
-        emailInput.focus();
-        return;
-    }
+    // Show loading
+    showToast('⏳ جاري تسجيل الدخول...');
     
-    // Check password validity
-    if (password !== account.password) {
-        loginAttempts++;
-        showToast('❌ كلمة المرور غير صحيحة');
-        const parent = passInput.parentElement;
-        if (parent) {
-            parent.style.backgroundColor = '#fee';
-            parent.style.borderColor = 'red';
-            setTimeout(() => {
-                parent.style.backgroundColor = '';
-                parent.style.borderColor = '';
-            }, 2000);
-        }
-        passInput.focus();
+    try {
+        // Call API to authenticate
+        const response = await fetch('http://localhost:3000/api/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password })
+        });
         
-        // Show correct credentials after 3 failed attempts
-        if (loginAttempts >= 3) {
-            setTimeout(() => {
-                showToast(`🔑 للتجربة: ${account.email} / ${account.password}`, 8000);
-                loginAttempts = 0;
-            }, 1000);
+        const result = await response.json();
+        
+        if (!response.ok || !result.success) {
+            loginAttempts++;
+            showToast('❌ ' + (result.error || 'خطأ في تسجيل الدخول'));
+            const parent = passInput.parentElement;
+            if (parent) {
+                parent.style.backgroundColor = '#fee';
+                parent.style.borderColor = 'red';
+                setTimeout(() => {
+                    parent.style.backgroundColor = '';
+                    parent.style.borderColor = '';
+                }, 2000);
+            }
+            passInput.focus();
+            
+            // Show hint after 3 failed attempts
+            if (loginAttempts >= 3) {
+                setTimeout(() => {
+                    showToast(`💡 تلميح: جميع كلمات المرور هي 12345678`, 8000);
+                    loginAttempts = 0;
+                }, 1000);
+            }
+            return;
         }
-        return;
-    }
-    
-    // Reset attempts on successful login
-    loginAttempts = 0;
-
-    DB.saveSession();
-    closeRoleLoginModal();
-    if (role === 'driver') {
-        initDriverMode();
-    } else if (role === 'admin') {
-        initAdminMode();
-    } else {
-        initPassengerMode();
+        
+        // Check if user role matches requested role
+        const userData = result.data;
+        if (userData.role !== role) {
+            showToast(`❌ هذا الحساب ليس حساب ${role === 'driver' ? 'كابتن' : role === 'admin' ? 'إدارة' : 'راكب'}`);
+            return;
+        }
+        
+        // Reset attempts on successful login
+        loginAttempts = 0;
+        
+        // Save user data to DB
+        DB.currentUser = userData;
+        DB.saveSession();
+        
+        showToast(`✅ مرحباً ${userData.name}`);
+        closeRoleLoginModal();
+        
+        if (role === 'driver') {
+            initDriverMode();
+        } else if (role === 'admin') {
+            initAdminMode();
+        } else {
+            initPassengerMode();
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        showToast('❌ خطأ في الاتصال بالخادم');
     }
 };
 
@@ -942,7 +963,7 @@ window.verifyOTP = function() {
     }, 1500);
 };
 
-window.loginWithEmail = function() {
+window.loginWithEmail = async function() {
     const emailInput = document.getElementById('email-input');
     const passwordInput = document.getElementById('password-input');
     const email = emailInput.value.trim();
@@ -973,63 +994,64 @@ window.loginWithEmail = function() {
         return;
     }
 
-    // Passenger login only via this modal
-    const account = roleAccounts.passenger;
+    // Show loading
+    showToast('⏳ جاري تسجيل الدخول...');
     
-    // Check email validity
-    if (!account || email.toLowerCase() !== account.email.toLowerCase()) {
-        loginAttempts++;
-        showToast('❌ البريد الإلكتروني غير صحيح');
-        const parent = emailInput.parentElement;
-        if (parent) {
-            parent.style.backgroundColor = '#fee';
-            parent.style.borderColor = 'red';
-            setTimeout(() => {
-                parent.style.backgroundColor = '';
-                parent.style.borderColor = '';
-            }, 2000);
-        }
-        emailInput.focus();
+    try {
+        // Call API to authenticate
+        const response = await fetch('http://localhost:3000/api/auth/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password })
+        });
         
-        // Show correct credentials after 3 failed attempts
-        if (loginAttempts >= 3) {
-            setTimeout(() => {
-                showToast(`🔑 للتجربة: ${account.email} / ${account.password}`, 8000);
-                loginAttempts = 0;
-            }, 1000);
-        }
-        return;
-    }
-    
-    // Check password validity
-    if (password !== account.password) {
-        loginAttempts++;
-        showToast('❌ كلمة المرور غير صحيحة');
-        const parent = passwordInput.parentElement;
-        if (parent) {
-            parent.style.backgroundColor = '#fee';
-            parent.style.borderColor = 'red';
-            setTimeout(() => {
-                parent.style.backgroundColor = '';
-                parent.style.borderColor = '';
-            }, 2000);
-        }
-        passwordInput.focus();
+        const result = await response.json();
         
-        // Show correct credentials after 3 failed attempts
-        if (loginAttempts >= 3) {
-            setTimeout(() => {
-                showToast(`🔑 للتجربة: ${account.email} / ${account.password}`, 8000);
-                loginAttempts = 0;
-            }, 1000);
+        if (!response.ok || !result.success) {
+            loginAttempts++;
+            showToast('❌ ' + (result.error || 'خطأ في تسجيل الدخول'));
+            const parent = passwordInput.parentElement;
+            if (parent) {
+                parent.style.backgroundColor = '#fee';
+                parent.style.borderColor = 'red';
+                setTimeout(() => {
+                    parent.style.backgroundColor = '';
+                    parent.style.borderColor = '';
+                }, 2000);
+            }
+            passwordInput.focus();
+            
+            // Show hint after 3 failed attempts
+            if (loginAttempts >= 3) {
+                setTimeout(() => {
+                    showToast(`💡 تلميح: جميع كلمات المرور هي 12345678`, 8000);
+                    loginAttempts = 0;
+                }, 1000);
+            }
+            return;
         }
-        return;
+        
+        // Check if user is passenger
+        const userData = result.data;
+        if (userData.role !== 'passenger') {
+            showToast(`❌ هذا الحساب ليس حساب راكب`);
+            return;
+        }
+        
+        // Reset attempts on successful login
+        loginAttempts = 0;
+        
+        // Save user data to DB
+        DB.currentUser = userData;
+        
+        showToast(`✅ مرحباً ${userData.name}`);
+        loginSuccess();
+    } catch (error) {
+        console.error('Login error:', error);
+        showToast('❌ خطأ في الاتصال بالخادم');
     }
-    
-    // Reset attempts on successful login
-    loginAttempts = 0;
-
-    loginSuccess();
 };
 
 window.selectCar = function(element, type) {

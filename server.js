@@ -322,7 +322,42 @@ app.get('/api/drivers', async (req, res) => {
 
 // ==================== USERS ENDPOINTS ====================
 
-// Get or create user
+// Login with email and password
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        
+        if (!email || !password) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Email and password are required' 
+            });
+        }
+        
+        // Check if user exists with email and password
+        const result = await pool.query(
+            'SELECT id, phone, name, email, role, created_at FROM users WHERE email = $1 AND password = $2',
+            [email, password]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(401).json({ 
+                success: false, 
+                error: 'Invalid email or password' 
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error logging in:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get or create user (for phone-based login)
 app.post('/api/users/login', async (req, res) => {
     try {
         const { phone, name, email } = req.body;
@@ -333,8 +368,8 @@ app.post('/api/users/login', async (req, res) => {
         if (result.rows.length === 0) {
             // Create new user
             result = await pool.query(`
-                INSERT INTO users (phone, name, email)
-                VALUES ($1, $2, $3)
+                INSERT INTO users (phone, name, email, password, role)
+                VALUES ($1, $2, $3, '12345678', 'passenger')
                 RETURNING *
             `, [phone, name, email]);
         }
