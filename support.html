@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الدعم والمساعدة - أكوادرا</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .back-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .header {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        
+        .support-section {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .support-option {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+        
+        .support-option:hover {
+            background: #f8f9fa;
+            transform: translateX(-5px);
+        }
+        
+        .support-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.3em;
+            margin-left: 15px;
+        }
+        
+        .support-content h3 {
+            color: #333;
+            margin-bottom: 5px;
+            font-size: 1.1em;
+        }
+        
+        .support-content p {
+            color: #666;
+            font-size: 0.85em;
+        }
+        
+        .faq-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .faq-item:hover {
+            background: #f0f0f0;
+        }
+        
+        .faq-question {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .faq-answer {
+            color: #666;
+            font-size: 0.9em;
+            display: none;
+        }
+        
+        .faq-item.active .faq-answer {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <button class="back-btn" onclick="history.back()">
+            <i class="fas fa-arrow-right"></i>
+            رجوع
+        </button>
+        
+        <div class="header">
+            <h1>💬 الدعم والمساعدة</h1>
+        </div>
+        
+        <div class="support-section">
+            <h2 style="margin-bottom: 15px; color: #333;">طرق التواصل</h2>
+            
+            <div class="support-option">
+                <div class="support-icon">
+                    <i class="fas fa-phone"></i>
+                </div>
+                <div class="support-content">
+                    <h3>الدعم الهاتفي</h3>
+                    <p>920000123 - متاح 24/7</p>
+                </div>
+            </div>
+            
+            <div class="support-option">
+                <div class="support-icon">
+                    <i class="fas fa-comment"></i>
+                </div>
+                <div class="support-content">
+                    <h3>محادثة مباشرة</h3>
+                    <p>اتحدث مع فريق الدعم الآن</p>
+                </div>
+            </div>
+            
+            <div class="support-option">
+                <div class="support-icon">
+                    <i class="fas fa-envelope"></i>
+                </div>
+                <div class="support-content">
+                    <h3>البريد الإلكتروني</h3>
+                    <p>support@akwadra.sa</p>
+                </div>
+            </div>
+            
+            <div class="support-option">
+                <div class="support-icon">
+                    <i class="fas fa-map-marker-alt"></i>
+                </div>
+                <div class="support-content">
+                    <h3>الفروع القريبة</h3>
+                    <p>ابحث عن أقرب فرع</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="support-section">
+            <h2 style="margin-bottom: 15px; color: #333;">الأسئلة الشائعة</h2>
+            
+            <div class="faq-item" onclick="toggleFAQ(this)">
+                <div class="faq-question">
+                    <span>❓</span>
+                    كيف أبدأ العمل كسائق؟
+                </div>
+                <div class="faq-answer">
+                    يمكنك التسجيل عبر التطبيق بخطوات سهلة. ستحتاج إلى صورة من بطاقتك الشخصية ورخصة القيادة. بعد التحقق من الوثائق ستتمكن من البدء في قبول الطلبات.
+                </div>
+            </div>
+            
+            <div class="faq-item" onclick="toggleFAQ(this)">
+                <div class="faq-question">
+                    <span>❓</span>
+                    هل توجد عمولة على الأرباح؟
+                </div>
+                <div class="faq-answer">
+                    نعم، هناك عمولة بنسبة 20% من قيمة كل رحلة. الباقي يذهب إلى رصيدك مباشرة ويمكنك سحبه في أي وقت.
+                </div>
+            </div>
+            
+            <div class="faq-item" onclick="toggleFAQ(this)">
+                <div class="faq-question">
+                    <span>❓</span>
+                    كيف يتم الدفع والسحب؟
+                </div>
+                <div class="faq-answer">
+                    يمكنك السحب يومياً إلى حسابك البنكي أو محفظتك الإلكترونية. لا توجد رسوم على عمليات السحب. تتم العملية خلال 24 ساعة عمل.
+                </div>
+            </div>
+            
+            <div class="faq-item" onclick="toggleFAQ(this)">
+                <div class="faq-question">
+                    <span>❓</span>
+                    ماذا إذا حدثت مشكلة مع الراكب؟
+                </div>
+                <div class="faq-answer">
+                    يمكنك الإبلاغ عن المشكلة من خلال التطبيق. فريق الدعم سيتواصل معك خلال ساعة واحدة للمساعدة والتحقيق.
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function toggleFAQ(element) {
+            element.classList.toggle('active');
+        }
+    </script>
+</body>
+</html>

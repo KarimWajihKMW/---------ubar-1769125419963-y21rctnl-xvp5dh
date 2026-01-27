@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الأرباح والإحصائيات - أكوادرا</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        
+        .back-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .stats-section {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 12px;
+        }
+        
+        .stat-number {
+            font-size: 1.8em;
+            font-weight: 800;
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .earning-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .earning-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+        
+        .earning-value {
+            font-size: 2.5em;
+            font-weight: 800;
+        }
+        
+        .activity-list {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .activity-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+        
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            background: #f0f0f0;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #667eea;
+            margin-left: 15px;
+        }
+        
+        .activity-content {
+            flex: 1;
+        }
+        
+        .activity-title {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .activity-time {
+            font-size: 0.8em;
+            color: #999;
+            margin-top: 4px;
+        }
+        
+        .activity-amount {
+            font-weight: 700;
+            color: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <button class="back-btn" onclick="history.back()">
+            <i class="fas fa-arrow-right"></i>
+            رجوع
+        </button>
+        
+        <div class="header">
+            <h1>💰 الأرباح والإحصائيات</h1>
+        </div>
+        
+        <div class="earning-card">
+            <div class="earning-label">إجمالي الأرباح اليوم</div>
+            <div class="earning-value">185 ر.س</div>
+        </div>
+        
+        <div class="stats-section">
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <div class="stat-number">8</div>
+                    <div class="stat-label">الرحلات اليوم</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">64 كم</div>
+                    <div class="stat-label">المسافة الكلية</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">4.8 ⭐</div>
+                    <div class="stat-label">التقييم</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">342</div>
+                    <div class="stat-label">إجمالي الرحلات</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="activity-list">
+            <h3 style="margin-bottom: 15px; color: #333;">نشاطك اليوم</h3>
+            
+            <div class="activity-item">
+                <div class="activity-icon">
+                    <i class="fas fa-check"></i>
+                </div>
+                <div class="activity-content">
+                    <div class="activity-title">رحلة من شارع الملك فهد</div>
+                    <div class="activity-time">10:30 صباحاً</div>
+                </div>
+                <div class="activity-amount">+35 ر.س</div>
+            </div>
+            
+            <div class="activity-item">
+                <div class="activity-icon">
+                    <i class="fas fa-check"></i>
+                </div>
+                <div class="activity-content">
+                    <div class="activity-title">رحلة من مطار الملك خالد</div>
+                    <div class="activity-time">11:15 صباحاً</div>
+                </div>
+                <div class="activity-amount">+95 ر.س</div>
+            </div>
+            
+            <div class="activity-item">
+                <div class="activity-icon">
+                    <i class="fas fa-check"></i>
+                </div>
+                <div class="activity-content">
+                    <div class="activity-title">رحلة من حي العليا</div>
+                    <div class="activity-time">12:45 ظهراً</div>
+                </div>
+                <div class="activity-amount">+55 ر.س</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

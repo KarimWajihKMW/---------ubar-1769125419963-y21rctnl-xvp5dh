@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>قائمة التنقل - أكوادرا تاكسي</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .menu-container {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+        
+        .menu-header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+            padding-top: 20px;
+        }
+        
+        .menu-header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 800;
+        }
+        
+        .menu-header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .menu-item {
+            background: white;
+            border-radius: 16px;
+            padding: 25px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .menu-item:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+        }
+        
+        .menu-item::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(102, 126, 234, 0.1) 0%, transparent 70%);
+            animation: shine 3s ease-in-out infinite;
+        }
+        
+        @keyframes shine {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 1; }
+        }
+        
+        .menu-item-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+            color: #667eea;
+            z-index: 1;
+            position: relative;
+        }
+        
+        .menu-item-title {
+            font-size: 1.2em;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 8px;
+            z-index: 1;
+            position: relative;
+        }
+        
+        .menu-item-desc {
+            font-size: 0.85em;
+            color: #666;
+            z-index: 1;
+            position: relative;
+        }
+        
+        .menu-item.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .menu-item.active .menu-item-icon,
+        .menu-item.active .menu-item-title,
+        .menu-item.active .menu-item-desc {
+            color: white;
+        }
+        
+        .trips-list-container {
+            background: white;
+            border-radius: 20px;
+            padding: 20px;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+        }
+        
+        .trips-list-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+        }
+        
+        .trips-list-header h2 {
+            font-size: 1.8em;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .trips-list-header button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .trips-list-header button:hover {
+            background: #764ba2;
+            transform: scale(1.05);
+        }
+        
+        .trip-card {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .trip-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+            background: white;
+        }
+        
+        .trip-info {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .trip-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        .trip-details {
+            flex: 1;
+        }
+        
+        .trip-passenger-name {
+            font-weight: 700;
+            color: #333;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+        
+        .trip-locations {
+            font-size: 0.85em;
+            color: #666;
+            display: flex;
+            gap: 5px;
+        }
+        
+        .trip-location-icon {
+            color: #667eea;
+        }
+        
+        .trip-price {
+            font-size: 1.4em;
+            font-weight: 800;
+            color: #667eea;
+            text-align: center;
+            min-width: 80px;
+        }
+        
+        .trip-actions {
+            display: flex;
+            gap: 8px;
+            margin-right: 15px;
+        }
+        
+        .trip-actions button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+        
+        .accept-btn {
+            background: #28a745;
+            color: white;
+        }
+        
+        .accept-btn:hover {
+            background: #218838;
+            transform: scale(1.05);
+        }
+        
+        .reject-btn {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .reject-btn:hover {
+            background: #c82333;
+            transform: scale(1.05);
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        
+        .empty-state-icon {
+            font-size: 3em;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        .empty-state-text {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        
+        .filter-section {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-btn {
+            padding: 8px 16px;
+            border: 2px solid #e9ecef;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s ease;
+        }
+        
+        .filter-btn:hover,
+        .filter-btn.active {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-accepted {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-completed {
+            background: #cfe2ff;
+            color: #084298;
+        }
+        
+        @media (max-width: 768px) {
+            .menu-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+            }
+            
+            .menu-item {
+                padding: 18px;
+            }
+            
+            .menu-item-icon {
+                font-size: 2.2em;
+            }
+            
+            .menu-item-title {
+                font-size: 1em;
+            }
+            
+            .menu-item-desc {
+                font-size: 0.75em;
+            }
+            
+            .trip-card {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .trip-actions {
+                width: 100%;
+                margin-right: 0;
+                margin-top: 10px;
+            }
+            
+            .trip-actions button {
+                flex: 1;
+            }
+            
+            .trip-price {
+                text-align: left;
+                margin-top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="menu-container">
+        <div class="menu-header">
+            <h1>🚗 أكوادرا تاكسي</h1>
+            <p>قائمة التنقل الرئيسية</p>
+        </div>
+        
+        <div class="menu-grid">
+            <div class="menu-item" onclick="showTrips('pending')">
+                <div class="menu-item-icon">📋</div>
+                <div class="menu-item-title">الطلبات المعلقة</div>
+                <div class="menu-item-desc">طلبات قيد الانتظار</div>
+            </div>
+            
+            <div class="menu-item" onclick="showTrips('active')">
+                <div class="menu-item-icon">🚗</div>
+                <div class="menu-item-title">رحلات نشطة</div>
+                <div class="menu-item-desc">رحلاتي الحالية</div>
+            </div>
+            
+            <div class="menu-item" onclick="showTrips('completed')">
+                <div class="menu-item-icon">✅</div>
+                <div class="menu-item-title">مكتملة</div>
+                <div class="menu-item-desc">الرحلات المنتهية</div>
+            </div>
+            
+            <div class="menu-item" onclick="goToPage('index.html')">
+                <div class="menu-item-icon">🗺️</div>
+                <div class="menu-item-title">الخريطة</div>
+                <div class="menu-item-desc">البحث عن رحلة</div>
+            </div>
+            
+            <div class="menu-item" onclick="goToPage('profile.html')">
+                <div class="menu-item-icon">👤</div>
+                <div class="menu-item-title">ملفي الشخصي</div>
+                <div class="menu-item-desc">معلوماتي</div>
+            </div>
+            
+            <div class="menu-item" onclick="goToPage('earnings.html')">
+                <div class="menu-item-icon">💰</div>
+                <div class="menu-item-title">الأرباح</div>
+                <div class="menu-item-desc">إحصائياتي</div>
+            </div>
+            
+            <div class="menu-item" onclick="goToPage('support.html')">
+                <div class="menu-item-icon">💬</div>
+                <div class="menu-item-title">الدعم</div>
+                <div class="menu-item-desc">المساعدة والدعم</div>
+            </div>
+            
+            <div class="menu-item" onclick="logout()">
+                <div class="menu-item-icon">🚪</div>
+                <div class="menu-item-title">تسجيل الخروج</div>
+                <div class="menu-item-desc">الخروج من الحساب</div>
+            </div>
+        </div>
+        
+        <div class="trips-list-container" id="tripsContainer" style="display: none;">
+            <div class="trips-list-header">
+                <h2>
+                    <i class="fas fa-list"></i>
+                    <span id="listTitle">الطلبات</span>
+                </h2>
+                <button onclick="closeTripsList()">إغلاق</button>
+            </div>
+            
+            <div class="filter-section">
+                <button class="filter-btn active" onclick="filterTrips('all')">
+                    الكل
+                </button>
+                <button class="filter-btn" onclick="filterTrips('nearby')">
+                    القريبة
+                </button>
+                <button class="filter-btn" onclick="filterTrips('high-price')">
+                    الأسعار العالية
+                </button>
+            </div>
+            
+            <div id="tripsList"></div>
+        </div>
+    </div>
+    
+    <script>
+        let currentFilter = 'pending';
+        let allTrips = [];
+        
+        // نموذج بيانات الرحلات
+        function initializeSampleTrips() {
+            allTrips = [
+                {
+                    id: 1,
+                    passenger: 'أحمد محمد',
+                    initials: 'أ.م',
+                    from: 'شارع الملك فهد',
+                    to: 'حي العليا',
+                    price: 35,
+                    distance: 8.5,
+                    status: 'pending'
+                },
+                {
+                    id: 2,
+                    passenger: 'فاطمة علي',
+                    initials: 'ف.ع',
+                    from: 'مطار الملك خالد',
+                    to: 'برج المملكة',
+                    price: 95,
+                    distance: 35.2,
+                    status: 'pending'
+                },
+                {
+                    id: 3,
+                    passenger: 'خالد سعود',
+                    initials: 'خ.س',
+                    from: 'حي الياسمين',
+                    to: 'النخيل مول',
+                    price: 45,
+                    distance: 12.8,
+                    status: 'active'
+                },
+                {
+                    id: 4,
+                    passenger: 'نورة محمود',
+                    initials: 'ن.م',
+                    from: 'جامعة الملك سعود',
+                    to: 'حي الملز',
+                    price: 42,
+                    distance: 15.3,
+                    status: 'completed'
+                },
+                {
+                    id: 5,
+                    passenger: 'سارة إبراهيم',
+                    initials: 'س.إ',
+                    from: 'الرياض جاليري',
+                    to: 'النخيل مول',
+                    price: 38,
+                    distance: 14.8,
+                    status: 'pending'
+                },
+                {
+                    id: 6,
+                    passenger: 'عمر يوسف',
+                    initials: 'ع.ي',
+                    from: 'مركز المملكة',
+                    to: 'الرياض فرونت',
+                    price: 55,
+                    distance: 28.5,
+                    status: 'completed'
+                }
+            ];
+        }
+        
+        function showTrips(filter) {
+            currentFilter = filter;
+            const container = document.getElementById('tripsContainer');
+            const tripsList = document.getElementById('tripsList');
+            const listTitle = document.getElementById('listTitle');
+            
+            // تحديث العنوان
+            const titles = {
+                'pending': 'الطلبات المعلقة',
+                'active': 'الرحلات النشطة',
+                'completed': 'الرحلات المكتملة'
+            };
+            listTitle.textContent = titles[filter];
+            
+            // تصفية الرحلات
+            const filtered = allTrips.filter(trip => trip.status === filter);
+            
+            // إنشاء HTML
+            if (filtered.length === 0) {
+                tripsList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div class="empty-state-text">لا توجد رحلات</div>
+                        <div>حالياً لا توجد ${titles[filter].toLowerCase()}</div>
+                    </div>
+                `;
+            } else {
+                tripsList.innerHTML = filtered.map(trip => `
+                    <div class="trip-card">
+                        <div class="trip-info">
+                            <div class="trip-avatar">${trip.initials}</div>
+                            <div class="trip-details">
+                                <div class="trip-passenger-name">${trip.passenger}</div>
+                                <div class="trip-locations">
+                                    <span class="trip-location-icon">📍</span>
+                                    <span>${trip.from} ← ${trip.to}</span>
+                                </div>
+                                <div style="font-size: 0.8em; color: #999; margin-top: 5px;">
+                                    <i class="fas fa-road"></i> ${trip.distance} كم
+                                </div>
+                            </div>
+                        </div>
+                        <div class="trip-price">${trip.price} ر.س</div>
+                        ${filter === 'pending' ? `
+                            <div class="trip-actions">
+                                <button class="accept-btn" onclick="acceptTrip(${trip.id})">
+                                    <i class="fas fa-check"></i> قبول
+                                </button>
+                                <button class="reject-btn" onclick="rejectTrip(${trip.id})">
+                                    <i class="fas fa-times"></i> رفض
+                                </button>
+                            </div>
+                        ` : `
+                            <div style="margin-right: 15px;">
+                                <span class="status-badge status-${filter === 'active' ? 'accepted' : 'completed'}">
+                                    ${filter === 'active' ? '🚗 نشطة' : '✅ مكتملة'}
+                                </span>
+                            </div>
+                        `}
+                    </div>
+                `).join('');
+            }
+            
+            container.style.display = 'block';
+            container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
+        function filterTrips(filterType) {
+            // تحديث الأزرار
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // تطبيق التصفية
+            // يمكن توسيع هذه الوظيفة لتصفية حسب المسافة أو السعر
+            console.log('تم التصفية حسب:', filterType);
+        }
+        
+        function acceptTrip(tripId) {
+            const trip = allTrips.find(t => t.id === tripId);
+            if (trip) {
+                trip.status = 'active';
+                alert(`✅ تم قبول الرحلة مع ${trip.passenger}`);
+                showTrips('pending');
+            }
+        }
+        
+        function rejectTrip(tripId) {
+            const trip = allTrips.find(t => t.id === tripId);
+            if (trip) {
+                allTrips = allTrips.filter(t => t.id !== tripId);
+                alert(`❌ تم رفض الرحلة`);
+                showTrips('pending');
+            }
+        }
+        
+        function closeTripsList() {
+            document.getElementById('tripsContainer').style.display = 'none';
+        }
+        
+        function goToPage(page) {
+            window.location.href = page;
+        }
+        
+        function logout() {
+            if (confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+                localStorage.clear();
+                window.location.href = 'index.html';
+            }
+        }
+        
+        // تهيئة البيانات عند تحميل الصفحة
+        window.addEventListener('DOMContentLoaded', function() {
+            initializeSampleTrips();
+        });
+    </script>
+</body>
+</html>
