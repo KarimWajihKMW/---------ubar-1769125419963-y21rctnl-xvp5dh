@@ -120,6 +120,11 @@ let driverAnimationId = null;
 let driverRequestTimeout = null;
 let loginAttempts = 0; // Track failed login attempts
 
+function isMapWorldActive() {
+    const mapWorld = document.getElementById('map-world');
+    return mapWorld && !mapWorld.classList.contains('hidden');
+}
+
 // No hardcoded demo accounts - use database authentication
 
 // Saved places storage
@@ -1400,6 +1405,12 @@ function loginSuccess() {
 function initPassengerMode() {
     document.getElementById('passenger-ui-container').classList.remove('hidden');
     document.getElementById('passenger-top-bar').classList.remove('hidden');
+    const driverTopBar = document.getElementById('driver-top-bar');
+    if (driverTopBar) driverTopBar.classList.add('hidden');
+    const driverMenu = document.getElementById('driver-side-menu');
+    const driverOverlay = document.getElementById('driver-menu-overlay');
+    if (driverMenu) driverMenu.classList.remove('sidebar-open');
+    if (driverOverlay) driverOverlay.classList.remove('overlay-open');
     const world = document.getElementById('map-world');
     if (world) world.classList.add('hidden');
     initLeafletMap();
@@ -1430,10 +1441,22 @@ function initPassengerMode() {
 
 function initDriverMode() {
     document.getElementById('driver-ui-container').classList.remove('hidden');
+    const passengerUi = document.getElementById('passenger-ui-container');
+    if (passengerUi) passengerUi.classList.add('hidden');
+    const passengerTopBar = document.getElementById('passenger-top-bar');
+    if (passengerTopBar) passengerTopBar.classList.add('hidden');
+    const passengerMenu = document.getElementById('side-menu');
+    const passengerOverlay = document.getElementById('menu-overlay');
+    if (passengerMenu) passengerMenu.classList.remove('sidebar-open');
+    if (passengerOverlay) passengerOverlay.classList.remove('overlay-open');
+    const driverTopBar = document.getElementById('driver-top-bar');
+    if (driverTopBar) driverTopBar.classList.remove('hidden');
     const um = document.getElementById('user-marker');
     if(um) um.classList.add('hidden');
     const world = document.getElementById('map-world');
-    if (world) world.classList.remove('hidden');
+    if (world) world.classList.add('hidden');
+    initLeafletMap();
+    updateDriverMenuData();
     scheduleMockRequest();
 }
 
@@ -1861,6 +1884,51 @@ function updateUIWithUserData() {
     if(pp) pp.innerText = user.points;
 }
 
+function updateDriverMenuData() {
+    const user = DB.getUser() || {
+        name: 'الكابتن',
+        rating: '4.8',
+        balance: 0,
+        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver'
+    };
+
+    const trips = DB.getTrips() || [];
+    const todayKey = new Date().toDateString();
+    const todayTrips = trips.filter(trip => {
+        if (!trip.date) return false;
+        return new Date(trip.date).toDateString() === todayKey;
+    });
+    const completedTrips = trips.filter(trip => String(trip.status).toLowerCase() === 'completed' || trip.status === 'مكتملة');
+    const earnings = completedTrips.reduce((sum, trip) => sum + Number(trip.cost || 0), 0);
+
+    const driverName = user.name && user.name.trim() ? user.name : 'الكابتن';
+    const firstName = driverName.split(' ')[0];
+
+    const nameEl = document.getElementById('driver-sidebar-name');
+    if (nameEl) nameEl.innerText = `أهلاً، ${firstName}`;
+
+    const ratingEl = document.getElementById('driver-sidebar-rating');
+    if (ratingEl) ratingEl.innerText = user.rating || '4.8';
+
+    const balanceEl = document.getElementById('driver-stats-balance');
+    if (balanceEl) balanceEl.innerText = `${user.balance || 0} ر.س`;
+
+    const earningsEl = document.getElementById('driver-stats-earnings');
+    if (earningsEl) earningsEl.innerText = `${earnings} ر.س`;
+
+    const totalEl = document.getElementById('driver-stats-total');
+    if (totalEl) totalEl.innerText = trips.length;
+
+    const todayEl = document.getElementById('driver-stats-today');
+    if (todayEl) todayEl.innerText = todayTrips.length;
+
+    const avatarIds = ['driver-sidebar-avatar', 'driver-nav-avatar'];
+    avatarIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.src = user.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver';
+    });
+}
+
 function renderTripHistory() {
     const container = document.getElementById('trip-history-container');
     if (!container) return;
@@ -1925,8 +1993,25 @@ function toggleMenu() {
     }
 }
 
+function toggleDriverMenu() {
+    const sideMenu = document.getElementById('driver-side-menu');
+    const menuOverlay = document.getElementById('driver-menu-overlay');
+    if (!sideMenu || !menuOverlay) return;
+
+    const isOpen = sideMenu.classList.contains('sidebar-open');
+    if (isOpen) {
+        sideMenu.classList.remove('sidebar-open');
+        menuOverlay.classList.remove('overlay-open');
+    } else {
+        sideMenu.classList.add('sidebar-open');
+        menuOverlay.classList.add('overlay-open');
+        updateDriverMenuData();
+    }
+}
+
 // --- Map Drag Logic (Enhanced for Mobile Touch) ---
 function startDrag(e) {
+    if (!isMapWorldActive()) return;
     if (e.target.closest('.pointer-events-auto')) return;
     const mapContainer = document.getElementById('map-container');
     
@@ -1956,6 +2041,7 @@ function startDrag(e) {
 }
 
 function drag(e) {
+    if (!isMapWorldActive()) return;
     if (!mapState.isDragging) return;
     
     // Prevent scrolling on mobile while dragging
@@ -1982,6 +2068,7 @@ function drag(e) {
 }
 
 function endDrag(e) {
+    if (!isMapWorldActive()) return;
     if (!mapState.isDragging) return;
     const mapContainer = document.getElementById('map-container');
     
@@ -2007,6 +2094,7 @@ function endDrag(e) {
 function handleMapClick(cx, cy) {
     // Only handle click for destination setting in Passenger Mode
     if (currentUserRole !== 'passenger') return;
+    if (!isMapWorldActive()) return;
 
     const mapWorld = document.getElementById('map-world');
     const destMarker = document.getElementById('dest-marker');
@@ -2281,16 +2369,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const centerMapBtn = document.getElementById('center-map');
 
     if (zoomInBtn) zoomInBtn.addEventListener('click', () => {
+        if (!isMapWorldActive() && leafletMap) {
+            leafletMap.zoomIn();
+            return;
+        }
         mapState.scale = Math.min(mapState.scale + 0.2, 2.5);
         updateMapTransform();
     });
 
     if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => {
+        if (!isMapWorldActive() && leafletMap) {
+            leafletMap.zoomOut();
+            return;
+        }
         mapState.scale = Math.max(mapState.scale - 0.2, 0.5);
         updateMapTransform();
     });
 
     if (centerMapBtn) centerMapBtn.addEventListener('click', () => {
+        if (!isMapWorldActive() && leafletMap) {
+            if (currentPickup) {
+                leafletMap.setView([currentPickup.lat, currentPickup.lng], Math.max(leafletMap.getZoom(), 13));
+            } else {
+                leafletMap.setView([26.8206, 30.8025], 6);
+            }
+            return;
+        }
         centerMap();
         if (currentUserRole === 'passenger') {
             const userMarker = document.getElementById('user-marker');
@@ -2310,6 +2414,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeMenuBtn) closeMenuBtn.addEventListener('click', toggleMenu);
     if (menuOverlay) menuOverlay.addEventListener('click', toggleMenu);
     document.querySelectorAll('#side-menu a').forEach(link => link.addEventListener('click', toggleMenu));
+
+    const driverMenuBtn = document.getElementById('driver-menu-btn');
+    const driverCloseMenuBtn = document.getElementById('driver-close-menu-btn');
+    const driverMenuOverlay = document.getElementById('driver-menu-overlay');
+
+    if (driverMenuBtn) driverMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleDriverMenu(); });
+    if (driverCloseMenuBtn) driverCloseMenuBtn.addEventListener('click', toggleDriverMenu);
+    if (driverMenuOverlay) driverMenuOverlay.addEventListener('click', toggleDriverMenu);
+    document.querySelectorAll('#driver-side-menu a').forEach(link => link.addEventListener('click', toggleDriverMenu));
 
     const destInput = document.getElementById('dest-input');
     if (destInput) {
