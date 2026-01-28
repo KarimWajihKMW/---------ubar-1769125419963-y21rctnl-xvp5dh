@@ -1868,17 +1868,20 @@ window.renderOffers = function() {
         {
             title: '🎉 خصم 20% على أول رحلة',
             description: 'استخدم الكود WELCOME20 على أول طلب لك واحصل على خصم فوري.',
-            badge: 'جديد'
+            badge: 'جديد',
+            code: 'WELCOME20'
         },
         {
             title: '🚗 رحلتان بسعر 1',
             description: 'رحلتك الثانية مجاناً عند الدفع بالبطاقة خلال هذا الأسبوع.',
-            badge: 'محدود'
+            badge: 'محدود',
+            code: '2FOR1'
         },
         {
             title: '⭐ نقاط مضاعفة',
             description: 'اكسب ضعف النقاط على الرحلات المكتملة في عطلة نهاية الأسبوع.',
-            badge: 'نقاط'
+            badge: 'نقاط',
+            code: 'DOUBLEPTS'
         }
     ];
 
@@ -1891,15 +1894,27 @@ window.renderOffers = function() {
     emptyState.classList.add('hidden');
     offers.forEach(offer => {
         const html = `
-        <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+        <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm cursor-pointer hover:shadow-md transition" onclick="window.applyOffer('${offer.code}')">
             <div class="flex items-center justify-between mb-2">
                 <h3 class="font-bold text-gray-800">${offer.title}</h3>
                 <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold">${offer.badge}</span>
             </div>
             <p class="text-sm text-gray-600">${offer.description}</p>
+            <div class="mt-3 flex justify-end">
+                <button type="button" class="text-xs font-bold text-indigo-600 hover:text-indigo-700" onclick="event.stopPropagation(); window.applyOffer('${offer.code}')">استخدام العرض</button>
+            </div>
         </div>`;
         container.insertAdjacentHTML('beforeend', html);
     });
+};
+
+window.applyOffer = function(code) {
+    if (!code) {
+        showToast('⚠️ هذا العرض غير متاح حالياً');
+        return;
+    }
+    SafeStorage.setItem('akwadra_active_offer', code);
+    showToast(`✅ تم اختيار العرض: ${code}`);
 };
 
 // Filter trips
