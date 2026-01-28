@@ -131,6 +131,96 @@
             color: white;
             transform: translateY(-2px);
         }
+
+        .action-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .edit-controls {
+            display: none;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .edit-controls.show {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .save-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .save-btn:hover {
+            background: #218838;
+            transform: translateY(-2px);
+        }
+
+        .cancel-btn {
+            background: #f0f0f0;
+            color: #333;
+            border: none;
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .cancel-btn:hover {
+            background: #e0e0e0;
+            transform: translateY(-2px);
+        }
+
+        .info-value.editing {
+            border: 1px dashed #667eea;
+            border-radius: 8px;
+            padding: 6px 10px;
+            background: #f8f9ff;
+            outline: none;
+        }
+
+        .ratings-section {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .ratings-section.show {
+            display: block;
+        }
+
+        .rating-item {
+            border-bottom: 1px solid #f0f0f0;
+            padding: 12px 0;
+        }
+
+        .rating-item:last-child {
+            border-bottom: none;
+        }
+
+        .rating-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .rating-stars {
+            color: #f4b400;
+            font-size: 0.95em;
+        }
         
         .menu-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -235,7 +325,7 @@
                 </div>
                 <div class="info-content">
                     <div class="info-label">رقم الجوال</div>
-                    <div class="info-value">0501234567</div>
+                    <div class="info-value" data-field="phone">0501234567</div>
                 </div>
             </div>
             
@@ -245,7 +335,7 @@
                 </div>
                 <div class="info-content">
                     <div class="info-label">البريد الإلكتروني</div>
-                    <div class="info-value">ahmed@akwadra.sa</div>
+                    <div class="info-value" data-field="email">ahmed@akwadra.sa</div>
                 </div>
             </div>
             
@@ -255,7 +345,7 @@
                 </div>
                 <div class="info-content">
                     <div class="info-label">نوع السيارة</div>
-                    <div class="info-value">اقتصادي</div>
+                    <div class="info-value" data-field="carType">اقتصادي</div>
                 </div>
             </div>
             
@@ -265,7 +355,7 @@
                 </div>
                 <div class="info-content">
                     <div class="info-label">لوحة السيارة</div>
-                    <div class="info-value">أ ب ج 1234</div>
+                    <div class="info-value" data-field="plate">أ ب ج 1234</div>
                 </div>
             </div>
         </div>
@@ -280,6 +370,41 @@
                 التقييمات
             </button>
         </div>
+
+        <div class="edit-controls" id="editControls">
+            <button class="save-btn" onclick="saveProfileEdits()">
+                <i class="fas fa-check"></i>
+                حفظ
+            </button>
+            <button class="cancel-btn" onclick="cancelProfileEdits()">
+                <i class="fas fa-times"></i>
+                إلغاء
+            </button>
+        </div>
+
+        <div class="ratings-section" id="ratingsSection">
+            <div class="rating-item">
+                <div class="rating-header">
+                    <div>محمد علي</div>
+                    <div class="rating-stars">★★★★★</div>
+                </div>
+                <div>سائق ممتاز وملتزم بالوقت</div>
+            </div>
+            <div class="rating-item">
+                <div class="rating-header">
+                    <div>سارة أحمد</div>
+                    <div class="rating-stars">★★★★☆</div>
+                </div>
+                <div>الرحلة كانت مريحة جدًا</div>
+            </div>
+            <div class="rating-item">
+                <div class="rating-header">
+                    <div>خالد يوسف</div>
+                    <div class="rating-stars">★★★★★</div>
+                </div>
+                <div>تعامل محترم وخدمة رائعة</div>
+            </div>
+        </div>
         
         <button class="logout-btn" onclick="logout()">
             <i class="fas fa-sign-out-alt"></i>
@@ -292,12 +417,56 @@
             window.location.href = 'menu.html';
         }
         
+        let isEditing = false;
+
         function editProfile() {
-            alert('سيتم تحديث ميزة تعديل الملف الشخصي قريباً');
+            if (isEditing) {
+                return;
+            }
+            isEditing = true;
+            document.getElementById('editControls').classList.add('show');
+
+            document.querySelectorAll('.info-value').forEach(valueEl => {
+                if (!valueEl.dataset.original) {
+                    valueEl.dataset.original = valueEl.textContent.trim();
+                }
+                valueEl.contentEditable = 'true';
+                valueEl.classList.add('editing');
+            });
+
+            const firstEditable = document.querySelector('.info-value');
+            if (firstEditable) firstEditable.focus();
         }
-        
+
+        function saveProfileEdits() {
+            document.querySelectorAll('.info-value').forEach(valueEl => {
+                valueEl.dataset.original = valueEl.textContent.trim();
+                valueEl.contentEditable = 'false';
+                valueEl.classList.remove('editing');
+            });
+            document.getElementById('editControls').classList.remove('show');
+            isEditing = false;
+            alert('✅ تم حفظ التعديلات محلياً');
+        }
+
+        function cancelProfileEdits() {
+            document.querySelectorAll('.info-value').forEach(valueEl => {
+                if (valueEl.dataset.original) {
+                    valueEl.textContent = valueEl.dataset.original;
+                }
+                valueEl.contentEditable = 'false';
+                valueEl.classList.remove('editing');
+            });
+            document.getElementById('editControls').classList.remove('show');
+            isEditing = false;
+        }
+
         function viewRatings() {
-            alert('سيتم عرض التقييمات قريباً');
+            const ratingsSection = document.getElementById('ratingsSection');
+            ratingsSection.classList.toggle('show');
+            if (ratingsSection.classList.contains('show')) {
+                ratingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
         }
         
         function logout() {
