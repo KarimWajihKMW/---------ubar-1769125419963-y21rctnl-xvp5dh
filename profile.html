@@ -18,6 +18,29 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
         }
+
+        .back-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            backdrop-filter: blur(6px);
+            transition: all 0.3s ease;
+        }
+
+        .back-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
         
         .container {
             max-width: 500px;
@@ -295,6 +318,10 @@
     </style>
 </head>
 <body>
+    <button class="back-btn" onclick="history.back()">
+        <i class="fas fa-arrow-right"></i>
+        رجوع
+    </button>
     <div class="container">
         <div class="header">
             <div class="avatar">👤</div>
