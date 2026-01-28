@@ -268,6 +268,27 @@ function initLeafletMap() {
     }
 }
 
+function moveLeafletMapToContainer(containerId) {
+    const mapEl = document.getElementById('leaflet-map');
+    const container = document.getElementById(containerId);
+    if (!mapEl || !container) return;
+
+    if (mapEl.parentElement !== container) {
+        container.appendChild(mapEl);
+    }
+
+    mapEl.style.display = 'block';
+    mapEl.style.position = 'absolute';
+    mapEl.style.inset = '0';
+    mapEl.style.zIndex = '1';
+    mapEl.style.width = '100%';
+    mapEl.style.height = '100%';
+
+    if (leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 100);
+    }
+}
+
 function setPickup(coords, label) {
     currentPickup = { ...coords, label: label || 'نقطة الالتقاط' };
     if (!leafletMap) return;
@@ -576,6 +597,7 @@ function generatePassengerPickup(base) {
 
 function startDriverToPassengerRoute() {
     if (!leafletMap) return;
+    moveLeafletMapToContainer('map-container');
     clearDriverPassengerRoute();
 
     const driverStart = getDriverBaseLocation();
@@ -1601,6 +1623,7 @@ function initDriverMode() {
     const world = document.getElementById('map-world');
     if (world) world.classList.add('hidden');
     initLeafletMap();
+    moveLeafletMapToContainer('map-container');
     updateDriverMenuData();
     scheduleMockRequest();
 }
