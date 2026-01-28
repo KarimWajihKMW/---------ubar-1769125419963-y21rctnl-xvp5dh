@@ -880,9 +880,19 @@ const DB = {
                 throw new Error(result.error || 'Failed to fetch trips');
             }
 
+            let tripsData = result.data || [];
+
+            if (role === 'passenger' && userId && tripsData.length === 0) {
+                const fallbackResponse = await fetch('/api/trips?limit=200');
+                const fallbackResult = await fallbackResponse.json();
+                if (fallbackResponse.ok && fallbackResult.success) {
+                    tripsData = fallbackResult.data || [];
+                }
+            }
+
             const user = this.getUser();
             const passengerName = user?.name;
-            const mapped = result.data.map(trip => this.normalizeTrip(trip, passengerName));
+            const mapped = tripsData.map(trip => this.normalizeTrip(trip, passengerName));
             this.setTrips(mapped);
             return mapped;
         } catch (error) {
@@ -1844,18 +1854,8 @@ window.renderAllTrips = async function() {
 
     if (container) container.classList.remove('hidden');
     if (emptyState) emptyState.classList.add('hidden');
-    
-    // Update statistics
-    const totalTrips = trips.length;
-    const totalSpent = trips.reduce((sum, t) => sum + (t.cost || 0), 0);
-    const avgRating = trips.reduce((sum, t) => sum + (t.rating || 0), 0) / totalTrips;
-    
-    document.getElementById('total-trips-count').innerText = totalTrips;
-    document.getElementById('total-spent').innerText = totalSpent;
-    document.getElementById('avg-rating').innerText = avgRating.toFixed(1);
-    
-    // Render trips
-    await renderTripHistory('all-trips-container', null);
+
+    loadAllTrips();
 };
 
 // Render offers
@@ -3247,9 +3247,52 @@ window.showTripDetails = function(tripId) {
     window.switchSection('trip-details');
 };
 
-// Initialize trip history when profile is opened
+// Initialize trip history when profile is opened + keep section history
 const originalSwitchSection = window.switchSection;
+const sectionHistory = [];
+
+function getVisibleSectionName() {
+    const sectionIds = {
+        destination: 'state-destination',
+        rideSelect: 'state-ride-select',
+        loading: 'state-loading',
+        driver: 'state-driver',
+        inRide: 'state-in-ride',
+        rating: 'state-rating',
+        profile: 'state-profile',
+        chat: 'state-chat',
+        'trip-history': 'state-trip-history',
+        'trip-details': 'state-trip-details',
+        offers: 'state-offers'
+    };
+
+    return Object.keys(sectionIds).find(key => {
+        const el = document.getElementById(sectionIds[key]);
+        return el && !el.classList.contains('hidden');
+    }) || null;
+}
+
+window.goBackOneStep = function() {
+    if (sectionHistory.length === 0) {
+        window.switchSection('destination');
+        return;
+    }
+
+    const last = sectionHistory.pop();
+    if (last) {
+        originalSwitchSection(last);
+    } else {
+        window.switchSection('destination');
+    }
+};
+
 window.switchSection = function(section) {
+    const currentSection = getVisibleSectionName();
+    if (currentSection && currentSection !== section) {
+        sectionHistory.push(currentSection);
+        if (sectionHistory.length > 20) sectionHistory.shift();
+    }
+
     originalSwitchSection(section);
     
     const user = DB.getUser();
