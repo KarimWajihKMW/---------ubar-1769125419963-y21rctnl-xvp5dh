@@ -1440,6 +1440,31 @@ window.driverAcceptRequest = function() {
     showToast('تم قبول الطلب! اذهب للراكب');
 };
 
+window.driverOpenNavigation = function() {
+    if (!leafletMap) {
+        showToast('الخريطة غير جاهزة');
+        return;
+    }
+
+    const origin = driverLocation || getDriverBaseLocation();
+    const target = passengerPickup || currentPickup || currentDestination;
+    if (!target) {
+        showToast('لا يوجد هدف للملاحة');
+        return;
+    }
+
+    const originStr = `${origin.lat},${origin.lng}`;
+    const destStr = `${target.lat},${target.lng}`;
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&travelmode=driving`;
+    window.open(url, '_blank');
+};
+
+window.driverCallPassenger = function() {
+    const phone = passengerPickup?.phone || '01000000000';
+    showToast('جاري الاتصال بالراكب');
+    window.location.href = `tel:${phone}`;
+};
+
 window.driverEndTrip = function() {
     document.getElementById('driver-active-trip').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
