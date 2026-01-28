@@ -576,17 +576,17 @@
             let filtered = allTrips.filter(trip => trip.status === currentFilter);
 
             if (currentFilterType === 'nearby') {
-                filtered = filtered.filter(trip => trip.distance <= 10);
+                filtered = filtered.slice().sort((a, b) => a.distance - b.distance);
             } else if (currentFilterType === 'high-price') {
-                filtered = filtered.filter(trip => trip.price >= 60);
+                filtered = filtered.slice().sort((a, b) => b.price - a.price);
             }
 
             if (filtered.length === 0) {
                 const filterLabel = currentFilterType === 'all'
                     ? titles[currentFilter]
                     : currentFilterType === 'nearby'
-                        ? 'الطلبات القريبة'
-                        : 'الطلبات ذات الأسعار العالية';
+                        ? 'الطلبات الأقرب'
+                        : 'الطلبات الأعلى سعراً';
                 tripsList.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">📭</div>
