@@ -1490,6 +1490,12 @@ window.driverAcceptRequest = function() {
     showToast('تم قبول الطلب! اذهب للراكب');
 };
 
+window.toggleDriverRequestPanel = function() {
+    const panel = document.getElementById('driver-incoming-request');
+    if (!panel) return;
+    panel.classList.toggle('collapsed');
+};
+
 window.driverOpenNavigation = function() {
     if (!leafletMap) {
         showToast('الخريطة غير جاهزة');

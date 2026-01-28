@@ -322,6 +322,10 @@
       .leaflet-popup {
         z-index: 1001 !important;
       }
+
+            #driver-incoming-request.collapsed #driver-request-body {
+                display: none;
+            }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
@@ -1637,9 +1641,14 @@
             <div id="driver-incoming-request" class="hidden p-0 bg-white">
                 <div class="bg-gray-900 p-4 text-white flex justify-between items-center rounded-t-[2.5rem]">
                     <span class="font-bold">طلب جديد!</span>
-                    <span class="bg-white/20 px-3 py-1 rounded-full text-xs">يبعد 3 كم</span>
+                    <div class="flex items-center gap-2">
+                        <span class="bg-white/20 px-3 py-1 rounded-full text-xs">يبعد 3 كم</span>
+                        <button onclick="toggleDriverRequestPanel()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </div>
                 </div>
-                <div class="p-6">
+                <div id="driver-request-body" class="p-6">
                     <div class="flex items-center mb-6">
                         <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Passenger1" class="w-16 h-16 rounded-full bg-gray-100 mr-4">
                         <div>
