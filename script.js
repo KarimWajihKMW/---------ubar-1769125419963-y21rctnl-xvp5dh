@@ -1375,6 +1375,9 @@ window.switchSection = function(name) {
         loading: document.getElementById('state-loading'),
         driver: document.getElementById('state-driver'),
         inRide: document.getElementById('state-in-ride'),
+        'payment-method': document.getElementById('state-payment-method'),
+        'payment-invoice': document.getElementById('state-payment-invoice'),
+        'payment-success': document.getElementById('state-payment-success'),
         rating: document.getElementById('state-rating'),
         profile: document.getElementById('state-profile'),
         chat: document.getElementById('state-chat'),
@@ -2940,6 +2943,7 @@ window.proceedToPayment = function() {
             });
         }
         
+        const paymentLabels = { cash: 'دفع كاش', card: 'بطاقة بنكية', wallet: 'محفظة إلكترونية' };
         showToast(`تم الدفع: ${amount} ر.س عبر ${paymentMethod === 'cash' ? 'كاش' : paymentMethod === 'card' ? 'بطاقة' : 'محفظة'}`);
         
         // Reset payment data
@@ -2947,11 +2951,18 @@ window.proceedToPayment = function() {
         appliedPromo = null;
         promoDiscount = 0;
         
-        // Go to rating
-        window.switchSection('rating');
+        // Show payment confirmation
+        const amountEl = document.getElementById('payment-success-amount');
+        const methodEl = document.getElementById('payment-success-method');
+        const timeEl = document.getElementById('payment-success-time');
+        if (amountEl) amountEl.innerText = `${amount} ر.س`;
+        if (methodEl) methodEl.innerText = paymentLabels[paymentMethod] || 'دفع كاش';
+        if (timeEl) timeEl.innerText = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+        window.switchSection('payment-success');
         
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - انتقل إلى التقييم';
+        btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';
     }, 2000);
 };
 
@@ -3289,6 +3300,9 @@ function getVisibleSectionName() {
         loading: 'state-loading',
         driver: 'state-driver',
         inRide: 'state-in-ride',
+        'payment-method': 'state-payment-method',
+        'payment-invoice': 'state-payment-invoice',
+        'payment-success': 'state-payment-success',
         rating: 'state-rating',
         profile: 'state-profile',
         chat: 'state-chat',

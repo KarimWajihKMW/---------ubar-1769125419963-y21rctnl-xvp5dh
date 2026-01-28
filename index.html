@@ -1302,6 +1302,32 @@
                 </button>
             </div>
 
+            <!-- State 6.7: Payment Success Confirmation -->
+            <div id="state-payment-success" class="hidden p-8 text-center bg-white">
+                <div class="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 text-emerald-600">
+                    <i class="fas fa-check-circle text-4xl"></i>
+                </div>
+                <h2 class="text-2xl font-extrabold text-gray-800 mb-2">تم تأكيد الدفع</h2>
+                <p class="text-gray-500 mb-6">تم إنهاء رحلتك بنجاح</p>
+
+                <div class="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 mb-6 text-right">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-gray-600 font-bold">المبلغ المدفوع</span>
+                        <span class="text-xl font-extrabold text-emerald-600" id="payment-success-amount">-- ر.س</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-600 font-bold">طريقة الدفع</span>
+                        <span class="text-gray-800 font-bold" id="payment-success-method">--</span>
+                    </div>
+                    <div class="flex justify-between items-center mt-2">
+                        <span class="text-gray-600 font-bold">وقت الدفع</span>
+                        <span class="text-gray-800 font-bold" id="payment-success-time">--</span>
+                    </div>
+                </div>
+
+                <button onclick="window.switchSection('rating')" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">تابع للتقييم</button>
+            </div>
+
             <!-- State 6: Rating -->
             <div id="state-rating" class="hidden p-8 text-center bg-white">
                 <div class="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600 animate-bounce">
