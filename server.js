@@ -549,7 +549,7 @@ app.patch('/api/drivers/:id/approval', async (req, res) => {
 // Login with email and password
 app.post('/api/auth/login', async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, role, name, phone } = req.body;
         
         if (!email || !password) {
             return res.status(400).json({ 
@@ -557,14 +557,67 @@ app.post('/api/auth/login', async (req, res) => {
                 error: 'Email and password are required' 
             });
         }
+
+        const trimmedEmail = String(email).trim().toLowerCase();
+        const trimmedPassword = String(password).trim();
+        const requestedRole = role ? String(role).trim().toLowerCase() : null;
         
         // Check if user exists with email and password
         const result = await pool.query(
             'SELECT id, phone, name, email, role, created_at FROM users WHERE email = $1 AND password = $2',
-            [email, password]
+            [trimmedEmail, trimmedPassword]
         );
         
         if (result.rows.length === 0) {
+            const emailCheck = await pool.query('SELECT id, role FROM users WHERE email = $1', [trimmedEmail]);
+            if (emailCheck.rows.length > 0) {
+                return res.status(401).json({ 
+                    success: false, 
+                    error: 'Invalid email or password' 
+                });
+            }
+
+            if (requestedRole === 'passenger') {
+                const baseName = name && String(name).trim() ? String(name).trim() : 'راكب جديد';
+                const rawPhone = phone ? String(phone) : '';
+                const digits = rawPhone.replace(/\D/g, '');
+                const buildGuestPhone = () => {
+                    if (digits.length >= 8) return digits;
+                    const stamp = Date.now().toString().slice(-9);
+                    const rand = Math.floor(Math.random() * 90 + 10);
+                    return `9${stamp}${rand}`;
+                };
+
+                let createdUser = null;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const guestPhone = buildGuestPhone();
+                    const insert = await pool.query(
+                        `INSERT INTO users (phone, name, email, password, role)
+                         VALUES ($1, $2, $3, $4, 'passenger')
+                         ON CONFLICT (phone) DO NOTHING
+                         RETURNING id, phone, name, email, role, created_at`,
+                        [guestPhone, baseName, trimmedEmail, trimmedPassword]
+                    );
+                    if (insert.rows.length > 0) {
+                        createdUser = insert.rows[0];
+                        break;
+                    }
+                }
+
+                if (!createdUser) {
+                    return res.status(500).json({
+                        success: false,
+                        error: 'Failed to create passenger account'
+                    });
+                }
+
+                return res.json({
+                    success: true,
+                    data: createdUser,
+                    created: true
+                });
+            }
+
             return res.status(401).json({ 
                 success: false, 
                 error: 'Invalid email or password' 
@@ -585,9 +638,20 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/users/login', async (req, res) => {
     try {
         const { phone, name, email } = req.body;
+
+        if (!phone) {
+            return res.status(400).json({
+                success: false,
+                error: 'Phone is required'
+            });
+        }
+
+        const normalizedPhone = String(phone).trim();
+        const normalizedEmail = email && String(email).trim() ? String(email).trim().toLowerCase() : `passenger_${normalizedPhone.replace(/\D/g, '') || Date.now()}@ubar.sa`;
+        const normalizedName = name && String(name).trim() ? String(name).trim() : 'راكب جديد';
         
         // Check if user exists
-        let result = await pool.query('SELECT * FROM users WHERE phone = $1', [phone]);
+        let result = await pool.query('SELECT * FROM users WHERE phone = $1', [normalizedPhone]);
         
         if (result.rows.length === 0) {
             // Create new user
@@ -595,7 +659,7 @@ app.post('/api/users/login', async (req, res) => {
                 INSERT INTO users (phone, name, email, password, role)
                 VALUES ($1, $2, $3, '12345678', 'passenger')
                 RETURNING *
-            `, [phone, name, email]);
+            `, [normalizedPhone, normalizedName, normalizedEmail]);
         }
         
         res.json({

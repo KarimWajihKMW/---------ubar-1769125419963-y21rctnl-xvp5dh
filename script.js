@@ -1134,7 +1134,7 @@ window.sendOTP = function() {
     }, 1500);
 };
 
-window.verifyOTP = function() {
+window.verifyOTP = async function() {
     let otpCode = '';
     document.querySelectorAll('.otp-input').forEach(input => otpCode += input.value);
     
@@ -1146,11 +1146,43 @@ window.verifyOTP = function() {
     const btn = document.querySelector('#auth-otp-section button');
     const originalText = btn.innerText;
     btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري التحقق...';
-    
-    setTimeout(() => {
-        btn.innerText = originalText;
+    btn.disabled = true;
+
+    try {
+        const phoneRaw = document.getElementById('phone-input')?.value || '';
+        const phoneDigits = phoneRaw.replace(/\D/g, '');
+        const emailFallback = phoneDigits ? `passenger_${phoneDigits}@ubar.sa` : `passenger_${Date.now()}@ubar.sa`;
+        const payload = {
+            phone: phoneDigits || phoneRaw,
+            name: 'راكب جديد',
+            email: emailFallback
+        };
+
+        const response = await fetch('/api/users/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            showToast('❌ ' + (result.error || 'خطأ في تسجيل الدخول'));
+            return;
+        }
+
+        DB.currentUser = result.data;
+        DB.setUser(result.data);
         loginSuccess();
-    }, 1500);
+    } catch (error) {
+        console.error('OTP login error:', error);
+        showToast('❌ خطأ في الاتصال بالخادم');
+    } finally {
+        btn.innerText = originalText;
+        btn.disabled = false;
+    }
 };
 
 window.loginWithEmail = async function() {
@@ -1188,13 +1220,14 @@ window.loginWithEmail = async function() {
     showToast('⏳ جاري تسجيل الدخول...');
     
     try {
+        const inferredName = email.split('@')[0] || 'راكب';
         // Call API to authenticate
         const response = await fetch('/api/auth/login', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ email, password, role: 'passenger', name: inferredName })
         });
         
         const result = await response.json();
@@ -2052,8 +2085,10 @@ window.toggleFieldVisibility = function(inputId, buttonEl) {
     if (buttonEl) {
         const icon = buttonEl.querySelector('i');
         if (icon) {
-            icon.classList.toggle('fa-eye', !isHidden);
-            icon.classList.toggle('fa-eye-slash', isHidden);
+            const nowVisible = !isVisible;
+            const isHidden = !nowVisible;
+            icon.classList.toggle('fa-eye', isHidden);
+            icon.classList.toggle('fa-eye-slash', !isHidden);
         }
         const nowVisible = !isVisible;
         buttonEl.setAttribute('aria-label', nowVisible ? 'إخفاء' : 'إظهار');
