@@ -647,8 +647,8 @@
             تاكسي أكوادرا
         </div>
         
-        <button id="profile-btn" class="bg-white/90 backdrop-blur-md p-3 w-12 h-12 rounded-full shadow-lg pointer-events-auto hover:scale-110 transition-transform text-indigo-600 hover:text-indigo-800 flex items-center justify-center overflow-hidden border-2 border-transparent hover:border-indigo-100">
-            <img id="nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Abdullah" alt="Profile" class="w-full h-full">
+        <button id="profile-btn" onclick="window.switchSection('profile'); document.getElementById('back-btn').classList.remove('hidden');" class="bg-white/90 backdrop-blur-md p-3 w-12 h-12 rounded-full shadow-lg pointer-events-auto hover:scale-110 transition-transform text-indigo-600 hover:text-indigo-800 flex items-center justify-center overflow-hidden border-2 border-transparent hover:border-indigo-100">
+            <img id="nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Abdullah" alt="Profile" class="w-full h-full cursor-pointer">
         </button>
     </div>
 
@@ -662,8 +662,8 @@
             وضع السائق
         </div>
 
-        <button class="bg-white/90 backdrop-blur-md p-3 w-12 h-12 rounded-full shadow-lg pointer-events-auto hover:scale-110 transition-transform text-emerald-600 hover:text-emerald-800 flex items-center justify-center overflow-hidden border-2 border-transparent hover:border-emerald-100">
-            <img id="driver-nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" alt="Driver" class="w-full h-full">
+        <button id="driver-profile-btn" onclick="window.switchSection && window.switchSection('driver-profile')" class="bg-white/90 backdrop-blur-md p-3 w-12 h-12 rounded-full shadow-lg pointer-events-auto hover:scale-110 transition-transform text-emerald-600 hover:text-emerald-800 flex items-center justify-center overflow-hidden border-2 border-transparent hover:border-emerald-100">
+            <img id="driver-nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" alt="Driver" class="w-full h-full cursor-pointer">
         </button>
     </div>
 

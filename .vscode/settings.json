@@ -54,6 +54,7 @@
         "/^sleep 2 && cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node test-driver-registration\\.js$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "true": true
     }
 }
