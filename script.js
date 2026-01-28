@@ -184,12 +184,15 @@ let leafletMap = null;
 let pickupMarkerL = null;
 let destMarkerL = null;
 let driverMarkerL = null;
+let passengerMarkerL = null;
 let routePolyline = null;
 let currentPickup = null; // {lat, lng}
 let currentDestination = null; // {lat, lng, label}
 let driverLocation = null; // {lat, lng}
+let passengerPickup = null; // {lat, lng, label}
 let etaCountdown = null;
 let etaSeconds = 0;
+let driverToPassengerAnim = null;
 
 function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
@@ -500,6 +503,145 @@ function animateDriverToPickup() {
     }
     
     requestAnimationFrame(moveStep);
+}
+
+function clearDriverPassengerRoute() {
+    if (driverToPassengerAnim) {
+        cancelAnimationFrame(driverToPassengerAnim);
+        driverToPassengerAnim = null;
+    }
+    if (passengerMarkerL) {
+        passengerMarkerL.remove();
+        passengerMarkerL = null;
+    }
+    if (routePolyline) {
+        routePolyline.remove();
+        routePolyline = null;
+    }
+    passengerPickup = null;
+}
+
+function getDriverBaseLocation() {
+    if (driverLocation) return { ...driverLocation };
+    if (currentPickup) return { ...currentPickup };
+    if (leafletMap) {
+        const center = leafletMap.getCenter();
+        return { lat: center.lat, lng: center.lng };
+    }
+    return { lat: 30.0444, lng: 31.2357 };
+}
+
+function ensureDriverMarker(location) {
+    if (!leafletMap) return;
+    const carIcon = L.divIcon({
+        className: 'driver-car-marker',
+        html: '<div style="font-size: 32px; transform: rotate(0deg);"><i class="fas fa-car" style="color: #10b981;"></i></div>',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+    });
+
+    if (driverMarkerL) {
+        driverMarkerL.setLatLng([location.lat, location.lng]);
+        return;
+    }
+    driverMarkerL = L.marker([location.lat, location.lng], { icon: carIcon }).addTo(leafletMap);
+    driverMarkerL.bindPopup('🚗 موقعك الحالي').openPopup();
+}
+
+function setPassengerPickup(coords, label) {
+    passengerPickup = { ...coords, label: label || 'موقع الراكب' };
+    if (!leafletMap) return;
+    if (passengerMarkerL) passengerMarkerL.remove();
+
+    const riderIcon = L.divIcon({
+        className: 'passenger-marker',
+        html: '<div style="font-size: 26px;"><i class="fas fa-user" style="color: #0f172a;"></i></div>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+    });
+
+    passengerMarkerL = L.marker([coords.lat, coords.lng], { icon: riderIcon }).addTo(leafletMap);
+    passengerMarkerL.bindPopup(passengerPickup.label).openPopup();
+}
+
+function generatePassengerPickup(base) {
+    const offsetLat = (Math.random() > 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.02);
+    const offsetLng = (Math.random() > 0.5 ? 1 : -1) * (0.01 + Math.random() * 0.02);
+    return {
+        lat: base.lat + offsetLat,
+        lng: base.lng + offsetLng,
+        label: 'موقع الراكب'
+    };
+}
+
+function startDriverToPassengerRoute() {
+    if (!leafletMap) return;
+    clearDriverPassengerRoute();
+
+    const driverStart = getDriverBaseLocation();
+    ensureDriverMarker(driverStart);
+
+    if (pickupMarkerL) {
+        pickupMarkerL.remove();
+        pickupMarkerL = null;
+    }
+
+    const passenger = passengerPickup || generatePassengerPickup(driverStart);
+    setPassengerPickup(passenger, passenger.label);
+
+    routePolyline = L.polyline([
+        [driverStart.lat, driverStart.lng],
+        [passenger.lat, passenger.lng]
+    ], { color: '#10b981', weight: 4, opacity: 0.8, dashArray: '8, 8' }).addTo(leafletMap);
+
+    const bounds = L.latLngBounds([
+        [driverStart.lat, driverStart.lng],
+        [passenger.lat, passenger.lng]
+    ]);
+    leafletMap.fitBounds(bounds, { padding: [50, 50] });
+
+    animateDriverToPassenger(driverStart, passenger);
+}
+
+function animateDriverToPassenger(start, target) {
+    const distanceMeters = calculateDistance(start.lat, start.lng, target.lat, target.lng);
+    const speedMps = 9; // ~32 km/h
+    const duration = Math.max(20000, Math.min(180000, Math.round(distanceMeters / speedMps) * 1000));
+    const startTime = Date.now();
+
+    function moveStep() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+
+        const currentLat = start.lat + (target.lat - start.lat) * eased;
+        const currentLng = start.lng + (target.lng - start.lng) * eased;
+        driverLocation = { lat: currentLat, lng: currentLng };
+
+        if (driverMarkerL) driverMarkerL.setLatLng([currentLat, currentLng]);
+        if (routePolyline) {
+            routePolyline.setLatLngs([
+                [currentLat, currentLng],
+                [target.lat, target.lng]
+            ]);
+        }
+
+        const bearing = calculateBearing(currentLat, currentLng, target.lat, target.lng);
+        const carEl = driverMarkerL && driverMarkerL.getElement();
+        if (carEl) {
+            const iconDiv = carEl.querySelector('div');
+            if (iconDiv) iconDiv.style.transform = `rotate(${bearing}deg)`;
+        }
+
+        if (progress < 1) {
+            driverToPassengerAnim = requestAnimationFrame(moveStep);
+        } else {
+            driverToPassengerAnim = null;
+            showToast('✅ وصلت إلى موقع الراكب');
+        }
+    }
+
+    driverToPassengerAnim = requestAnimationFrame(moveStep);
 }
 
 function calculateBearing(lat1, lng1, lat2, lng2) {
@@ -1264,6 +1406,7 @@ window.sendChatMessage = function() {
 window.driverRejectRequest = function() {
     document.getElementById('driver-incoming-request').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
+    clearDriverPassengerRoute();
     showToast('تم رفض الطلب');
     scheduleMockRequest();
 };
@@ -1271,12 +1414,14 @@ window.driverRejectRequest = function() {
 window.driverAcceptRequest = function() {
     document.getElementById('driver-incoming-request').classList.add('hidden');
     document.getElementById('driver-active-trip').classList.remove('hidden');
+    startDriverToPassengerRoute();
     showToast('تم قبول الطلب! اذهب للراكب');
 };
 
 window.driverEndTrip = function() {
     document.getElementById('driver-active-trip').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
+    clearDriverPassengerRoute();
     showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
     triggerConfetti();
     
