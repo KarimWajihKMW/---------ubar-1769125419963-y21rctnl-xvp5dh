@@ -448,13 +448,13 @@
             </div>
             
             <div class="filter-section">
-                <button class="filter-btn active" onclick="filterTrips('all')">
+                <button class="filter-btn active" onclick="filterTrips('all', this)">
                     الكل
                 </button>
-                <button class="filter-btn" onclick="filterTrips('nearby')">
+                <button class="filter-btn" onclick="filterTrips('nearby', this)">
                     القريبة
                 </button>
-                <button class="filter-btn" onclick="filterTrips('high-price')">
+                <button class="filter-btn" onclick="filterTrips('high-price', this)">
                     الأسعار العالية
                 </button>
             </div>
@@ -465,6 +465,7 @@
     
     <script>
         let currentFilter = 'pending';
+        let currentFilterType = 'all';
         let allTrips = [];
         
         // نموذج بيانات الرحلات
@@ -535,81 +536,101 @@
         
         function showTrips(filter) {
             currentFilter = filter;
+            currentFilterType = 'all';
+            setActiveFilterButton('all', document.querySelector('.filter-btn'));
+            renderTrips();
             const container = document.getElementById('tripsContainer');
+            container.style.display = 'block';
+            container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function setActiveFilterButton(filterType, buttonEl) {
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            if (buttonEl) {
+                buttonEl.classList.add('active');
+                return;
+            }
+            const fallback = document.querySelector('.filter-btn');
+            if (fallback) fallback.classList.add('active');
+        }
+
+        function filterTrips(filterType, buttonEl) {
+            currentFilterType = filterType;
+            setActiveFilterButton(filterType, buttonEl);
+            renderTrips();
+        }
+
+        function renderTrips() {
             const tripsList = document.getElementById('tripsList');
             const listTitle = document.getElementById('listTitle');
-            
-            // تحديث العنوان
+
             const titles = {
                 'pending': 'الطلبات المعلقة',
                 'active': 'الرحلات النشطة',
                 'completed': 'الرحلات المكتملة'
             };
-            listTitle.textContent = titles[filter];
-            
-            // تصفية الرحلات
-            const filtered = allTrips.filter(trip => trip.status === filter);
-            
-            // إنشاء HTML
+            listTitle.textContent = titles[currentFilter];
+
+            let filtered = allTrips.filter(trip => trip.status === currentFilter);
+
+            if (currentFilterType === 'nearby') {
+                filtered = filtered.filter(trip => trip.distance <= 10);
+            } else if (currentFilterType === 'high-price') {
+                filtered = filtered.filter(trip => trip.price >= 60);
+            }
+
             if (filtered.length === 0) {
+                const filterLabel = currentFilterType === 'all'
+                    ? titles[currentFilter]
+                    : currentFilterType === 'nearby'
+                        ? 'الطلبات القريبة'
+                        : 'الطلبات ذات الأسعار العالية';
                 tripsList.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">📭</div>
                         <div class="empty-state-text">لا توجد رحلات</div>
-                        <div>حالياً لا توجد ${titles[filter].toLowerCase()}</div>
+                        <div>حالياً لا توجد ${filterLabel}</div>
                     </div>
                 `;
-            } else {
-                tripsList.innerHTML = filtered.map(trip => `
-                    <div class="trip-card">
-                        <div class="trip-info">
-                            <div class="trip-avatar">${trip.initials}</div>
-                            <div class="trip-details">
-                                <div class="trip-passenger-name">${trip.passenger}</div>
-                                <div class="trip-locations">
-                                    <span class="trip-location-icon">📍</span>
-                                    <span>${trip.from} ← ${trip.to}</span>
-                                </div>
-                                <div style="font-size: 0.8em; color: #999; margin-top: 5px;">
-                                    <i class="fas fa-road"></i> ${trip.distance} كم
-                                </div>
+                return;
+            }
+
+            tripsList.innerHTML = filtered.map(trip => `
+                <div class="trip-card">
+                    <div class="trip-info">
+                        <div class="trip-avatar">${trip.initials}</div>
+                        <div class="trip-details">
+                            <div class="trip-passenger-name">${trip.passenger}</div>
+                            <div class="trip-locations">
+                                <span class="trip-location-icon">📍</span>
+                                <span>${trip.from} ← ${trip.to}</span>
+                            </div>
+                            <div style="font-size: 0.8em; color: #999; margin-top: 5px;">
+                                <i class="fas fa-road"></i> ${trip.distance} كم
                             </div>
                         </div>
-                        <div class="trip-price">${trip.price} ر.س</div>
-                        ${filter === 'pending' ? `
-                            <div class="trip-actions">
-                                <button class="accept-btn" onclick="acceptTrip(${trip.id})">
-                                    <i class="fas fa-check"></i> قبول
-                                </button>
-                                <button class="reject-btn" onclick="rejectTrip(${trip.id})">
-                                    <i class="fas fa-times"></i> رفض
-                                </button>
-                            </div>
-                        ` : `
-                            <div style="margin-right: 15px;">
-                                <span class="status-badge status-${filter === 'active' ? 'accepted' : 'completed'}">
-                                    ${filter === 'active' ? '🚗 نشطة' : '✅ مكتملة'}
-                                </span>
-                            </div>
-                        `}
                     </div>
-                `).join('');
-            }
-            
-            container.style.display = 'block';
-            container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-        
-        function filterTrips(filterType) {
-            // تحديث الأزرار
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-            
-            // تطبيق التصفية
-            // يمكن توسيع هذه الوظيفة لتصفية حسب المسافة أو السعر
-            console.log('تم التصفية حسب:', filterType);
+                    <div class="trip-price">${trip.price} ر.س</div>
+                    ${currentFilter === 'pending' ? `
+                        <div class="trip-actions">
+                            <button class="accept-btn" onclick="acceptTrip(${trip.id})">
+                                <i class="fas fa-check"></i> قبول
+                            </button>
+                            <button class="reject-btn" onclick="rejectTrip(${trip.id})">
+                                <i class="fas fa-times"></i> رفض
+                            </button>
+                        </div>
+                    ` : `
+                        <div style="margin-right: 15px;">
+                            <span class="status-badge status-${currentFilter === 'active' ? 'accepted' : 'completed'}">
+                                ${currentFilter === 'active' ? '🚗 نشطة' : '✅ مكتملة'}
+                            </span>
+                        </div>
+                    `}
+                </div>
+            `).join('');
         }
         
         function acceptTrip(tripId) {
