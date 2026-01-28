@@ -1864,7 +1864,23 @@ window.renderOffers = function() {
     const emptyState = document.getElementById('empty-offers-state');
     if (!container || !emptyState) return;
 
-    const offers = [];
+    const offers = [
+        {
+            title: '🎉 خصم 20% على أول رحلة',
+            description: 'استخدم الكود WELCOME20 على أول طلب لك واحصل على خصم فوري.',
+            badge: 'جديد'
+        },
+        {
+            title: '🚗 رحلتان بسعر 1',
+            description: 'رحلتك الثانية مجاناً عند الدفع بالبطاقة خلال هذا الأسبوع.',
+            badge: 'محدود'
+        },
+        {
+            title: '⭐ نقاط مضاعفة',
+            description: 'اكسب ضعف النقاط على الرحلات المكتملة في عطلة نهاية الأسبوع.',
+            badge: 'نقاط'
+        }
+    ];
 
     container.innerHTML = '';
     if (!offers.length) {
