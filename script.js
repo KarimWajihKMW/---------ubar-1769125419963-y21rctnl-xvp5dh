@@ -1448,6 +1448,10 @@ window.closeChat = function() {
     switchSection(previousState);
 };
 
+window.openDriverProfile = function() {
+    window.location.href = 'profile.html';
+};
+
 window.sendChatMessage = function() {
     const chatInput = document.getElementById('chat-input');
     const chatMessages = document.getElementById('chat-messages');
@@ -2705,6 +2709,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (profileBtn) profileBtn.addEventListener('click', () => {
         window.switchSection('profile');
         if(backBtn) backBtn.classList.remove('hidden');
+    });
+
+    const driverProfileBtn = document.getElementById('driver-profile-btn');
+    if (driverProfileBtn) driverProfileBtn.addEventListener('click', () => {
+        if (window.openDriverProfile) window.openDriverProfile();
     });
 
     const chatInput = document.getElementById('chat-input');
