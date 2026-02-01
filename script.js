@@ -1266,21 +1266,35 @@ window.loginWithEmail = async function() {
             return;
         }
         
-        // Check if user is passenger
         const userData = result.data;
+
+        // Reset attempts on successful login
+        loginAttempts = 0;
+
+        // Save user data
+        DB.currentUser = userData;
+        DB.setUser(userData);
+        DB.saveSession();
+
+        showToast(`✅ مرحباً ${userData.name}`);
+
+        if (userData.role === 'admin') {
+            window.closeAuthModal();
+            initAdminMode();
+            return;
+        }
+
+        if (userData.role === 'driver') {
+            window.closeAuthModal();
+            initDriverMode();
+            return;
+        }
+
         if (userData.role !== 'passenger') {
             showToast(`❌ هذا الحساب ليس حساب راكب`);
             return;
         }
-        
-        // Reset attempts on successful login
-        loginAttempts = 0;
-        
-        // Save user data
-        DB.currentUser = userData;
-        DB.setUser(userData);
-        
-        showToast(`✅ مرحباً ${userData.name}`);
+
         loginSuccess();
     } catch (error) {
         console.error('Login error:', error);
