@@ -48,6 +48,41 @@ app.use(express.json());
 app.use(express.static('.'));
 app.use('/uploads', express.static(uploadsDir));
 
+const DEFAULT_ADMIN_USERS = [
+    {
+        phone: '0555678901',
+        name: 'عبدالرحمن إبراهيم',
+        email: 'admin@ubar.sa',
+        password: '12345678',
+        role: 'admin'
+    },
+    {
+        phone: '0556789012',
+        name: 'هند خالد',
+        email: 'admin2@ubar.sa',
+        password: '12345678',
+        role: 'admin'
+    }
+];
+
+async function ensureDefaultAdmins() {
+    try {
+        for (const admin of DEFAULT_ADMIN_USERS) {
+            const existing = await pool.query('SELECT id FROM users WHERE email = $1', [admin.email]);
+            if (existing.rows.length > 0) continue;
+
+            await pool.query(
+                `INSERT INTO users (phone, name, email, password, role)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [admin.phone, admin.name, admin.email, admin.password, admin.role]
+            );
+        }
+        console.log('✅ Default admin users ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure default admins:', err.message);
+    }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
@@ -673,7 +708,9 @@ app.post('/api/users/login', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📍 API available at http://localhost:${PORT}/api`);
+ensureDefaultAdmins().finally(() => {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server running on port ${PORT}`);
+        console.log(`📍 API available at http://localhost:${PORT}/api`);
+    });
 });
