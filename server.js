@@ -88,6 +88,17 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
 });
 
+// Database health check
+app.get('/api/db/health', async (req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        res.json({ status: 'OK', message: 'Database is connected' });
+    } catch (err) {
+        console.error('Database health check failed:', err);
+        res.status(500).json({ status: 'ERROR', message: 'Database connection failed' });
+    }
+});
+
 // ==================== TRIPS ENDPOINTS ====================
 
 // Get all trips with filtering

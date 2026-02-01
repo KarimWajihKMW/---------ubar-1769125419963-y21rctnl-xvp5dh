@@ -11,33 +11,39 @@ async function testAPI() {
         let data = await response.json();
         console.log('✅ Health:', data);
         
-        // Test 2: Get all trips
-        console.log('\n2️⃣ Testing get all trips...');
+        // Test 2: Database health check
+        console.log('\n2️⃣ Testing database health endpoint...');
+        response = await fetch(`${baseURL}/db/health`);
+        data = await response.json();
+        console.log('✅ DB Health:', data);
+
+        // Test 3: Get all trips
+        console.log('\n3️⃣ Testing get all trips...');
         response = await fetch(`${baseURL}/trips`);
         data = await response.json();
         console.log(`✅ Total trips: ${data.total}`);
         console.log(`   First trip:`, data.data[0]);
-        
-        // Test 3: Get completed trips
-        console.log('\n3️⃣ Testing get completed trips...');
+
+        // Test 4: Get completed trips
+        console.log('\n4️⃣ Testing get completed trips...');
         response = await fetch(`${baseURL}/trips/completed`);
         data = await response.json();
         console.log(`✅ Completed trips: ${data.count}`);
-        
-        // Test 4: Get cancelled trips
-        console.log('\n4️⃣ Testing get cancelled trips...');
+
+        // Test 5: Get cancelled trips
+        console.log('\n5️⃣ Testing get cancelled trips...');
         response = await fetch(`${baseURL}/trips/cancelled`);
         data = await response.json();
         console.log(`✅ Cancelled trips: ${data.count}`);
-        
-        // Test 5: Get trip statistics
-        console.log('\n5️⃣ Testing trip statistics...');
+
+        // Test 6: Get trip statistics
+        console.log('\n6️⃣ Testing trip statistics...');
         response = await fetch(`${baseURL}/trips/stats/summary`);
         data = await response.json();
         console.log('✅ Stats:', data.data);
-        
-        // Test 6: Create a new trip
-        console.log('\n6️⃣ Testing create new trip...');
+
+        // Test 7: Create a new trip
+        console.log('\n7️⃣ Testing create new trip...');
         const newTrip = {
             pickup_location: 'شارع التحلية، الرياض',
             dropoff_location: 'العليا مول',
@@ -59,8 +65,8 @@ async function testAPI() {
         
         const createdTripId = data.data.id;
         
-        // Test 7: Update trip status to completed
-        console.log('\n7️⃣ Testing update trip to completed...');
+        // Test 8: Update trip status to completed
+        console.log('\n8️⃣ Testing update trip to completed...');
         response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -68,15 +74,15 @@ async function testAPI() {
         });
         data = await response.json();
         console.log('✅ Updated trip status:', data.data.status);
-        
-        // Test 8: Get single trip
-        console.log('\n8️⃣ Testing get single trip...');
+
+        // Test 9: Get single trip
+        console.log('\n9️⃣ Testing get single trip...');
         response = await fetch(`${baseURL}/trips/${createdTripId}`);
         data = await response.json();
         console.log('✅ Trip details:', data.data);
-        
-        // Test 9: Get available drivers
-        console.log('\n9️⃣ Testing get available drivers...');
+
+        // Test 1️⃣0️⃣: Get available drivers
+        console.log('\n1️⃣0️⃣ Testing get available drivers...');
         response = await fetch(`${baseURL}/drivers`);
         data = await response.json();
         console.log(`✅ Available drivers: ${data.data.length}`);
