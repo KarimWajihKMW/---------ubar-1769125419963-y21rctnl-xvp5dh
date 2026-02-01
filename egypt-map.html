@@ -501,6 +501,26 @@
         
         // Go back
         function goBack() {
+            const params = new URLSearchParams(window.location.search);
+            const returnTo = params.get('returnTo');
+
+            if (returnTo) {
+                window.location.href = returnTo;
+                return;
+            }
+
+            if (document.referrer) {
+                try {
+                    const referrerUrl = new URL(document.referrer);
+                    if (referrerUrl.origin === window.location.origin) {
+                        window.history.back();
+                        return;
+                    }
+                } catch (error) {
+                    // Ignore invalid referrer
+                }
+            }
+
             window.location.href = 'menu.html';
         }
         
