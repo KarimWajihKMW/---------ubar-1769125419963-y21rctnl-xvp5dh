@@ -240,8 +240,8 @@
             if (document.referrer) {
                 try {
                     const referrerUrl = new URL(document.referrer);
-                    if (referrerUrl.origin === window.location.origin && referrerUrl.pathname.endsWith('/egypt-map.html')) {
-                        window.location.href = 'menu.html';
+                    if (referrerUrl.origin === window.location.origin) {
+                        window.history.back();
                         return;
                     }
                 } catch (error) {
@@ -249,7 +249,7 @@
                 }
             }
 
-            window.history.back();
+            window.location.href = 'menu.html';
         }
     </script>
 </body>
