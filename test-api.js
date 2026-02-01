@@ -42,8 +42,14 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Stats:', data.data);
 
-        // Test 7: Create a new trip
-        console.log('\n7️⃣ Testing create new trip...');
+        // Test 7: Get users
+        console.log('\n7️⃣ Testing get users...');
+        response = await fetch(`${baseURL}/users`);
+        data = await response.json();
+        console.log(`✅ Total users: ${data.total}`);
+
+        // Test 8: Create a new trip
+        console.log('\n8️⃣ Testing create new trip...');
         const newTrip = {
             pickup_location: 'شارع التحلية، الرياض',
             dropoff_location: 'العليا مول',
@@ -65,8 +71,8 @@ async function testAPI() {
         
         const createdTripId = data.data.id;
         
-        // Test 8: Update trip status to completed
-        console.log('\n8️⃣ Testing update trip to completed...');
+        // Test 9: Update trip status to completed
+        console.log('\n9️⃣ Testing update trip to completed...');
         response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -75,14 +81,14 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Updated trip status:', data.data.status);
 
-        // Test 9: Get single trip
-        console.log('\n9️⃣ Testing get single trip...');
+        // Test 1️⃣0️⃣: Get single trip
+        console.log('\n1️⃣0️⃣ Testing get single trip...');
         response = await fetch(`${baseURL}/trips/${createdTripId}`);
         data = await response.json();
         console.log('✅ Trip details:', data.data);
 
-        // Test 1️⃣0️⃣: Get available drivers
-        console.log('\n1️⃣0️⃣ Testing get available drivers...');
+        // Test 1️⃣1️⃣: Get available drivers
+        console.log('\n1️⃣1️⃣ Testing get available drivers...');
         response = await fetch(`${baseURL}/drivers`);
         data = await response.json();
         console.log(`✅ Available drivers: ${data.data.length}`);

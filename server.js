@@ -592,6 +592,58 @@ app.patch('/api/drivers/:id/approval', async (req, res) => {
 
 // ==================== USERS ENDPOINTS ====================
 
+// Get users with optional filtering
+app.get('/api/users', async (req, res) => {
+    try {
+        const { role, limit = 50, offset = 0 } = req.query;
+
+        let query = 'SELECT id, phone, name, email, role, created_at FROM users WHERE 1=1';
+        const params = [];
+        let paramCount = 0;
+
+        if (role && role !== 'all') {
+            paramCount++;
+            query += ` AND role = $${paramCount}`;
+            params.push(role);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        paramCount++;
+        query += ` LIMIT $${paramCount}`;
+        params.push(limit);
+
+        paramCount++;
+        query += ` OFFSET $${paramCount}`;
+        params.push(offset);
+
+        const result = await pool.query(query, params);
+
+        let countQuery = 'SELECT COUNT(*) FROM users WHERE 1=1';
+        const countParams = [];
+        let countParamIndex = 0;
+
+        if (role && role !== 'all') {
+            countParamIndex++;
+            countQuery += ` AND role = $${countParamIndex}`;
+            countParams.push(role);
+        }
+
+        const countResult = await pool.query(countQuery, countParams);
+
+        res.json({
+            success: true,
+            data: result.rows,
+            total: parseInt(countResult.rows[0].count, 10),
+            limit: parseInt(limit, 10),
+            offset: parseInt(offset, 10)
+        });
+    } catch (err) {
+        console.error('Error fetching users:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // Login with email and password
 app.post('/api/auth/login', async (req, res) => {
     try {
