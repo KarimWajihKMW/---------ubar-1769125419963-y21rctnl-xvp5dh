@@ -603,9 +603,15 @@
             let filtered = allTrips.filter(trip => trip.status === currentFilter);
 
             if (currentFilterType === 'nearby') {
-                filtered = filtered.slice().sort((a, b) => a.distance - b.distance);
+                filtered = filtered
+                    .slice()
+                    .sort((a, b) => Number(a.distance || 0) - Number(b.distance || 0))
+                    .slice(0, 5);
             } else if (currentFilterType === 'high-price') {
-                filtered = filtered.slice().sort((a, b) => b.price - a.price);
+                filtered = filtered
+                    .slice()
+                    .sort((a, b) => Number(b.price || 0) - Number(a.price || 0))
+                    .slice(0, 5);
             }
 
             if (filtered.length === 0) {
