@@ -2638,7 +2638,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Open auth modal directly when URL hash requests it
         const hash = window.location.hash;
-        if (hash === '#auth' || hash === '#auth-modal') {
+        if (hash === '#auth-admin' || hash === '#auth-driver') {
+            if (roleModal) {
+                roleModal.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+            }
+            const targetRole = hash === '#auth-admin' ? 'admin' : 'driver';
+            setTimeout(() => {
+                if (typeof window.openRoleLoginModal === 'function') {
+                    window.openRoleLoginModal(targetRole);
+                }
+            }, 100);
+        } else if (hash === '#auth' || hash === '#auth-modal' || hash === '#auth-passenger') {
             if (roleModal) {
                 roleModal.classList.add('hidden', 'opacity-0', 'pointer-events-none');
             }
@@ -2647,6 +2657,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.openAuthModal();
                 }
             }, 100);
+        } else if (hash === '#auth-role') {
+            if (roleModal) {
+                roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+            }
         }
 
         // Bind role buttons even if inline onclick is blocked by CSP
