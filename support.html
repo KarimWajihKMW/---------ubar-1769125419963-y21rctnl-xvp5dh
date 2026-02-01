@@ -175,7 +175,7 @@
                 </div>
             </a>
             
-            <a class="support-option" href="egypt-map.html?returnTo=support.html" aria-label="عرض الفروع القريبة">
+            <a class="support-option" id="nearby-branches-link" href="egypt-map.html?returnTo=support.html" aria-label="عرض الفروع القريبة">
                 <div class="support-icon">
                     <i class="fas fa-map-marker-alt"></i>
                 </div>
@@ -236,7 +236,28 @@
             element.classList.toggle('active');
         }
 
+        function getReturnTo() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('returnTo');
+        }
+
+        function setupReturnLinks() {
+            const returnTo = getReturnTo();
+            const branchesLink = document.getElementById('nearby-branches-link');
+
+            if (branchesLink && returnTo) {
+                const encoded = encodeURIComponent(returnTo);
+                branchesLink.href = `egypt-map.html?returnTo=${encoded}`;
+            }
+        }
+
         function goBack() {
+            const returnTo = getReturnTo();
+            if (returnTo) {
+                window.location.href = returnTo;
+                return;
+            }
+
             if (document.referrer) {
                 try {
                     const referrerUrl = new URL(document.referrer);
@@ -251,6 +272,8 @@
 
             window.location.href = 'menu.html';
         }
+
+        window.addEventListener('DOMContentLoaded', setupReturnLinks);
     </script>
 </body>
 </html>
