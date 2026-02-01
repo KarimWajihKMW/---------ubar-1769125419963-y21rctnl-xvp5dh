@@ -211,6 +211,26 @@
             font-size: 1.5em;
             margin-bottom: 10px;
         }
+
+        .card-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            text-decoration: none;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+
+        .card-action:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.35);
+        }
     </style>
 </head>
 <body>
@@ -234,6 +254,10 @@
                 <div class="status success">✓ يعمل</div>
                 <p>الخادم يعمل على المنفذ 3000</p>
                 <p style="font-size: 0.85em; color: #666; margin-top: 10px;">الحالة: متصل بقاعدة البيانات</p>
+                <a href="/api/health" target="_blank" rel="noopener" class="card-action">
+                    <span>فتح حالة الخادم</span>
+                    <span>↗</span>
+                </a>
             </div>
             
             <div class="card">
