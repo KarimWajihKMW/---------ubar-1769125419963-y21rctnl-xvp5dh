@@ -2601,9 +2601,23 @@ document.addEventListener('DOMContentLoaded', () => {
         centerMap();
         animateAmbientCars();
         
-        // Show role selection modal on startup
+        // Show role selection modal only when no session exists
         const roleModal = document.getElementById('role-selection-modal');
-        if (roleModal) {
+        if (DB.hasSession()) {
+            if (roleModal) {
+                roleModal.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+            }
+            const user = DB.getUser();
+            const role = user?.role || 'passenger';
+            currentUserRole = role;
+            if (role === 'driver') {
+                initDriverMode();
+            } else if (role === 'admin') {
+                initAdminMode();
+            } else {
+                initPassengerMode();
+            }
+        } else if (roleModal) {
             roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
         }
 
