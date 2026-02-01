@@ -2281,6 +2281,21 @@ function toggleDriverMenu() {
     }
 }
 
+function toggleAdminMenu() {
+    const sideMenu = document.getElementById('admin-side-menu');
+    const menuOverlay = document.getElementById('admin-menu-overlay');
+    if (!sideMenu || !menuOverlay) return;
+
+    const isOpen = sideMenu.classList.contains('sidebar-open');
+    if (isOpen) {
+        sideMenu.classList.remove('sidebar-open');
+        menuOverlay.classList.remove('overlay-open');
+    } else {
+        sideMenu.classList.add('sidebar-open');
+        menuOverlay.classList.add('overlay-open');
+    }
+}
+
 // --- Map Drag Logic (Enhanced for Mobile Touch) ---
 function startDrag(e) {
     if (!isMapWorldActive()) return;
@@ -2709,6 +2724,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (driverCloseMenuBtn) driverCloseMenuBtn.addEventListener('click', toggleDriverMenu);
     if (driverMenuOverlay) driverMenuOverlay.addEventListener('click', toggleDriverMenu);
     document.querySelectorAll('#driver-side-menu a').forEach(link => link.addEventListener('click', toggleDriverMenu));
+
+    const adminMenuBtn = document.getElementById('admin-menu-btn');
+    const adminCloseMenuBtn = document.getElementById('admin-close-menu-btn');
+    const adminMenuOverlay = document.getElementById('admin-menu-overlay');
+
+    if (adminMenuBtn) adminMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleAdminMenu(); });
+    if (adminCloseMenuBtn) adminCloseMenuBtn.addEventListener('click', toggleAdminMenu);
+    if (adminMenuOverlay) adminMenuOverlay.addEventListener('click', toggleAdminMenu);
+    document.querySelectorAll('#admin-side-menu a').forEach(link => link.addEventListener('click', toggleAdminMenu));
 
     const destInput = document.getElementById('dest-input');
     if (destInput) {
