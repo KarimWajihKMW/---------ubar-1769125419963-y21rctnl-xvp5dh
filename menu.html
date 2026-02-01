@@ -598,20 +598,21 @@
                 'active': 'الرحلات النشطة',
                 'completed': 'الرحلات المكتملة'
             };
+            const baseTrips = allTrips.filter(trip => trip.status === currentFilter);
             listTitle.textContent = titles[currentFilter];
 
-            let filtered = allTrips.filter(trip => trip.status === currentFilter);
+            let filtered = baseTrips;
 
             if (currentFilterType === 'nearby') {
-                filtered = filtered
+                const source = baseTrips.length ? baseTrips : allTrips;
+                filtered = source
                     .slice()
-                    .sort((a, b) => Number(a.distance || 0) - Number(b.distance || 0))
-                    .slice(0, 5);
+                    .sort((a, b) => Number(a.distance || 0) - Number(b.distance || 0));
             } else if (currentFilterType === 'high-price') {
-                filtered = filtered
+                const source = baseTrips.length ? baseTrips : allTrips;
+                filtered = source
                     .slice()
-                    .sort((a, b) => Number(b.price || 0) - Number(a.price || 0))
-                    .slice(0, 5);
+                    .sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
             }
 
             if (filtered.length === 0) {
@@ -630,7 +631,14 @@
                 return;
             }
 
-            tripsList.innerHTML = filtered.map(trip => `
+            tripsList.innerHTML = filtered.map(trip => {
+                const statusMap = {
+                    pending: { label: '⏳ معلقة', className: 'status-pending' },
+                    active: { label: '🚗 نشطة', className: 'status-accepted' },
+                    completed: { label: '✅ مكتملة', className: 'status-completed' }
+                };
+                const statusInfo = statusMap[trip.status] || statusMap.pending;
+                return `
                 <div class="trip-card">
                     <div class="trip-info">
                         <div class="trip-avatar">${trip.initials}</div>
@@ -646,7 +654,7 @@
                         </div>
                     </div>
                     <div class="trip-price">${trip.price} ر.س</div>
-                    ${currentFilter === 'pending' ? `
+                    ${trip.status === 'pending' ? `
                         <div class="trip-actions">
                             <button class="accept-btn" onclick="acceptTrip(${trip.id})">
                                 <i class="fas fa-check"></i> قبول
@@ -657,13 +665,14 @@
                         </div>
                     ` : `
                         <div style="margin-right: 15px;">
-                            <span class="status-badge status-${currentFilter === 'active' ? 'accepted' : 'completed'}">
-                                ${currentFilter === 'active' ? '🚗 نشطة' : '✅ مكتملة'}
+                            <span class="status-badge ${statusInfo.className}">
+                                ${statusInfo.label}
                             </span>
                         </div>
                     `}
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
         
         function acceptTrip(tripId) {
