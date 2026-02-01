@@ -594,23 +594,31 @@
             const listTitle = document.getElementById('listTitle');
 
             const titles = {
-                'pending': 'الطلبات المعلقة',
-                'active': 'الرحلات النشطة',
-                'completed': 'الرحلات المكتملة'
+                pending: 'الطلبات المعلقة',
+                active: 'الرحلات النشطة',
+                completed: 'الرحلات المكتملة'
             };
-            const baseTrips = allTrips.filter(trip => trip.status === currentFilter);
-            listTitle.textContent = titles[currentFilter];
+
+            let baseTrips = [];
+
+            if (currentFilterType === 'all') {
+                baseTrips = allTrips.filter(trip => trip.status === currentFilter);
+                listTitle.textContent = titles[currentFilter];
+            } else {
+                baseTrips = allTrips.slice();
+                listTitle.textContent = currentFilterType === 'nearby'
+                    ? 'الطلبات القريبة'
+                    : 'الطلبات الأعلى سعراً';
+            }
 
             let filtered = baseTrips;
 
             if (currentFilterType === 'nearby') {
-                const source = baseTrips.length ? baseTrips : allTrips;
-                filtered = source
+                filtered = baseTrips
                     .slice()
                     .sort((a, b) => Number(a.distance || 0) - Number(b.distance || 0));
             } else if (currentFilterType === 'high-price') {
-                const source = baseTrips.length ? baseTrips : allTrips;
-                filtered = source
+                filtered = baseTrips
                     .slice()
                     .sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
             }
