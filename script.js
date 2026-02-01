@@ -2636,6 +2636,19 @@ document.addEventListener('DOMContentLoaded', () => {
             roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
         }
 
+        // Open auth modal directly when URL hash requests it
+        const hash = window.location.hash;
+        if (hash === '#auth' || hash === '#auth-modal') {
+            if (roleModal) {
+                roleModal.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+            }
+            setTimeout(() => {
+                if (typeof window.openAuthModal === 'function') {
+                    window.openAuthModal();
+                }
+            }, 100);
+        }
+
         // Bind role buttons even if inline onclick is blocked by CSP
         document.querySelectorAll('.role-card').forEach(btn => {
             const role = btn.dataset.role;
