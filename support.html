@@ -133,7 +133,7 @@
 </head>
 <body>
     <div class="container">
-        <button class="back-btn" onclick="history.back()">
+        <button class="back-btn" onclick="goBack()">
             <i class="fas fa-arrow-right"></i>
             رجوع
         </button>
@@ -234,6 +234,22 @@
     <script>
         function toggleFAQ(element) {
             element.classList.toggle('active');
+        }
+
+        function goBack() {
+            if (document.referrer) {
+                try {
+                    const referrerUrl = new URL(document.referrer);
+                    if (referrerUrl.origin === window.location.origin && referrerUrl.pathname.endsWith('/egypt-map.html')) {
+                        window.location.href = 'menu.html';
+                        return;
+                    }
+                } catch (error) {
+                    // Ignore invalid referrer
+                }
+            }
+
+            window.history.back();
         }
     </script>
 </body>
