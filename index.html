@@ -210,6 +210,13 @@
         40% { transform: scale(1); }
       }
 
+            /* Role-based visibility safeguards */
+            .role-passenger #driver-ui-container,
+            .role-passenger #driver-panel-toggle,
+            .role-passenger #driver-top-bar {
+                display: none !important;
+            }
+
       /* Role Selection Modal */
       .role-card {
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -866,6 +873,9 @@
             
             <!-- State 1: Where to? -->
             <div id="state-destination" class="px-4 sm:px-6 pb-6 sm:pb-8">
+                <div class="mb-3 sm:mb-4 bg-indigo-50 text-indigo-700 text-xs sm:text-sm font-bold py-2 px-3 rounded-xl">
+                    حدد موقعك والمكان اللي انت متجه له
+                </div>
                 <h2 class="text-xl sm:text-2xl font-extrabold text-gray-800 mb-4 sm:mb-6">إلى أين تريد الذهاب؟</h2>
                 
                 <div class="space-y-3 sm:space-y-4">

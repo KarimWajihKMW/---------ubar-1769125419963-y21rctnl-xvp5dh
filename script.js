@@ -1763,6 +1763,8 @@ function loginSuccess() {
 function initPassengerMode() {
     currentUserRole = 'passenger';
     window.currentUserRole = 'passenger';
+    document.body.classList.add('role-passenger');
+    document.body.classList.remove('role-driver');
     document.getElementById('passenger-ui-container').classList.remove('hidden');
     document.getElementById('passenger-top-bar').classList.remove('hidden');
     const driverUi = document.getElementById('driver-ui-container');
@@ -1816,6 +1818,8 @@ function initPassengerMode() {
 function initDriverMode() {
     currentUserRole = 'driver';
     window.currentUserRole = 'driver';
+    document.body.classList.add('role-driver');
+    document.body.classList.remove('role-passenger');
     document.getElementById('driver-ui-container').classList.remove('hidden');
     setDriverPanelVisible(true);
     const passengerUi = document.getElementById('passenger-ui-container');
