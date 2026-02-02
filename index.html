@@ -940,7 +940,12 @@
                     </div>
                 </div>
 
-                <div class="space-y-4 mb-8">
+                <button id="car-options-toggle" type="button" onclick="toggleCarOptions()" class="w-full mb-4 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors" aria-expanded="true">
+                    <i id="car-options-toggle-icon" class="fas fa-chevron-up"></i>
+                    <span id="car-options-toggle-text">إخفاء أنواع السيارات</span>
+                </button>
+
+                <div id="car-options-list" class="space-y-4 mb-8">
                     <!-- Economy -->
                     <div class="car-select flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'economy')">
                         <div class="flex items-center">

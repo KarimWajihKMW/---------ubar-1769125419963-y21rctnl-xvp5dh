@@ -1367,6 +1367,25 @@ window.selectCar = function(element, type) {
     }
 };
 
+window.toggleCarOptions = function() {
+    const list = document.getElementById('car-options-list');
+    const toggleBtn = document.getElementById('car-options-toggle');
+    const toggleText = document.getElementById('car-options-toggle-text');
+    const toggleIcon = document.getElementById('car-options-toggle-icon');
+
+    if (!list || !toggleBtn) return;
+
+    const isNowHidden = list.classList.toggle('hidden');
+    if (toggleText) {
+        toggleText.innerText = isNowHidden ? 'إظهار أنواع السيارات' : 'إخفاء أنواع السيارات';
+    }
+    if (toggleIcon) {
+        toggleIcon.classList.toggle('fa-chevron-down', isNowHidden);
+        toggleIcon.classList.toggle('fa-chevron-up', !isNowHidden);
+    }
+    toggleBtn.setAttribute('aria-expanded', (!isNowHidden).toString());
+};
+
 window.resetApp = function() {
     if (currentUserRole !== 'passenger') return;
 
