@@ -1534,6 +1534,8 @@ window.driverRejectRequest = function() {
 };
 
 window.driverAcceptRequest = function() {
+    const waiting = document.getElementById('driver-status-waiting');
+    if (waiting) waiting.classList.add('hidden');
     document.getElementById('driver-incoming-request').classList.add('hidden');
     document.getElementById('driver-active-trip').classList.remove('hidden');
     startDriverToPassengerRoute();
@@ -1740,6 +1742,8 @@ function initPassengerMode() {
 }
 
 function initDriverMode() {
+    currentUserRole = 'driver';
+    window.currentUserRole = 'driver';
     document.getElementById('driver-ui-container').classList.remove('hidden');
     const passengerUi = document.getElementById('passenger-ui-container');
     if (passengerUi) passengerUi.classList.add('hidden');
@@ -1770,7 +1774,9 @@ function scheduleMockRequest() {
     if (driverRequestTimeout) clearTimeout(driverRequestTimeout);
     driverRequestTimeout = setTimeout(() => {
         const waiting = document.getElementById('driver-status-waiting');
-        if (currentUserRole === 'driver' && waiting && !waiting.classList.contains('hidden')) {
+        const userRole = DB.getUser()?.role;
+        const isDriver = currentUserRole === 'driver' || userRole === 'driver';
+        if (isDriver && waiting && !waiting.classList.contains('hidden')) {
             waiting.classList.add('hidden');
             document.getElementById('driver-incoming-request').classList.remove('hidden');
         }
