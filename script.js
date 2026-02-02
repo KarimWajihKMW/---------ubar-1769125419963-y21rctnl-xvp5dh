@@ -314,6 +314,17 @@ function initLeafletMap() {
             }
         });
     }
+
+    // Hook pickup search input
+    const pickupInput = document.getElementById('current-loc-input');
+    if (pickupInput) {
+        pickupInput.addEventListener('keydown', evt => {
+            if (evt.key === 'Enter') {
+                const q = pickupInput.value.trim();
+                if (q) searchPickupByName(q);
+            }
+        });
+    }
 }
 
 function moveLeafletMapToContainer(containerId) {
@@ -385,6 +396,21 @@ function searchDestinationByName(q) {
         .catch(() => showToast('حدث خطأ في البحث'));
 }
 
+function searchPickupByName(q) {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&q=${encodeURIComponent(q)}`;
+    fetch(url, { headers: { 'Accept': 'application/json' }})
+        .then(r => r.json())
+        .then(arr => {
+            if (!arr || !arr.length) { showToast('لم يتم العثور على نتائج'); return; }
+            const best = arr[0];
+            const lat = parseFloat(best.lat), lon = parseFloat(best.lon);
+            setPickup({ lat, lng: lon }, best.display_name);
+            leafletMap.setView([lat, lon], 15);
+            showToast('تم تحديد موقع الالتقاط');
+        })
+        .catch(() => showToast('حدث خطأ في البحث'));
+}
+
 function reverseGeocode(lat, lng, callback) {
     const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ar`;
     fetch(url, { headers: { 'Accept': 'application/json' }})
@@ -400,7 +426,7 @@ function reverseGeocode(lat, lng, callback) {
 
 function updateCurrentLocationInput(text) {
     const inp = document.getElementById('current-loc-input');
-    if (inp) inp.value = text || 'موقعك الحالي';
+    if (inp) inp.value = text || 'حدد موقعك';
 }
 
 function updateMapSelectionButtons() {
@@ -842,7 +868,7 @@ window.endTripEarly = function() {
 window.shareRide = function() {
     const rideDetails = `
 🚗 تفاصيل رحلتي مع أكوادرا تاكسي
-من: ${document.getElementById('current-loc-input').value || 'موقعك الحالي'}
+من: ${document.getElementById('current-loc-input').value || 'حدد موقعك'}
 إلى: ${document.getElementById('dest-input').value || 'الوجهة'}
 السائق: أحمد محمد ⭐ 4.9
     `.trim();
@@ -2745,7 +2771,7 @@ function finishTrip() {
     const newTrip = {
         id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
         date: new Date().toISOString(),
-        pickup: "موقعك الحالي",
+        pickup: "حدد موقعك",
         dropoff: rideDestText ? rideDestText.innerText : "وجهة محددة",
         cost: currentTripPrice || 25,
         status: "completed",
@@ -3157,7 +3183,7 @@ window.showInvoice = function() {
     const finalPrice = subtotal - promoDiscount;
     
     // Populate invoice
-    document.getElementById('inv-from').innerText = document.getElementById('current-loc-input').value || 'موقعك الحالي';
+    document.getElementById('inv-from').innerText = document.getElementById('current-loc-input').value || 'حدد موقعك';
     document.getElementById('inv-to').innerText = document.getElementById('dest-input').value || 'الوجهة المختارة';
     document.getElementById('inv-date').innerText = new Date().toLocaleDateString('ar-EG');
     document.getElementById('inv-car').innerText = carTypes[carType];
@@ -3193,7 +3219,7 @@ window.proceedToPayment = function() {
         const newTrip = {
             id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
             date: new Date().toISOString(),
-            pickup: document.getElementById('current-loc-input').value || 'موقعك الحالي',
+            pickup: document.getElementById('current-loc-input').value || 'حدد موقعك',
             dropoff: rideDestText ? rideDestText.innerText : 'وجهة محددة',
             cost: amount,
             status: 'completed',
@@ -3447,7 +3473,7 @@ function createTripCard(trip, showDetailsButton = false) {
             <div class="bg-gray-50 rounded-xl p-3 mb-3">
                 <div class="flex items-start gap-2 mb-2">
                     <i class="fas fa-circle text-indigo-600 text-xs mt-1"></i>
-                    <p class="text-sm text-gray-700 font-bold flex-1">${trip.pickup || 'موقعك الحالي'}</p>
+                    <p class="text-sm text-gray-700 font-bold flex-1">${trip.pickup || 'حدد موقعك'}</p>
                 </div>
                 <div class="border-r-2 border-dashed border-gray-300 h-3 mr-1"></div>
                 <div class="flex items-start gap-2">
@@ -3540,7 +3566,7 @@ window.showTripDetails = function(tripId) {
     document.getElementById('trip-detail-status').innerHTML = `<i class="fas fa-check-circle ml-1"></i> ${statusLabels[trip.status] || statusLabels.completed}`;
     document.getElementById('trip-detail-id').innerText = trip.id;
     document.getElementById('trip-detail-date').innerText = formattedDateTime;
-    document.getElementById('trip-detail-pickup').innerText = trip.pickup || 'موقعك الحالي';
+    document.getElementById('trip-detail-pickup').innerText = trip.pickup || 'حدد موقعك';
     document.getElementById('trip-detail-dropoff').innerText = trip.dropoff || 'الوجهة';
     document.getElementById('trip-detail-driver-name').innerText = trip.driver || 'أحمد محمد';
     document.getElementById('trip-detail-driver-avatar').src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${trip.driver}`;
