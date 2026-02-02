@@ -545,7 +545,11 @@
         
         function logout() {
             if (confirm('هل تريد تسجيل الخروج؟')) {
+                const darkMode = localStorage.getItem('akwadra_dark_mode');
                 localStorage.clear();
+                if (darkMode !== null) {
+                    localStorage.setItem('akwadra_dark_mode', darkMode);
+                }
                 window.location.href = 'index.html';
             }
         }
