@@ -1690,33 +1690,6 @@
                 </button>
             </div>
 
-            <!-- Driver Status: Incoming Request -->
-            <div id="driver-incoming-request" class="hidden p-0 bg-white">
-                <div class="bg-gray-900 p-4 text-white flex justify-between items-center rounded-t-[2.5rem]">
-                    <span class="font-bold">طلب جديد!</span>
-                    <div class="flex items-center gap-2">
-                        <span class="bg-white/20 px-3 py-1 rounded-full text-xs">يبعد 3 كم</span>
-                        <button onclick="toggleDriverRequestPanel()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center">
-                            <i class="fas fa-chevron-down"></i>
-                        </button>
-                    </div>
-                </div>
-                <div id="driver-request-body" class="p-6">
-                    <div class="flex items-center mb-6">
-                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Passenger1" class="w-16 h-16 rounded-full bg-gray-100 mr-4">
-                        <div>
-                            <h3 class="text-xl font-bold">راكب تجريبي</h3>
-                            <p class="text-sm text-gray-500">رحلة اقتصادية • الدفع نقداً</p>
-                        </div>
-                        <div class="mr-auto text-2xl font-bold text-indigo-600">25 ر.س</div>
-                    </div>
-                    <div class="flex gap-4">
-                        <button onclick="driverRejectRequest()" class="flex-1 bg-red-50 text-red-600 py-4 rounded-xl font-bold hover:bg-red-100 transition-colors">رفض</button>
-                        <button onclick="driverAcceptRequest()" class="flex-1 bg-green-600 text-white py-4 rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-200 transition-colors animate-pulse">قبول</button>
-                    </div>
-                </div>
-            </div>
-
             <!-- Driver Status: Active Trip -->
             <div id="driver-active-trip" class="hidden p-6 bg-white">
                  <h3 class="text-xl font-bold mb-4">رحلة جارية</h3>

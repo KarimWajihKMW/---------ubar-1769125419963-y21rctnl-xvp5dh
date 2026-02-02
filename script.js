@@ -1545,7 +1545,8 @@ window.sendChatMessage = function() {
 };
 
 window.driverRejectRequest = function() {
-    document.getElementById('driver-incoming-request').classList.add('hidden');
+    const incoming = document.getElementById('driver-incoming-request');
+    if (incoming) incoming.classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
     setDriverPanelVisible(true);
     clearDriverPassengerRoute();
@@ -1556,7 +1557,8 @@ window.driverRejectRequest = function() {
 window.driverAcceptRequest = function() {
     const waiting = document.getElementById('driver-status-waiting');
     if (waiting) waiting.classList.add('hidden');
-    document.getElementById('driver-incoming-request').classList.add('hidden');
+    const incoming = document.getElementById('driver-incoming-request');
+    if (incoming) incoming.classList.add('hidden');
     document.getElementById('driver-active-trip').classList.remove('hidden');
     setDriverPanelVisible(true);
     startDriverToPassengerRoute();
@@ -1849,10 +1851,12 @@ function scheduleMockRequest() {
     if (driverRequestTimeout) clearTimeout(driverRequestTimeout);
     driverRequestTimeout = setTimeout(() => {
         const waiting = document.getElementById('driver-status-waiting');
+        const incoming = document.getElementById('driver-incoming-request');
+        if (!incoming) return;
         const isDriver = currentUserRole === 'driver';
         if (isDriver && waiting && !waiting.classList.contains('hidden')) {
             waiting.classList.add('hidden');
-            document.getElementById('driver-incoming-request').classList.remove('hidden');
+            incoming.classList.remove('hidden');
             setDriverPanelVisible(true);
         }
     }, 1000);
