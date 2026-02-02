@@ -1703,6 +1703,8 @@ function loginSuccess() {
 function initPassengerMode() {
     document.getElementById('passenger-ui-container').classList.remove('hidden');
     document.getElementById('passenger-top-bar').classList.remove('hidden');
+    const driverUi = document.getElementById('driver-ui-container');
+    if (driverUi) driverUi.classList.add('hidden');
     const driverTopBar = document.getElementById('driver-top-bar');
     if (driverTopBar) driverTopBar.classList.add('hidden');
     const driverMenu = document.getElementById('driver-side-menu');
