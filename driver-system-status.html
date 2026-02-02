@@ -231,9 +231,38 @@
             transform: translateY(-1px);
             box-shadow: 0 8px 16px rgba(102, 126, 234, 0.35);
         }
+
+        .back-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            backdrop-filter: blur(6px);
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .back-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+        }
     </style>
 </head>
 <body>
+    <a class="back-btn" href="menu.html" aria-label="العودة إلى قائمة الإدارة">
+        <span>↩</span>
+        <span>رجوع</span>
+    </a>
     <div class="container">
         <div class="header">
             <h1>🚗 نظام تسجيل السائقين - أكوادرا</h1>
