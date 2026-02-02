@@ -2,6 +2,11 @@
 <html>
 <head>
     <title>Test Buttons</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 24px; }
+        body.dark-mode { background: #0f172a; color: #e2e8f0; }
+        body.dark-mode button { background: #1f2937; color: #e5e7eb; border: 1px solid #334155; }
+    </style>
     <script>
         function testButton(name) {
             alert('Button clicked: ' + name);
@@ -14,5 +19,16 @@
     <button onclick="testButton('passenger')">راكب</button>
     <button onclick="testButton('driver')">كابتن</button>
     <button onclick="testButton('admin')">إدارة</button>
+    <script>
+        (function() {
+            try {
+                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {
+                // ignore
+            }
+        })();
+    </script>
 </body>
 </html>

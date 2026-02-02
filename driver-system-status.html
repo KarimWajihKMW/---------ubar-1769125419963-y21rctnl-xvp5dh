@@ -17,6 +17,51 @@
             min-height: 100vh;
             padding: 20px;
         }
+
+        body.dark-mode {
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        body.dark-mode .card,
+        body.dark-mode .test-section,
+        body.dark-mode .success-box {
+            background: #0b1220;
+            border-color: #1f2937;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+        }
+
+        body.dark-mode .header,
+        body.dark-mode .card-title,
+        body.dark-mode .test-section h2 {
+            color: #e5e7eb;
+        }
+
+        body.dark-mode p {
+            color: #94a3b8;
+        }
+
+        body.dark-mode .feature-item {
+            background: #111827;
+            border-color: #1f2937;
+            color: #e5e7eb;
+        }
+
+        body.dark-mode .test-list li {
+            background: #111827;
+            border-left-color: #6366f1;
+        }
+
+        body.dark-mode .driver-item {
+            background: #111827;
+            border-right-color: #6366f1;
+        }
+
+        body.dark-mode .back-btn {
+            background: #0b1220;
+            color: #cbd5e1;
+            border-color: #1f2937;
+        }
         
         .container {
             max-width: 1200px;
@@ -480,5 +525,16 @@
             <p style="opacity: 0.6; font-size: 0.9em; margin-top: 20px;">آخر تحديث: 27 يناير 2026</p>
         </div>
     </div>
+    <script>
+        (function() {
+            try {
+                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {
+                // ignore
+            }
+        })();
+    </script>
 </body>
 </html>

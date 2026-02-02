@@ -22,6 +22,59 @@
             overflow-x: hidden;
         }
 
+        body.dark-mode {
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        body.dark-mode .menu-container {
+            background: #0f172a;
+        }
+
+        body.dark-mode .menu-header {
+            color: #e5e7eb;
+        }
+
+        body.dark-mode .menu-item {
+            background: #0b1220;
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        body.dark-mode .menu-item-title {
+            color: #e5e7eb;
+        }
+
+        body.dark-mode .menu-item-desc {
+            color: #94a3b8;
+        }
+
+        body.dark-mode .menu-item-icon {
+            color: #818cf8;
+        }
+
+        body.dark-mode .trips-list-container {
+            background: #0b1220;
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        body.dark-mode .trips-list-header h2 {
+            color: #e5e7eb;
+        }
+
+        body.dark-mode .trip-card {
+            background: #111827;
+            border-color: #1f2937;
+        }
+
+        body.dark-mode .trip-card:hover {
+            background: #0b1220;
+        }
+
+        body.dark-mode .back-btn {
+            background: #0b1220;
+            color: #cbd5e1;
+        }
+
         .back-btn {
             position: fixed;
             top: 20px;
@@ -720,6 +773,17 @@
         window.addEventListener('DOMContentLoaded', function() {
             initializeSampleTrips();
         });
+    </script>
+    <script>
+        (function() {
+            try {
+                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {
+                // ignore
+            }
+        })();
     </script>
 </body>
 </html>

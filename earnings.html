@@ -9,6 +9,17 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body { font-family: 'Cairo', sans-serif; }
+        body.dark-mode { background: #0f172a; color: #e2e8f0; }
+        body.dark-mode .bg-white { background: #0b1220 !important; }
+        body.dark-mode .bg-gray-50 { background: #111827 !important; }
+        body.dark-mode .text-gray-800 { color: #e5e7eb !important; }
+        body.dark-mode .text-gray-700 { color: #cbd5e1 !important; }
+        body.dark-mode .text-gray-600 { color: #cbd5e1 !important; }
+        body.dark-mode .text-gray-500 { color: #94a3b8 !important; }
+        body.dark-mode .text-gray-400 { color: #94a3b8 !important; }
+        body.dark-mode .border-gray-100 { border-color: #1f2937 !important; }
+        body.dark-mode .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1f2937 !important; }
+        body.dark-mode .shadow-sm { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35) !important; }
     </style>
 </head>
 <body class="bg-gray-50 p-5">
@@ -89,5 +100,16 @@
             </div>
         </div>
     </div>
+    <script>
+        (function() {
+            try {
+                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {
+                // ignore
+            }
+        })();
+    </script>
 </body>
 </html>

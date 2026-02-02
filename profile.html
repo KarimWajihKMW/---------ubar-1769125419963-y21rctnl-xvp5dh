@@ -19,6 +19,53 @@
             min-height: 100vh;
         }
 
+        body.dark-mode {
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        body.dark-mode .header,
+        body.dark-mode .info-section,
+        body.dark-mode .ratings-section {
+            background: #0b1220;
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        body.dark-mode .header h1,
+        body.dark-mode .info-value {
+            color: #e5e7eb;
+        }
+
+        body.dark-mode .header p,
+        body.dark-mode .info-label {
+            color: #94a3b8;
+        }
+
+        body.dark-mode .info-item {
+            border-bottom-color: #1f2937;
+        }
+
+        body.dark-mode .info-icon {
+            background: #111827;
+            color: #818cf8;
+        }
+
+        body.dark-mode .action-btn {
+            background: #0b1220;
+            border-color: #6366f1;
+            color: #c7d2fe;
+        }
+
+        body.dark-mode .cancel-btn {
+            background: #111827;
+            color: #cbd5e1;
+        }
+
+        body.dark-mode .back-btn {
+            background: #0b1220;
+            color: #cbd5e1;
+        }
+
         .back-btn {
             position: fixed;
             top: 20px;
@@ -502,6 +549,17 @@
                 window.location.href = 'index.html';
             }
         }
+    </script>
+    <script>
+        (function() {
+            try {
+                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {
+                // ignore
+            }
+        })();
     </script>
 </body>
 </html>

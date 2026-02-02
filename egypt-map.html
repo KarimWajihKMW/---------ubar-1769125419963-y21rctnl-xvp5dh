@@ -20,6 +20,45 @@
             overflow: hidden;
             height: 100vh;
         }
+
+        body.dark-mode {
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        body.dark-mode .control-btn,
+        body.dark-mode .search-box input,
+        body.dark-mode .info-panel,
+        body.dark-mode .legend,
+        body.dark-mode .trips-counter {
+            background: #0b1220;
+            color: #e5e7eb;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+        }
+
+        body.dark-mode .control-btn:hover,
+        body.dark-mode .city-item:hover {
+            background: #111827;
+        }
+
+        body.dark-mode .search-box input {
+            color: #e5e7eb;
+        }
+
+        body.dark-mode .city-item {
+            border-bottom-color: #1f2937;
+        }
+
+        body.dark-mode .city-name,
+        body.dark-mode .popup-title {
+            color: #e5e7eb;
+        }
+
+        body.dark-mode .city-info,
+        body.dark-mode .counter-label,
+        body.dark-mode .popup-content {
+            color: #94a3b8;
+        }
         
         .map-container {
             width: 100%;
@@ -541,4 +580,15 @@
         });
     </script>
 </body>
+        <script>
+            (function() {
+                try {
+                    if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                        document.body.classList.add('dark-mode');
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            })();
+        </script>
 </html>
