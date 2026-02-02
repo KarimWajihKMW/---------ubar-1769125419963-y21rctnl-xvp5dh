@@ -1568,6 +1568,14 @@ function setDriverPanelVisible(visible) {
     const toggleBtn = document.getElementById('driver-panel-toggle');
     if (!panel || !toggleBtn) return;
 
+    const userRole = DB.getUser()?.role;
+    const isDriver = currentUserRole === 'driver' || userRole === 'driver';
+    if (!isDriver) {
+        panel.classList.add('hidden');
+        toggleBtn.classList.add('hidden');
+        return;
+    }
+
     if (visible) {
         panel.classList.remove('hidden');
         toggleBtn.classList.add('hidden');
@@ -1580,6 +1588,14 @@ function setDriverPanelVisible(visible) {
 window.toggleDriverPanel = function() {
     const panel = document.getElementById('driver-ui-container');
     if (!panel) return;
+    const userRole = DB.getUser()?.role;
+    const isDriver = currentUserRole === 'driver' || userRole === 'driver';
+    if (!isDriver) {
+        panel.classList.add('hidden');
+        const toggleBtn = document.getElementById('driver-panel-toggle');
+        if (toggleBtn) toggleBtn.classList.add('hidden');
+        return;
+    }
     const isHidden = panel.classList.contains('hidden');
     setDriverPanelVisible(isHidden);
 };
@@ -1749,6 +1765,14 @@ function initPassengerMode() {
     document.getElementById('passenger-top-bar').classList.remove('hidden');
     const driverUi = document.getElementById('driver-ui-container');
     if (driverUi) driverUi.classList.add('hidden');
+    const driverPanelToggle = document.getElementById('driver-panel-toggle');
+    if (driverPanelToggle) driverPanelToggle.classList.add('hidden');
+    const driverIncoming = document.getElementById('driver-incoming-request');
+    if (driverIncoming) driverIncoming.classList.add('hidden');
+    const driverWaiting = document.getElementById('driver-status-waiting');
+    if (driverWaiting) driverWaiting.classList.add('hidden');
+    const driverActive = document.getElementById('driver-active-trip');
+    if (driverActive) driverActive.classList.add('hidden');
     const driverTopBar = document.getElementById('driver-top-bar');
     if (driverTopBar) driverTopBar.classList.add('hidden');
     const driverMenu = document.getElementById('driver-side-menu');
