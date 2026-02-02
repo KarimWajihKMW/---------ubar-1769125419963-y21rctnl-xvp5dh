@@ -1568,8 +1568,7 @@ function setDriverPanelVisible(visible) {
     const toggleBtn = document.getElementById('driver-panel-toggle');
     if (!panel || !toggleBtn) return;
 
-    const userRole = DB.getUser()?.role;
-    const isDriver = currentUserRole === 'driver' || userRole === 'driver';
+    const isDriver = currentUserRole === 'driver';
     if (!isDriver) {
         panel.classList.add('hidden');
         toggleBtn.classList.add('hidden');
@@ -1588,8 +1587,7 @@ function setDriverPanelVisible(visible) {
 window.toggleDriverPanel = function() {
     const panel = document.getElementById('driver-ui-container');
     if (!panel) return;
-    const userRole = DB.getUser()?.role;
-    const isDriver = currentUserRole === 'driver' || userRole === 'driver';
+    const isDriver = currentUserRole === 'driver';
     if (!isDriver) {
         panel.classList.add('hidden');
         const toggleBtn = document.getElementById('driver-panel-toggle');
@@ -1851,8 +1849,7 @@ function scheduleMockRequest() {
     if (driverRequestTimeout) clearTimeout(driverRequestTimeout);
     driverRequestTimeout = setTimeout(() => {
         const waiting = document.getElementById('driver-status-waiting');
-        const userRole = DB.getUser()?.role;
-        const isDriver = currentUserRole === 'driver' || userRole === 'driver';
+        const isDriver = currentUserRole === 'driver';
         if (isDriver && waiting && !waiting.classList.contains('hidden')) {
             waiting.classList.add('hidden');
             document.getElementById('driver-incoming-request').classList.remove('hidden');
