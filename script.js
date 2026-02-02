@@ -229,6 +229,7 @@ let passengerPickup = null; // {lat, lng, label}
 let etaCountdown = null;
 let etaSeconds = 0;
 let driverToPassengerAnim = null;
+let mapSelectionMode = 'destination';
 
 function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
@@ -287,8 +288,19 @@ function initLeafletMap() {
         leafletMap.setView([30.0444, 31.2357], 12);
     }
 
-    // Destination select by click
+    // Destination/Pickup select by click
     leafletMap.on('click', e => {
+        if (mapSelectionMode === 'pickup') {
+            reverseGeocode(e.latlng.lat, e.latlng.lng, (address) => {
+                setPickup({ lat: e.latlng.lat, lng: e.latlng.lng }, address);
+                leafletMap.setView([e.latlng.lat, e.latlng.lng], Math.max(leafletMap.getZoom(), 14));
+                showToast('تم تحديد موقع الالتقاط');
+            });
+            mapSelectionMode = 'destination';
+            updateMapSelectionButtons();
+            return;
+        }
+
         setDestination({ lat: e.latlng.lat, lng: e.latlng.lng }, 'وجهة محددة');
     });
 
@@ -390,6 +402,50 @@ function updateCurrentLocationInput(text) {
     const inp = document.getElementById('current-loc-input');
     if (inp) inp.value = text || 'موقعك الحالي';
 }
+
+function updateMapSelectionButtons() {
+    const pickupBtn = document.getElementById('pickup-map-btn');
+    const destBtn = document.getElementById('dest-map-btn');
+
+    if (pickupBtn) {
+        pickupBtn.classList.toggle('ring-2', mapSelectionMode === 'pickup');
+        pickupBtn.classList.toggle('ring-indigo-500', mapSelectionMode === 'pickup');
+    }
+    if (destBtn) {
+        destBtn.classList.toggle('ring-2', mapSelectionMode === 'destination');
+        destBtn.classList.toggle('ring-indigo-500', mapSelectionMode === 'destination');
+    }
+}
+
+function startMapSelection(mode) {
+    mapSelectionMode = mode === 'pickup' ? 'pickup' : 'destination';
+    updateMapSelectionButtons();
+    if (mapSelectionMode === 'pickup') {
+        showToast('اضغط على الخريطة لتحديد موقعك الحالي');
+    } else {
+        showToast('اضغط على الخريطة لتحديد الوجهة');
+    }
+}
+
+function useCurrentLocation() {
+    if (!navigator.geolocation) {
+        showToast('المتصفح لا يدعم تحديد الموقع');
+        return;
+    }
+    navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude, longitude } = pos.coords;
+        reverseGeocode(latitude, longitude, (address) => {
+            setPickup({ lat: latitude, lng: longitude }, address);
+            if (leafletMap) leafletMap.setView([latitude, longitude], Math.max(leafletMap.getZoom(), 14));
+            showToast('تم تحديث موقعك الحالي');
+        });
+    }, () => {
+        showToast('تعذر تحديد موقعك');
+    }, { enableHighAccuracy: true, timeout: 6000 });
+}
+
+window.startMapSelection = startMapSelection;
+window.useCurrentLocation = useCurrentLocation;
 
 // Saved places functionality
 window.selectSavedPlace = function(type) {
