@@ -1761,6 +1761,8 @@ function loginSuccess() {
 }
 
 function initPassengerMode() {
+    currentUserRole = 'passenger';
+    window.currentUserRole = 'passenger';
     document.getElementById('passenger-ui-container').classList.remove('hidden');
     document.getElementById('passenger-top-bar').classList.remove('hidden');
     const driverUi = document.getElementById('driver-ui-container');
@@ -1773,6 +1775,10 @@ function initPassengerMode() {
     if (driverWaiting) driverWaiting.classList.add('hidden');
     const driverActive = document.getElementById('driver-active-trip');
     if (driverActive) driverActive.classList.add('hidden');
+    if (driverRequestTimeout) {
+        clearTimeout(driverRequestTimeout);
+        driverRequestTimeout = null;
+    }
     const driverTopBar = document.getElementById('driver-top-bar');
     if (driverTopBar) driverTopBar.classList.add('hidden');
     const driverMenu = document.getElementById('driver-side-menu');
