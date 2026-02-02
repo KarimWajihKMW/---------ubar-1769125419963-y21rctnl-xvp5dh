@@ -1670,6 +1670,9 @@
                 <button class="mt-6 w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl hover:bg-red-100 transition-colors">
                     إيقاف الاستقبال
                 </button>
+                <button type="button" onclick="toggleDriverPanel()" class="mt-3 w-full py-2.5 bg-gray-50 text-gray-600 font-bold rounded-xl hover:bg-gray-100 transition-colors">
+                    إخفاء اللوحة
+                </button>
             </div>
 
             <!-- Driver Status: Incoming Request -->
@@ -1710,6 +1713,10 @@
             </div>
         </div>
     </div>
+
+    <button id="driver-panel-toggle" type="button" onclick="toggleDriverPanel()" class="hidden fixed bottom-6 right-6 z-30 bg-emerald-600 text-white px-4 py-2.5 rounded-full shadow-lg font-bold pointer-events-auto hover:bg-emerald-700 transition-all">
+        إظهار لوحة السائق
+    </button>
 
     <!-- =============================================
          ADMIN UI COMPONENTS

@@ -1528,6 +1528,7 @@ window.sendChatMessage = function() {
 window.driverRejectRequest = function() {
     document.getElementById('driver-incoming-request').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
+    setDriverPanelVisible(true);
     clearDriverPassengerRoute();
     showToast('تم رفض الطلب');
     scheduleMockRequest();
@@ -1538,8 +1539,30 @@ window.driverAcceptRequest = function() {
     if (waiting) waiting.classList.add('hidden');
     document.getElementById('driver-incoming-request').classList.add('hidden');
     document.getElementById('driver-active-trip').classList.remove('hidden');
+    setDriverPanelVisible(true);
     startDriverToPassengerRoute();
     showToast('تم قبول الطلب! اذهب للراكب');
+};
+
+function setDriverPanelVisible(visible) {
+    const panel = document.getElementById('driver-ui-container');
+    const toggleBtn = document.getElementById('driver-panel-toggle');
+    if (!panel || !toggleBtn) return;
+
+    if (visible) {
+        panel.classList.remove('hidden');
+        toggleBtn.classList.add('hidden');
+    } else {
+        panel.classList.add('hidden');
+        toggleBtn.classList.remove('hidden');
+    }
+}
+
+window.toggleDriverPanel = function() {
+    const panel = document.getElementById('driver-ui-container');
+    if (!panel) return;
+    const isHidden = panel.classList.contains('hidden');
+    setDriverPanelVisible(isHidden);
 };
 
 window.toggleDriverRequestPanel = function() {
@@ -1745,6 +1768,7 @@ function initDriverMode() {
     currentUserRole = 'driver';
     window.currentUserRole = 'driver';
     document.getElementById('driver-ui-container').classList.remove('hidden');
+    setDriverPanelVisible(true);
     const passengerUi = document.getElementById('passenger-ui-container');
     if (passengerUi) passengerUi.classList.add('hidden');
     const passengerTopBar = document.getElementById('passenger-top-bar');
@@ -1779,6 +1803,7 @@ function scheduleMockRequest() {
         if (isDriver && waiting && !waiting.classList.contains('hidden')) {
             waiting.classList.add('hidden');
             document.getElementById('driver-incoming-request').classList.remove('hidden');
+            setDriverPanelVisible(true);
         }
     }, 1000);
 }
