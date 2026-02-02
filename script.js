@@ -98,6 +98,42 @@ const SafeStorage = {
     }
 };
 
+// --- Dark Mode ---
+const DARK_MODE_KEY = 'akwadra_dark_mode';
+
+function updateDarkModeToggleUI() {
+    const isDark = document.body.classList.contains('dark-mode');
+    document.querySelectorAll('[data-dark-toggle-label]').forEach((el) => {
+        el.textContent = isDark ? 'مفعل' : 'غير مفعل';
+    });
+    document.querySelectorAll('[data-dark-toggle-icon]').forEach((el) => {
+        el.classList.toggle('fa-moon', !isDark);
+        el.classList.toggle('fa-sun', isDark);
+    });
+}
+
+function setDarkMode(enabled) {
+    document.body.classList.toggle('dark-mode', enabled);
+    SafeStorage.setItem(DARK_MODE_KEY, enabled ? '1' : '0');
+    updateDarkModeToggleUI();
+}
+
+function toggleDarkMode() {
+    const isDark = document.body.classList.contains('dark-mode');
+    setDarkMode(!isDark);
+}
+
+window.toggleDarkMode = toggleDarkMode;
+
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = SafeStorage.getItem(DARK_MODE_KEY);
+    if (saved === '1') {
+        setDarkMode(true);
+    } else {
+        updateDarkModeToggleUI();
+    }
+});
+
 // --- Global State ---
 let currentUserRole = null; // 'passenger', 'driver', 'admin'
 let currentCarType = null;
