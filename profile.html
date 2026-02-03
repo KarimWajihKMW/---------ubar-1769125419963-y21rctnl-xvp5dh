@@ -265,12 +265,16 @@
              document.getElementById('ratingsSection').classList.add('hidden');
         }
 
-        // Apply dark mode if preference exists (matching menu.html logic if it had any, 
-        // but adding generic support based on CSS provided)
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            // document.body.classList.add('dark-mode'); 
-            // Commented out as default seems to be light, but CSS supports it.
-        }
+    <script>
+        (function() {
+            try {
+                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        })();
     </script>
 </body>
 </html>

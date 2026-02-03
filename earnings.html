@@ -196,10 +196,15 @@
     </div>
 
     <script>
-        // Apply dark mode if preference exists
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            // document.body.classList.add('dark-mode'); 
-        }
+        (function() {
+            try {
+                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        })();
     </script>
 </body>
 </html>
