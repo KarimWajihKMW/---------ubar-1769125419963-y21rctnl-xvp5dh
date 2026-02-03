@@ -2835,14 +2835,23 @@ document.addEventListener('DOMContentLoaded', () => {
         centerMap();
         animateAmbientCars();
         
-        // Show role selection modal only when no session exists
         const roleModal = document.getElementById('role-selection-modal');
-        if (DB.hasSession()) {
+        const params = new URLSearchParams(window.location.search);
+        const requestedRole = (params.get('role') || params.get('mode') || '').toLowerCase();
+        const allowedRoles = ['passenger', 'driver', 'admin'];
+        const forcedRole = allowedRoles.includes(requestedRole) ? requestedRole : null;
+
+        const hasSession = DB.hasSession();
+        const user = hasSession ? DB.getUser() : null;
+        const savedRole = user?.role || 'passenger';
+
+        const shouldAutoInit = forcedRole || (hasSession && savedRole === 'passenger');
+
+        if (shouldAutoInit) {
             if (roleModal) {
                 roleModal.classList.add('hidden', 'opacity-0', 'pointer-events-none');
             }
-            const user = DB.getUser();
-            const role = user?.role || 'passenger';
+            const role = forcedRole || savedRole;
             currentUserRole = role;
             if (role === 'driver') {
                 initDriverMode();
@@ -2853,6 +2862,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else if (roleModal) {
             roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+            document.body.classList.remove('role-driver', 'role-passenger');
         }
 
         // Open auth modal directly when URL hash requests it
