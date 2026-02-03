@@ -2,22 +2,16 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>الأرباح والإحصائيات - أكوادرا</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>الأرباح - أكوادرا</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
             font-family: 'Cairo', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            overflow-x: hidden;
         }
 
         body.dark-mode {
@@ -25,377 +19,187 @@
             color: #e2e8f0;
         }
 
-        body.dark-mode .menu-container {
-            background: #0f172a;
-        }
-
-        body.dark-mode .summary-card,
-        body.dark-mode .menu-item,
-        body.dark-mode .trips-list-container,
-        body.dark-mode .trip-card {
+        body.dark-mode .bg-white {
             background: #0b1220;
-            border-color: #1f2937;
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
         }
 
-        body.dark-mode .menu-header,
-        body.dark-mode .menu-item-title,
-        body.dark-mode .trip-passenger-name,
-        body.dark-mode .trips-list-header h2 {
+        body.dark-mode .bg-gray-50 {
+            background: #111827;
+        }
+
+        body.dark-mode .text-gray-800 {
             color: #e5e7eb;
         }
 
-        .back-btn {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 10px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            backdrop-filter: blur(6px);
-            transition: all 0.3s ease;
-        }
-
-        .back-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-        }
-
-        body.dark-mode .menu-item-desc,
-        body.dark-mode .trip-locations,
-        body.dark-mode .trip-location-icon {
-            color: #94a3b8;
-        }
-
-        body.dark-mode .menu-item-icon,
-        body.dark-mode .trip-price {
-            color: #818cf8;
-        }
-
-        body.dark-mode .back-btn {
-            background: #0b1220;
+        body.dark-mode .text-gray-700 {
             color: #cbd5e1;
         }
 
-        .menu-container {
-            min-height: 100vh;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 20px;
+        body.dark-mode .text-gray-600 {
+            color: #cbd5e1;
         }
 
-        .menu-header {
-            text-align: center;
-            color: white;
-            margin-bottom: 40px;
-            padding-top: 20px;
-        }
-
-        .menu-header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            font-weight: 800;
-        }
-
-        .menu-header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-
-        .menu-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-            max-width: 1200px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-
-        .menu-item {
-            background: white;
-            border-radius: 16px;
-            padding: 25px;
-            text-align: center;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .menu-item:hover {
-            transform: translateY(-10px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
-        }
-
-        .menu-item::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(102, 126, 234, 0.1) 0%, transparent 70%);
-            animation: shine 3s ease-in-out infinite;
-        }
-
-        @keyframes shine {
-            0%, 100% { opacity: 0; }
-            50% { opacity: 1; }
-        }
-
-        .menu-item-icon {
-            font-size: 3em;
-            margin-bottom: 15px;
-            color: #667eea;
-            z-index: 1;
-            position: relative;
-        }
-
-        .menu-item-title {
-            font-size: 1.2em;
-            font-weight: 700;
-            color: #333;
-            margin-bottom: 8px;
-            z-index: 1;
-            position: relative;
-        }
-
-        .menu-item-desc {
-            font-size: 0.85em;
-            color: #666;
-            z-index: 1;
-            position: relative;
-        }
-
-        .summary-card {
-            max-width: 1200px;
-            margin: 0 auto 30px;
-        }
-
-        .summary-value {
-            font-size: 2.6em;
-            font-weight: 800;
-            color: #22c55e;
-        }
-
-        .summary-label {
-            font-size: 0.9em;
-            font-weight: 700;
-            color: #6b7280;
-            margin-bottom: 10px;
-        }
-
-        .summary-currency {
-            font-size: 0.5em;
+        body.dark-mode .text-gray-500 {
             color: #94a3b8;
-            margin-right: 6px;
         }
 
-        .trips-list-container {
-            background: white;
-            border-radius: 20px;
-            padding: 20px;
-            max-width: 1200px;
-            margin-left: auto;
-            margin-right: auto;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+        body.dark-mode .text-gray-400 {
+            color: #94a3b8;
         }
 
-        .trips-list-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 3px solid #667eea;
+        body.dark-mode .border-gray-100 {
+            border-color: #1f2937;
         }
 
-        .trips-list-header h2 {
-            font-size: 1.6em;
-            color: #333;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        body.dark-mode .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+            border-color: #1f2937;
         }
 
-        .trip-card {
-            background: #f8f9fa;
-            border: 2px solid #e9ecef;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: all 0.3s ease;
-        }
-
-        .trip-card:hover {
-            border-color: #667eea;
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
-            background: white;
-        }
-
-        .trip-info {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .trip-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 1.1em;
-        }
-
-        .trip-details {
-            flex: 1;
-        }
-
-        .trip-passenger-name {
-            font-weight: 700;
-            color: #333;
-            font-size: 1.05em;
-            margin-bottom: 5px;
-        }
-
-        .trip-locations {
-            font-size: 0.85em;
-            color: #666;
-            display: flex;
-            gap: 6px;
-        }
-
-        .trip-location-icon {
-            color: #667eea;
-        }
-
-        .trip-price {
-            font-size: 1.2em;
-            font-weight: 800;
-            color: #22c55e;
-            text-align: center;
-            min-width: 90px;
+        body.dark-mode .shadow-sm {
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
         }
     </style>
 </head>
-<body>
-    <button class="back-btn" onclick="history.back()">
-        <i class="fas fa-arrow-right"></i>
-        رجوع
-    </button>
+<body class="bg-gray-50 p-5">
+    <div class="max-w-6xl mx-auto">
+        <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 mb-6 hover:bg-gray-50 transition-colors" onclick="history.back()">
+            <i class="fas fa-arrow-right"></i>
+            رجوع
+        </button>
 
-    <div class="menu-container">
-        <div class="menu-header">
-            <h1>الأرباح والإحصائيات</h1>
-            <p>نظرة عامة على أدائك اليومي</p>
+        <div class="mb-8 text-center">
+            <div class="w-24 h-24 rounded-full bg-white border border-gray-100 shadow-sm flex items-center justify-center text-5xl mx-auto mb-4 text-gray-700 relative">
+                💰
+                <div class="absolute bottom-0 right-0 bg-green-500 w-6 h-6 rounded-full border-4 border-white"></div>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-800 mb-1">الأرباح</h1>
+            <p class="text-gray-500">ملخص الدخل المالي والإحصائيات</p>
         </div>
 
-        <!-- Summary Card -->
-        <div class="summary-card menu-item">
-            <div class="menu-item-title">إجمالي الأرباح اليوم</div>
-            <div class="summary-value">185 <span class="summary-currency">ر.س</span></div>
-            <div class="menu-item-desc">إجمالي الدخل المحقق اليوم</div>
-        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <!-- Stats -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">💵</div>
+                <div class="font-bold text-green-600 text-xl" dir="ltr">2,450 SAR</div>
+                <div class="text-gray-500 text-sm">إجمالي الرصيد</div>
+            </div>
 
-        <!-- Stats Grid -->
-        <div class="menu-grid">
-            <div class="menu-item">
-                <div class="menu-item-icon"><i class="fas fa-route"></i></div>
-                <div class="menu-item-title">8</div>
-                <div class="menu-item-desc">الرحلات اليوم</div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">🚖</div>
+                <div class="font-bold text-gray-800 text-xl">42</div>
+                <div class="text-gray-500 text-sm">الرحلات المكتملة</div>
             </div>
-            <div class="menu-item">
-                <div class="menu-item-icon"><i class="fas fa-road"></i></div>
-                <div class="menu-item-title">64 كم</div>
-                <div class="menu-item-desc">المسافة الكلية</div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">⏱️</div>
+                <div class="font-bold text-gray-800 info-value text-xl">15h</div>
+                <div class="text-gray-500 text-sm">ساعات العمل</div>
             </div>
-            <div class="menu-item">
-                <div class="menu-item-icon"><i class="fas fa-star"></i></div>
-                <div class="menu-item-title">4.8</div>
-                <div class="menu-item-desc">التقييم</div>
-            </div>
-            <div class="menu-item">
-                <div class="menu-item-icon"><i class="fas fa-clipboard-list"></i></div>
-                <div class="menu-item-title">342</div>
-                <div class="menu-item-desc">إجمالي الرحلات</div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">🎁</div>
+                <div class="font-bold text-gray-800 info-value text-xl" dir="ltr">150 SAR</div>
+                <div class="text-gray-500 text-sm">المكافآت</div>
             </div>
         </div>
 
-        <!-- Activity List -->
-        <div class="trips-list-container">
-            <div class="trips-list-header">
-                <h2><i class="fas fa-clock"></i> نشاطك اليوم</h2>
+        <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-8">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
+                <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <i class="fas fa-history text-indigo-500"></i>
+                    سجل الرحلات و الأرباح
+                </h2>
+                <span class="text-sm text-gray-500">آخر 7 أيام</span>
             </div>
-
-            <div class="trip-card">
-                <div class="trip-info">
-                    <div class="trip-avatar">✔</div>
-                    <div class="trip-details">
-                        <div class="trip-passenger-name">رحلة من شارع الملك فهد</div>
-                        <div class="trip-locations">
-                            <span class="trip-location-icon"><i class="fas fa-clock"></i></span>
-                            10:30 صباحاً
+            
+            <div class="divide-y divide-gray-100">
+                <!-- Trip Item -->
+                <div class="py-4 flex items-center justify-between group cursor-pointer hover:bg-gray-50 transition-colors rounded-lg px-2">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg font-bold">
+                            أ.م
+                        </div>
+                        <div>
+                            <div class="font-bold text-gray-800">أحمد محمد</div>
+                            <div class="text-sm text-gray-500 flex items-center gap-1">
+                                <i class="fas fa-map-marker-alt text-xs"></i>
+                                شارع الملك فهد - حي العليا
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div class="trip-price">+35 ر.س</div>
-            </div>
-
-            <div class="trip-card">
-                <div class="trip-info">
-                    <div class="trip-avatar">✔</div>
-                    <div class="trip-details">
-                        <div class="trip-passenger-name">رحلة من مطار الملك خالد</div>
-                        <div class="trip-locations">
-                            <span class="trip-location-icon"><i class="fas fa-clock"></i></span>
-                            11:15 صباحاً
-                        </div>
+                    <div class="text-left">
+                        <div class="font-bold text-green-600 text-lg" dir="ltr">+ 35.00</div>
+                        <div class="text-xs text-gray-400">اليوم 10:30 ص</div>
                     </div>
                 </div>
-                <div class="trip-price">+95 ر.س</div>
-            </div>
 
-            <div class="trip-card">
-                <div class="trip-info">
-                    <div class="trip-avatar">✔</div>
-                    <div class="trip-details">
-                        <div class="trip-passenger-name">رحلة من حي العليا</div>
-                        <div class="trip-locations">
-                            <span class="trip-location-icon"><i class="fas fa-clock"></i></span>
-                            12:45 ظهراً
+                <!-- Trip Item -->
+                <div class="py-4 flex items-center justify-between group cursor-pointer hover:bg-gray-50 transition-colors rounded-lg px-2">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg font-bold">
+                            ف.ع
+                        </div>
+                        <div>
+                            <div class="font-bold text-gray-800">فاطمة علي</div>
+                            <div class="text-sm text-gray-500 flex items-center gap-1">
+                                <i class="fas fa-map-marker-alt text-xs"></i>
+                                مطار الملك خالد - برج المملكة
+                            </div>
                         </div>
                     </div>
+                    <div class="text-left">
+                        <div class="font-bold text-green-600 text-lg" dir="ltr">+ 95.00</div>
+                        <div class="text-xs text-gray-400">أمس 08:15 م</div>
+                    </div>
                 </div>
-                <div class="trip-price">+55 ر.س</div>
+
+                <!-- Trip Item -->
+                <div class="py-4 flex items-center justify-between group cursor-pointer hover:bg-gray-50 transition-colors rounded-lg px-2">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center text-lg font-bold">
+                            خ.س
+                        </div>
+                        <div>
+                            <div class="font-bold text-gray-800">خالد سالم</div>
+                            <div class="text-sm text-gray-500 flex items-center gap-1">
+                                <i class="fas fa-map-marker-alt text-xs"></i>
+                                البوليفارد - الدرعية
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-left">
+                        <div class="font-bold text-green-600 text-lg" dir="ltr">+ 45.00</div>
+                        <div class="text-xs text-gray-400">أمس 04:20 م</div>
+                    </div>
+                </div>
+            </div>
+            
+            <button class="w-full mt-4 py-3 text-indigo-600 font-semibold text-sm hover:bg-indigo-50 rounded-xl transition-colors">
+                عرض المزيد من الرحلات
+            </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="alert('سيتم تحويل المبلغ قريباً')">
+                <div class="text-3xl mb-3">🏦</div>
+                <div class="font-bold text-gray-800">سحب الرصيد</div>
+                <div class="text-gray-500 text-sm">تحويل للحساب البنكي</div>
+            </div>
+            
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="window.location.href='menu.html'">
+                <div class="text-3xl mb-3">🏠</div>
+                <div class="font-bold text-gray-800">القائمة الرئيسية</div>
+                <div class="text-gray-500 text-sm">العودة</div>
             </div>
         </div>
+
     </div>
+
     <script>
-        (function() {
-            try {
-                if (localStorage.getItem('akwadra_dark_mode') === '1') {
-                    document.body.classList.add('dark-mode');
-                }
-            } catch (e) {
-                // ignore
-            }
-        })();
+        // Apply dark mode if preference exists
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            // document.body.classList.add('dark-mode'); 
+        }
     </script>
 </body>
 </html>
