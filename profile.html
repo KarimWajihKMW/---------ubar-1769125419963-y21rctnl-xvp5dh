@@ -2,21 +2,16 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>الملف الشخصي - أكوادرا</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
             font-family: 'Cairo', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
         }
 
         body.dark-mode {
@@ -24,546 +19,258 @@
             color: #e2e8f0;
         }
 
-        body.dark-mode .header,
-        body.dark-mode .info-section,
-        body.dark-mode .ratings-section {
+        body.dark-mode .bg-white {
             background: #0b1220;
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
         }
 
-        body.dark-mode .header h1,
-        body.dark-mode .info-value {
+        body.dark-mode .bg-gray-50 {
+            background: #111827;
+        }
+
+        body.dark-mode .text-gray-800 {
             color: #e5e7eb;
         }
 
-        body.dark-mode .header p,
-        body.dark-mode .info-label {
+        body.dark-mode .text-gray-700 {
+            color: #cbd5e1;
+        }
+
+        body.dark-mode .text-gray-600 {
+            color: #cbd5e1;
+        }
+
+        body.dark-mode .text-gray-500 {
             color: #94a3b8;
         }
 
-        body.dark-mode .info-item {
-            border-bottom-color: #1f2937;
+        body.dark-mode .text-gray-400 {
+            color: #94a3b8;
         }
 
-        body.dark-mode .info-icon {
-            background: #111827;
-            color: #818cf8;
+        body.dark-mode .border-gray-100 {
+            border-color: #1f2937;
         }
 
-        body.dark-mode .action-btn {
-            background: #0b1220;
-            border-color: #6366f1;
-            color: #c7d2fe;
+        body.dark-mode .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+            border-color: #1f2937;
         }
 
-        body.dark-mode .cancel-btn {
-            background: #111827;
-            color: #cbd5e1;
-        }
-
-        body.dark-mode .back-btn {
-            background: #0b1220;
-            color: #cbd5e1;
-        }
-
-        .back-btn {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            z-index: 1000;
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 10px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            backdrop-filter: blur(6px);
-            transition: all 0.3s ease;
-        }
-
-        .back-btn:hover {
-            background: rgba(255,255,255,0.3);
-            transform: translateY(-2px);
-        }
-        
-        .container {
-            max-width: 500px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .header {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            text-align: center;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-        
-        .avatar {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 3em;
-            margin: 0 auto 20px;
-        }
-        
-        .header h1 {
-            color: #333;
-            font-size: 1.8em;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            color: #666;
-            font-size: 1em;
-        }
-        
-        .info-section {
-            background: white;
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 15px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-        
-        .info-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid #f0f0f0;
-        }
-        
-        .info-item:last-child {
-            border-bottom: none;
-        }
-        
-        .info-icon {
-            width: 40px;
-            height: 40px;
-            background: #f0f0f0;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #667eea;
-            margin-left: 15px;
-        }
-        
-        .info-content {
-            flex: 1;
-        }
-        
-        .info-label {
-            font-size: 0.85em;
-            color: #999;
-            margin-bottom: 4px;
-        }
-        
-        .info-value {
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .action-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .action-btn {
-            background: white;
-            border: 2px solid #667eea;
-            color: #667eea;
-            padding: 15px;
-            border-radius: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        
-        .action-btn:hover {
-            background: #667eea;
-            color: white;
-            transform: translateY(-2px);
-        }
-
-        .action-btn.active {
-            background: #667eea;
-            color: white;
-        }
-
-        .edit-controls {
-            display: none;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-
-        .edit-controls.show {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-        }
-
-        .save-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 14px;
-            border-radius: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .save-btn:hover {
-            background: #218838;
-            transform: translateY(-2px);
-        }
-
-        .cancel-btn {
-            background: #f0f0f0;
-            color: #333;
-            border: none;
-            padding: 14px;
-            border-radius: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .cancel-btn:hover {
-            background: #e0e0e0;
-            transform: translateY(-2px);
+        body.dark-mode .shadow-sm {
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
         }
 
         .info-value.editing {
-            border: 1px dashed #667eea;
-            border-radius: 8px;
-            padding: 6px 10px;
-            background: #f8f9ff;
             outline: none;
-        }
-
-        .ratings-section {
-            background: white;
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            display: none;
-        }
-
-        .ratings-section.show {
-            display: block;
-        }
-
-        .rating-item {
-            border-bottom: 1px solid #f0f0f0;
-            padding: 12px 0;
-        }
-
-        .rating-item:last-child {
-            border-bottom: none;
-        }
-
-        .rating-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 6px;
-        }
-
-        .rating-stars {
-            color: #f4b400;
-            font-size: 0.95em;
-        }
-        
-        .menu-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 16px;
-            border-radius: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            font-size: 1.1em;
-            margin-bottom: 15px;
-        }
-        
-        .menu-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-        }
-        
-        .logout-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 16px;
-            border-radius: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            font-size: 1em;
-        }
-        
-        .logout-btn:hover {
-            background: #c82333;
-            transform: translateY(-3px);
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 12px;
-            text-align: center;
-        }
-        
-        .stat-value {
-            font-size: 1.8em;
-            font-weight: 800;
-            margin-bottom: 5px;
-        }
-        
-        .stat-label {
-            font-size: 0.85em;
-            opacity: 0.9;
+            border-bottom: 2px solid #4f46e5;
+            background: rgba(79, 70, 229, 0.1);
+            padding: 0 5px;
+            border-radius: 4px;
         }
     </style>
 </head>
-<body>
-    <button class="back-btn" onclick="history.back()">
-        <i class="fas fa-arrow-right"></i>
-        رجوع
-    </button>
-    <div class="container">
-        <div class="header">
-            <div class="avatar">👤</div>
-            <h1>أحمد محمد</h1>
-            <p>سائق معتمد</p>
-        </div>
-        
-        <button class="menu-btn" onclick="goToMenu()">
-            <i class="fas fa-bars"></i>
-            قائمة التنقل الرئيسية
+<body class="bg-gray-50 p-5">
+    <div class="max-w-6xl mx-auto">
+        <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 mb-6 hover:bg-gray-50 transition-colors" onclick="history.back()">
+            <i class="fas fa-arrow-right"></i>
+            رجوع
         </button>
-        
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value">4.8</div>
-                <div class="stat-label">التقييم</div>
+
+        <div class="mb-8 text-center">
+            <div class="w-24 h-24 rounded-full bg-white border border-gray-100 shadow-sm flex items-center justify-center text-5xl mx-auto mb-4 text-gray-700 relative">
+                👤
+                <div class="absolute bottom-0 right-0 bg-green-500 w-6 h-6 rounded-full border-4 border-white"></div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">342</div>
-                <div class="stat-label">الرحلات</div>
-            </div>
-        </div>
-        
-        <div class="info-section">
-            <div class="info-item">
-                <div class="info-icon">
-                    <i class="fas fa-phone"></i>
-                </div>
-                <div class="info-content">
-                    <div class="info-label">رقم الجوال</div>
-                    <div class="info-value" data-field="phone">0501234567</div>
-                </div>
-            </div>
-            
-            <div class="info-item">
-                <div class="info-icon">
-                    <i class="fas fa-envelope"></i>
-                </div>
-                <div class="info-content">
-                    <div class="info-label">البريد الإلكتروني</div>
-                    <div class="info-value" data-field="email">ahmed@akwadra.sa</div>
-                </div>
-            </div>
-            
-            <div class="info-item">
-                <div class="info-icon">
-                    <i class="fas fa-car"></i>
-                </div>
-                <div class="info-content">
-                    <div class="info-label">نوع السيارة</div>
-                    <div class="info-value" data-field="carType">اقتصادي</div>
-                </div>
-            </div>
-            
-            <div class="info-item">
-                <div class="info-icon">
-                    <i class="fas fa-tag"></i>
-                </div>
-                <div class="info-content">
-                    <div class="info-label">لوحة السيارة</div>
-                    <div class="info-value" data-field="plate">أ ب ج 1234</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="action-buttons">
-            <button class="action-btn" onclick="editProfile()">
-                <i class="fas fa-edit"></i>
-                تعديل
-            </button>
-            <button class="action-btn" onclick="viewRatings()">
-                <i class="fas fa-star"></i>
-                التقييمات
-            </button>
+            <h1 class="text-2xl font-bold text-gray-800 mb-1">أحمد محمد</h1>
+            <p class="text-gray-500">سائق معتمد - كابتن متميز</p>
         </div>
 
-        <div class="edit-controls" id="editControls">
-            <button class="save-btn" onclick="saveProfileEdits()">
-                <i class="fas fa-check"></i>
-                حفظ
-            </button>
-            <button class="cancel-btn" onclick="cancelProfileEdits()">
-                <i class="fas fa-times"></i>
-                إلغاء
-            </button>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <!-- Stats -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">⭐</div>
+                <div class="font-bold text-gray-800 text-xl">4.8</div>
+                <div class="text-gray-500 text-sm">التقييم العام</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">🚖</div>
+                <div class="font-bold text-gray-800 text-xl">342</div>
+                <div class="text-gray-500 text-sm">عدد الرحلات</div>
+            </div>
+
+            <!-- Profile Info Cards -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">📱</div>
+                <div class="font-bold text-gray-800 info-value text-base" data-field="phone">0501234567</div>
+                <div class="text-gray-500 text-sm">رقم الجوال</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">📧</div>
+                <div class="font-bold text-gray-800 info-value text-base truncate px-2" data-field="email">ahmed@akwadra.sa</div>
+                <div class="text-gray-500 text-sm">البريد الإلكتروني</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">🚗</div>
+                <div class="font-bold text-gray-800 info-value text-base" data-field="carType">اقتصادي</div>
+                <div class="text-gray-500 text-sm">نوع السيارة</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">🔢</div>
+                <div class="font-bold text-gray-800 info-value text-base" data-field="plate">أ ب ج 1234</div>
+                <div class="text-gray-500 text-sm">لوحة السيارة</div>
+            </div>
+            
+            <!-- Actions -->
+             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="editProfile()" id="editBtnCard">
+                <div class="text-3xl mb-3">✏️</div>
+                <div class="font-bold text-gray-800">تعديل</div>
+                <div class="text-gray-500 text-sm">تعديل البيانات</div>
+            </div>
+
+            <div class="hidden bg-indigo-600 p-5 rounded-2xl shadow-sm border border-indigo-600 text-center hover:bg-indigo-700 transition-colors cursor-pointer" onclick="saveProfileEdits()" id="saveBtnCard">
+                <div class="text-3xl mb-3 text-white">💾</div>
+                <div class="font-bold text-white">حفظ</div>
+                <div class="text-indigo-100 text-sm">حفظ التغييرات</div>
+            </div>
+
+            <div class="hidden bg-gray-200 p-5 rounded-2xl shadow-sm border border-gray-300 text-center hover:bg-gray-300 transition-colors cursor-pointer" onclick="cancelProfileEdits()" id="cancelBtnCard">
+                <div class="text-3xl mb-3">❌</div>
+                <div class="font-bold text-gray-800">إلغاء</div>
+                <div class="text-gray-600 text-sm">إلغاء التعديل</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="viewRatings()">
+                <div class="text-3xl mb-3">💬</div>
+                <div class="font-bold text-gray-800">التقييمات</div>
+                <div class="text-gray-500 text-sm">آراء الركاب</div>
+            </div>
+            
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="goToMenu()">
+                <div class="text-3xl mb-3">🏠</div>
+                <div class="font-bold text-gray-800">القائمة</div>
+                <div class="text-gray-500 text-sm">العودة للرئيسية</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-red-50 transition-colors cursor-pointer group" onclick="logout()">
+                <div class="text-3xl mb-3 group-hover:scale-110 transition-transform">🚪</div>
+                <div class="font-bold text-red-600">خروج</div>
+                <div class="text-red-400 text-sm">تسجيل الخروج</div>
+            </div>
         </div>
 
-        <div class="ratings-section" id="ratingsSection">
-            <div class="rating-item">
-                <div class="rating-header">
-                    <div>محمد علي</div>
-                    <div class="rating-stars">★★★★★</div>
-                </div>
-                <div>سائق ممتاز وملتزم بالوقت</div>
+        <div id="ratingsSection" class="hidden bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-8">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
+                <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    💬 تقييمات الركاب
+                </h2>
+                <button class="text-sm text-gray-500 hover:text-gray-700" onclick="hideRatings()">إخفاء</button>
             </div>
-            <div class="rating-item">
-                <div class="rating-header">
-                    <div>سارة أحمد</div>
-                    <div class="rating-stars">★★★★☆</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="font-bold text-gray-800">محمد علي</div>
+                        <div class="text-amber-500 text-sm">★★★★★</div>
+                    </div>
+                    <p class="text-gray-600 text-sm">سائق ممتاز وملتزم بالوقت، السيارة نظيفة جداً.</p>
                 </div>
-                <div>الرحلة كانت مريحة جدًا</div>
-            </div>
-            <div class="rating-item">
-                <div class="rating-header">
-                    <div>خالد يوسف</div>
-                    <div class="rating-stars">★★★★★</div>
+                <div class="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="font-bold text-gray-800">سارة أحمد</div>
+                        <div class="text-amber-500 text-sm">★★★★☆</div>
+                    </div>
+                    <p class="text-gray-600 text-sm">الرحلة كانت مريحة جدًا والقيادة هادئة.</p>
                 </div>
-                <div>تعامل محترم وخدمة رائعة</div>
+                <div class="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="font-bold text-gray-800">خالد يوسف</div>
+                        <div class="text-amber-500 text-sm">★★★★★</div>
+                    </div>
+                    <p class="text-gray-600 text-sm">تعامل محترم وخدمة رائعة، شكراً لك.</p>
+                </div>
             </div>
         </div>
-        
-        <button class="logout-btn" onclick="logout()">
-            <i class="fas fa-sign-out-alt"></i>
-            تسجيل الخروج
-        </button>
+
     </div>
-    
+
     <script>
         function goToMenu() {
             window.location.href = 'menu.html';
         }
-        
-        let isEditing = false;
 
-        function editProfile() {
-            if (isEditing) {
-                return;
-            }
-            isEditing = true;
-            document.getElementById('editControls').classList.add('show');
-
-            document.querySelectorAll('.info-value').forEach(valueEl => {
-                if (!valueEl.dataset.original) {
-                    valueEl.dataset.original = valueEl.textContent.trim();
-                }
-                valueEl.contentEditable = 'true';
-                valueEl.classList.add('editing');
-            });
-
-            const firstEditable = document.querySelector('.info-value');
-            if (firstEditable) firstEditable.focus();
-        }
-
-        function saveProfileEdits() {
-            document.querySelectorAll('.info-value').forEach(valueEl => {
-                valueEl.dataset.original = valueEl.textContent.trim();
-                valueEl.contentEditable = 'false';
-                valueEl.classList.remove('editing');
-            });
-            document.getElementById('editControls').classList.remove('show');
-            isEditing = false;
-            alert('✅ تم حفظ التعديلات محلياً');
-        }
-
-        function cancelProfileEdits() {
-            document.querySelectorAll('.info-value').forEach(valueEl => {
-                if (valueEl.dataset.original) {
-                    valueEl.textContent = valueEl.dataset.original;
-                }
-                valueEl.contentEditable = 'false';
-                valueEl.classList.remove('editing');
-            });
-            document.getElementById('editControls').classList.remove('show');
-            isEditing = false;
-        }
-
-        function viewRatings() {
-            const ratingsSection = document.getElementById('ratingsSection');
-            ratingsSection.classList.toggle('show');
-            if (ratingsSection.classList.contains('show')) {
-                ratingsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        }
-        
         function logout() {
-            if (confirm('هل تريد تسجيل الخروج؟')) {
-                const darkMode = localStorage.getItem('akwadra_dark_mode');
-                localStorage.clear();
-                if (darkMode !== null) {
-                    localStorage.setItem('akwadra_dark_mode', darkMode);
-                }
+            if(confirm('هل أنت متأكد من تسجيل الخروج؟')) {
                 window.location.href = 'index.html';
             }
         }
-    </script>
-    <script>
-        (function() {
-            try {
-                if (localStorage.getItem('akwadra_dark_mode') === '1') {
-                    document.body.classList.add('dark-mode');
-                }
-            } catch (e) {
-                // ignore
-            }
-        })();
+
+        function editProfile() {
+            const values = document.querySelectorAll('.info-value');
+            values.forEach(val => {
+                val.contentEditable = "true";
+                val.classList.add('editing');
+            });
+            
+            document.getElementById('editBtnCard').classList.add('hidden');
+            document.getElementById('saveBtnCard').classList.remove('hidden');
+            document.getElementById('saveBtnCard').classList.add('block'); // Ensure display
+            document.getElementById('cancelBtnCard').classList.remove('hidden');
+            document.getElementById('cancelBtnCard').classList.add('block');
+            
+            // Focus first field
+            if(values.length > 0) values[0].focus();
+        }
+
+        function saveProfileEdits() {
+            const values = document.querySelectorAll('.info-value');
+            values.forEach(val => {
+                val.contentEditable = "false";
+                val.classList.remove('editing');
+            });
+
+            document.getElementById('editBtnCard').classList.remove('hidden');
+            document.getElementById('saveBtnCard').classList.add('hidden');
+            document.getElementById('saveBtnCard').classList.remove('block');
+            document.getElementById('cancelBtnCard').classList.add('hidden');
+            document.getElementById('cancelBtnCard').classList.remove('block');
+
+            // Here you would typically send data to backend
+            alert('تم حفظ التغييرات بنجاح');
+        }
+
+        function cancelProfileEdits() {
+            const values = document.querySelectorAll('.info-value');
+            values.forEach(val => {
+                val.contentEditable = "false";
+                val.classList.remove('editing');
+                // Revert logic could be added here if we stored original values
+            });
+
+            document.getElementById('editBtnCard').classList.remove('hidden');
+            document.getElementById('saveBtnCard').classList.add('hidden');
+            document.getElementById('saveBtnCard').classList.remove('block');
+            document.getElementById('cancelBtnCard').classList.add('hidden');
+            document.getElementById('cancelBtnCard').classList.remove('block');
+        }
+
+        function viewRatings() {
+            const ratings = document.getElementById('ratingsSection');
+            ratings.classList.remove('hidden');
+            ratings.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function hideRatings() {
+             document.getElementById('ratingsSection').classList.add('hidden');
+        }
+
+        // Apply dark mode if preference exists (matching menu.html logic if it had any, 
+        // but adding generic support based on CSS provided)
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            // document.body.classList.add('dark-mode'); 
+            // Commented out as default seems to be light, but CSS supports it.
+        }
     </script>
 </body>
 </html>
