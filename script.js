@@ -1897,6 +1897,15 @@ function initPassengerMode() {
     }
 }
 
+window.switchToPassengerMode = function() {
+    const roleModal = document.getElementById('role-selection-modal');
+    if (roleModal) {
+        roleModal.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+    }
+    initPassengerMode();
+    showToast('تم التحويل لوضع الراكب');
+};
+
 function initDriverMode() {
     currentUserRole = 'driver';
     window.currentUserRole = 'driver';
