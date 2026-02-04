@@ -4004,6 +4004,17 @@ window.proceedToPayment = function() {
     }, 2000);
 };
 
+window.applyStoredOfferToPayment = function() {
+    const storedOffer = SafeStorage.getItem('akwadra_active_offer');
+    if (storedOffer) {
+        const promoInput = document.getElementById('promo-code-input');
+        if (promoInput) {
+            promoInput.value = storedOffer;
+            window.applyPromoCode();
+        }
+    }
+};
+
 window.initPaymentFlow = function() {
     selectedPaymentMethod = null;
     appliedPromo = null;
@@ -4017,15 +4028,7 @@ window.initPaymentFlow = function() {
     });
     document.getElementById('confirm-payment-btn').disabled = true;
     updatePaymentSummary();
-
-    const storedOffer = SafeStorage.getItem('akwadra_active_offer');
-    if (storedOffer) {
-        const promoInput = document.getElementById('promo-code-input');
-        if (promoInput) {
-            promoInput.value = storedOffer;
-            window.applyPromoCode();
-        }
-    }
+    window.applyStoredOfferToPayment();
 };
 
 // ========================================
@@ -4398,5 +4401,9 @@ window.switchSection = function(section) {
         renderAllTrips();
     } else if (section === 'offers') {
         renderOffers();
+    } else if (section === 'payment-method') {
+        initPaymentFlow();
+    } else if (section === 'payment-invoice') {
+        window.applyStoredOfferToPayment();
     }
 };
