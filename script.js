@@ -2071,7 +2071,7 @@ async function loadAdminDashboardStats() {
     try {
         const response = await ApiService.admin.getDashboardStats();
         if (response?.success && response?.data) {
-            const { today_trips, active_drivers, total_earnings, avg_rating } = response.data;
+            const { today_trips, active_drivers, total_passengers, total_earnings, avg_rating } = response.data;
             
             // Update today's trips
             const todayTripsEl = document.getElementById('admin-today-trips');
@@ -2083,6 +2083,12 @@ async function loadAdminDashboardStats() {
             const activeDriversEl = document.getElementById('admin-active-drivers');
             if (activeDriversEl) {
                 activeDriversEl.textContent = active_drivers.toLocaleString('ar-EG');
+            }
+            
+            // Update total passengers
+            const passengersEl = document.getElementById('admin-total-passengers');
+            if (passengersEl) {
+                passengersEl.textContent = total_passengers.toLocaleString('ar-EG');
             }
             
             // Update total earnings

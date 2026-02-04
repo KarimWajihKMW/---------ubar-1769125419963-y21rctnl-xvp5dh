@@ -564,6 +564,13 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
             FROM drivers
         `);
         
+        // Get passengers count (users with role 'passenger', 'user' or NULL)
+        const passengersResult = await pool.query(`
+            SELECT COUNT(*) as count
+            FROM users
+            WHERE role = 'passenger' OR role = 'user' OR role IS NULL
+        `);
+        
         // Get total earnings (completed trips)
         const earningsResult = await pool.query(`
             SELECT COALESCE(SUM(cost), 0) as total
@@ -583,6 +590,7 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
             data: {
                 today_trips: parseInt(todayTripsResult.rows[0].count),
                 active_drivers: parseInt(activeDriversResult.rows[0].count),
+                total_passengers: parseInt(passengersResult.rows[0].count),
                 total_earnings: parseFloat(earningsResult.rows[0].total),
                 avg_rating: parseFloat(ratingResult.rows[0].avg_rating).toFixed(1)
             }
