@@ -1657,6 +1657,8 @@ window.switchSection = function(name) {
     if(name === 'profile') {
         updateUIWithUserData();
         renderTripHistory();
+        loadPassengerProfileEditDefaults();
+        setPassengerProfileEditMode(false);
     }
 };
 
@@ -2984,6 +2986,110 @@ function updateUIWithUserData() {
     
     const pp = document.getElementById('profile-points');
     if(pp) pp.innerText = user.points;
+
+    if (!passengerProfileEdit.editing) {
+        const nameInput = document.getElementById('profile-name-input');
+        if (nameInput) nameInput.value = user.name || '';
+    }
+}
+
+const passengerProfileEdit = {
+    editing: false,
+    originalName: '',
+    originalAvatar: '',
+    pendingAvatar: null
+};
+
+function setPassengerProfileEditMode(enabled) {
+    passengerProfileEdit.editing = enabled;
+    const nameLabel = document.getElementById('profile-name');
+    const nameInput = document.getElementById('profile-name-input');
+    const editBtn = document.getElementById('profile-edit-btn');
+    const saveBtn = document.getElementById('profile-save-btn');
+    const cancelBtn = document.getElementById('profile-cancel-btn');
+
+    if (nameLabel) nameLabel.classList.toggle('hidden', enabled);
+    if (nameInput) nameInput.classList.toggle('hidden', !enabled);
+    if (editBtn) editBtn.classList.toggle('hidden', enabled);
+    if (saveBtn) saveBtn.classList.toggle('hidden', !enabled);
+    if (cancelBtn) cancelBtn.classList.toggle('hidden', !enabled);
+}
+
+function loadPassengerProfileEditDefaults() {
+    const user = DB.getUser();
+    if (!user) return;
+    passengerProfileEdit.originalName = user.name || '';
+    passengerProfileEdit.originalAvatar = user.avatar || '';
+    passengerProfileEdit.pendingAvatar = null;
+
+    const nameInput = document.getElementById('profile-name-input');
+    if (nameInput) nameInput.value = passengerProfileEdit.originalName;
+}
+
+window.editPassengerProfile = function() {
+    const user = DB.getUser();
+    if (!user) {
+        showToast('⚠️ يرجى تسجيل الدخول أولاً');
+        return;
+    }
+    loadPassengerProfileEditDefaults();
+    setPassengerProfileEditMode(true);
+};
+
+window.savePassengerProfile = function() {
+    const user = DB.getUser();
+    if (!user) {
+        showToast('⚠️ يرجى تسجيل الدخول أولاً');
+        return;
+    }
+
+    const nameInput = document.getElementById('profile-name-input');
+    const newName = nameInput ? nameInput.value.trim() : '';
+    if (!newName || newName.length < 2) {
+        showToast('⚠️ أدخل اسم صحيح');
+        if (nameInput) nameInput.focus();
+        return;
+    }
+
+    const updates = { name: newName };
+    if (passengerProfileEdit.pendingAvatar) {
+        updates.avatar = passengerProfileEdit.pendingAvatar;
+    }
+
+    DB.updateUser(updates);
+    setPassengerProfileEditMode(false);
+    passengerProfileEdit.pendingAvatar = null;
+    showToast('✅ تم حفظ البيانات');
+};
+
+window.cancelPassengerProfile = function() {
+    const nameInput = document.getElementById('profile-name-input');
+    if (nameInput) nameInput.value = passengerProfileEdit.originalName || '';
+
+    const avatarEl = document.getElementById('profile-avatar');
+    if (avatarEl && passengerProfileEdit.originalAvatar) {
+        avatarEl.src = passengerProfileEdit.originalAvatar;
+    }
+
+    passengerProfileEdit.pendingAvatar = null;
+    setPassengerProfileEditMode(false);
+};
+
+function handlePassengerAvatarSelection(file) {
+    if (!file) return;
+    if (!file.type || !file.type.startsWith('image/')) {
+        showToast('⚠️ اختر صورة صحيحة');
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const dataUrl = e.target?.result;
+        if (!dataUrl) return;
+        passengerProfileEdit.pendingAvatar = dataUrl;
+        const avatarEl = document.getElementById('profile-avatar');
+        if (avatarEl) avatarEl.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
 }
 
 function updateDriverMenuData() {
@@ -3658,6 +3764,41 @@ document.addEventListener('DOMContentLoaded', () => {
         window.switchSection('profile');
         if(backBtn) backBtn.classList.remove('hidden');
     });
+
+    const profileEditBtn = document.getElementById('profile-edit-btn');
+    if (profileEditBtn) profileEditBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.editPassengerProfile();
+    });
+
+    const profileSaveBtn = document.getElementById('profile-save-btn');
+    if (profileSaveBtn) profileSaveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.savePassengerProfile();
+    });
+
+    const profileCancelBtn = document.getElementById('profile-cancel-btn');
+    if (profileCancelBtn) profileCancelBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.cancelPassengerProfile();
+    });
+
+    const profileAvatarBtn = document.getElementById('profile-avatar-btn');
+    const profileAvatarInput = document.getElementById('profile-avatar-input');
+    if (profileAvatarBtn && profileAvatarInput) {
+        profileAvatarBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (!passengerProfileEdit.editing) {
+                window.editPassengerProfile();
+            }
+            profileAvatarInput.click();
+        });
+        profileAvatarInput.addEventListener('change', () => {
+            const file = profileAvatarInput.files && profileAvatarInput.files[0];
+            handlePassengerAvatarSelection(file);
+            profileAvatarInput.value = '';
+        });
+    }
 
     const driverProfileBtn = document.getElementById('driver-profile-btn');
     if (driverProfileBtn) driverProfileBtn.addEventListener('click', () => {
