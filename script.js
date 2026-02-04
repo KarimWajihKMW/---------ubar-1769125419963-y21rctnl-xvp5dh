@@ -2012,11 +2012,41 @@ function initAdminMode() {
     renderAdminTrips();
 }
 
+function getGuestDriverIdentity() {
+    const key = 'akwadra_guest_driver_identity';
+    try {
+        const cached = SafeStorage.getItem(key);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed?.email || parsed?.phone) return parsed;
+        }
+    } catch (error) {
+        console.warn('Failed to read guest driver identity:', error);
+    }
+
+    const stamp = Date.now().toString().slice(-8);
+    const phone = `05${stamp}`;
+    const email = `guest_driver_${Date.now()}@ubar.sa`;
+    const identity = { phone, email };
+    SafeStorage.setItem(key, JSON.stringify(identity));
+    return identity;
+}
+
 async function resolveDriverProfile() {
     try {
         const user = DB.getUser();
-        if (!user) return null;
-        const response = await ApiService.drivers.resolve(user.email, user.phone, true);
+        let email = user?.email;
+        let phone = user?.phone;
+
+        if (!email && !phone) {
+            const guest = getGuestDriverIdentity();
+            email = guest.email;
+            phone = guest.phone;
+        }
+
+        if (!email && !phone) return null;
+
+        const response = await ApiService.drivers.resolve(email, phone, true);
         if (response?.success) {
             currentDriverProfile = response.data;
             return currentDriverProfile;
