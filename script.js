@@ -749,6 +749,39 @@ function ensureDriverMarker(location) {
     driverMarkerL.bindPopup('🚗 موقعك الحالي').openPopup();
 }
 
+window.focusCaptainOnMap = function() {
+    if (!leafletMap) {
+        initLeafletMap();
+    }
+    moveLeafletMapToContainer('map-container');
+
+    const mapWorld = document.getElementById('map-world');
+    if (mapWorld) mapWorld.style.display = 'none';
+
+    const baseLocation = driverLocation || currentPickup || getDriverBaseLocation();
+    if (!baseLocation) {
+        showToast('لا يوجد موقع للكابتن حالياً');
+        return;
+    }
+
+    ensureDriverMarker(baseLocation);
+
+    if (leafletMap) {
+        const points = [baseLocation];
+        if (currentDestination) {
+            points.push(currentDestination);
+        }
+        if (points.length > 1) {
+            const bounds = L.latLngBounds(points.map(p => [p.lat, p.lng]));
+            leafletMap.fitBounds(bounds, { padding: [50, 50] });
+        } else {
+            leafletMap.setView([baseLocation.lat, baseLocation.lng], Math.max(leafletMap.getZoom(), 14));
+        }
+    }
+
+    showToast('📍 تم عرض الكابتن على الخريطة');
+};
+
 function setPassengerPickup(coords, label) {
     passengerPickup = { ...coords, label: label || 'موقع الراكب' };
     if (!leafletMap) return;
