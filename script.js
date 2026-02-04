@@ -237,6 +237,24 @@ let etaSeconds = 0;
 let driverToPassengerAnim = null;
 let mapSelectionMode = 'destination';
 
+function formatStreetLabel(label) {
+    if (!label) return 'موقع محدد';
+    const parts = label.split(',').map(part => part.trim()).filter(Boolean);
+    return parts.slice(0, 2).join('، ') || label;
+}
+
+function bindStreetLabel(marker, label) {
+    if (!marker) return;
+    const text = formatStreetLabel(label);
+    if (marker.unbindTooltip) marker.unbindTooltip();
+    marker.bindTooltip(text, {
+        permanent: true,
+        direction: 'top',
+        offset: [0, -18],
+        className: 'map-street-label'
+    }).openTooltip();
+}
+
 function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
     if (!mapDiv) {
@@ -360,6 +378,7 @@ function setPickup(coords, label) {
     if (pickupMarkerL) pickupMarkerL.remove();
     pickupMarkerL = L.marker([coords.lat, coords.lng], { draggable: true }).addTo(leafletMap);
     pickupMarkerL.bindPopup(currentPickup.label).openPopup();
+    bindStreetLabel(pickupMarkerL, currentPickup.label);
     
     // Update current location input
     updateCurrentLocationInput(currentPickup.label);
@@ -372,6 +391,7 @@ function setPickup(coords, label) {
         reverseGeocode(p.lat, p.lng, (address) => {
             currentPickup.label = address;
             pickupMarkerL.setPopupContent(address).openPopup();
+            bindStreetLabel(pickupMarkerL, address);
             updateCurrentLocationInput(address);
             showToast('تم تعديل موقع الالتقاط');
         });
@@ -384,6 +404,7 @@ function setDestination(coords, label) {
     if (destMarkerL) destMarkerL.remove();
     destMarkerL = L.marker([coords.lat, coords.lng], { draggable: false, opacity: 0.9 }).addTo(leafletMap);
     destMarkerL.bindPopup(currentDestination.label).openPopup();
+    bindStreetLabel(destMarkerL, currentDestination.label);
     document.getElementById('ride-dest-text') && (document.getElementById('ride-dest-text').innerText = currentDestination.label);
     confirmDestination(currentDestination.label);
 }
@@ -707,6 +728,7 @@ function setPassengerPickup(coords, label) {
 
     passengerMarkerL = L.marker([coords.lat, coords.lng], { icon: riderIcon }).addTo(leafletMap);
     passengerMarkerL.bindPopup(passengerPickup.label).openPopup();
+    bindStreetLabel(passengerMarkerL, passengerPickup.label);
 }
 
 function generatePassengerPickup(base) {
