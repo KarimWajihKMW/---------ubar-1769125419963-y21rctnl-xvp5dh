@@ -216,6 +216,8 @@
             .role-passenger #driver-top-bar {
                 display: none !important;
             }
+            .role-driver #passenger-ui-container,
+            .role-driver #passenger-top-bar,
             .role-driver #passenger-quick-actions {
                 display: none !important;
             }
@@ -1702,6 +1704,39 @@
     ============================================== -->
     <div id="driver-ui-container" class="absolute bottom-0 w-full z-20 pointer-events-none hidden">
         <div class="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-hidden">
+            <!-- Captain Header -->
+            <div class="px-6 pt-6 pb-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs text-emerald-100 font-bold">واجهة الكابتن</p>
+                        <h2 class="text-lg font-extrabold" id="driver-home-name">أهلاً، كابتن</h2>
+                        <div class="flex items-center gap-2 text-emerald-100 text-xs mt-1">
+                            <i class="fas fa-star text-yellow-300"></i>
+                            <span id="driver-home-rating">4.8</span>
+                            <span class="mx-1">•</span>
+                            <span id="driver-home-status">متصل</span>
+                        </div>
+                    </div>
+                    <div class="bg-white/15 rounded-2xl p-3 text-center">
+                        <i class="fas fa-taxi text-2xl"></i>
+                        <p class="text-[10px] mt-1 text-emerald-100 font-bold" id="driver-home-car-type">اقتصادي</p>
+                    </div>
+                </div>
+                <div class="mt-4 grid grid-cols-3 gap-2 text-center">
+                    <div class="bg-white/10 rounded-xl p-2">
+                        <p class="text-[10px] text-emerald-100 font-bold">اليوم</p>
+                        <p class="text-sm font-extrabold" id="driver-home-today">0</p>
+                    </div>
+                    <div class="bg-white/10 rounded-xl p-2">
+                        <p class="text-[10px] text-emerald-100 font-bold">الإجمالي</p>
+                        <p class="text-sm font-extrabold" id="driver-home-total">0</p>
+                    </div>
+                    <div class="bg-white/10 rounded-xl p-2">
+                        <p class="text-[10px] text-emerald-100 font-bold">الأرباح</p>
+                        <p class="text-sm font-extrabold" id="driver-home-earnings">0 ر.س</p>
+                    </div>
+                </div>
+            </div>
             <!-- Driver Incoming Request -->
             <div id="driver-incoming-request" class="hidden bg-white border-b border-gray-100">
                 <div class="p-6 pb-4">

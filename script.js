@@ -2030,11 +2030,11 @@ function initDriverMode() {
     document.body.classList.add('role-driver');
     document.body.classList.remove('role-passenger');
     document.getElementById('driver-ui-container').classList.remove('hidden');
-    setDriverPanelVisible(false);
+    setDriverPanelVisible(true);
     currentIncomingTrip = null;
     activeDriverTripId = null;
     const passengerUi = document.getElementById('passenger-ui-container');
-    if (passengerUi) passengerUi.classList.remove('hidden');
+    if (passengerUi) passengerUi.classList.add('hidden');
     const passengerTopBar = document.getElementById('passenger-top-bar');
     if (passengerTopBar) passengerTopBar.classList.add('hidden');
     const passengerMenu = document.getElementById('side-menu');
@@ -2049,9 +2049,10 @@ function initDriverMode() {
     if (world) world.classList.add('hidden');
     initLeafletMap();
     moveLeafletMapToContainer('map-container');
-    switchSection('destination');
+    showDriverWaitingState();
     updateDriverMenuData();
     resolveDriverProfile().then(() => {
+        showDriverWaitingState();
         startDriverRequestPolling();
         setTimeout(() => {
             forceDriverIncomingRequest();
@@ -2811,6 +2812,9 @@ function updateDriverMenuData() {
 
     const driverName = user.name && user.name.trim() ? user.name : 'الكابتن';
     const firstName = driverName.split(' ')[0];
+    const carTypeNames = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
+    const driverCarType = currentDriverProfile?.car_type || user.car_type || 'economy';
+    const driverCarLabel = carTypeNames[driverCarType] || driverCarType;
 
     const nameEl = document.getElementById('driver-sidebar-name');
     if (nameEl) nameEl.innerText = `أهلاً، ${firstName}`;
@@ -2829,6 +2833,19 @@ function updateDriverMenuData() {
 
     const todayEl = document.getElementById('driver-stats-today');
     if (todayEl) todayEl.innerText = todayTrips.length;
+
+    const homeNameEl = document.getElementById('driver-home-name');
+    if (homeNameEl) homeNameEl.innerText = `أهلاً، ${firstName}`;
+    const homeRatingEl = document.getElementById('driver-home-rating');
+    if (homeRatingEl) homeRatingEl.innerText = user.rating || '4.8';
+    const homeTodayEl = document.getElementById('driver-home-today');
+    if (homeTodayEl) homeTodayEl.innerText = todayTrips.length;
+    const homeTotalEl = document.getElementById('driver-home-total');
+    if (homeTotalEl) homeTotalEl.innerText = trips.length;
+    const homeEarningsEl = document.getElementById('driver-home-earnings');
+    if (homeEarningsEl) homeEarningsEl.innerText = `${earnings} ر.س`;
+    const homeCarTypeEl = document.getElementById('driver-home-car-type');
+    if (homeCarTypeEl) homeCarTypeEl.innerText = driverCarLabel;
 
     const avatarIds = ['driver-sidebar-avatar', 'driver-nav-avatar'];
     avatarIds.forEach(id => {
