@@ -543,6 +543,57 @@ app.get('/api/trips/stats/summary', async (req, res) => {
     }
 });
 
+// Get admin dashboard statistics
+app.get('/api/admin/dashboard/stats', async (req, res) => {
+    try {
+        // Get today's date range (start and end of day)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        // Get ALL trips count from database (not just today)
+        const todayTripsResult = await pool.query(`
+            SELECT COUNT(*) as count
+            FROM trips
+        `);
+        
+        // Get active drivers count
+        const activeDriversResult = await pool.query(`
+            SELECT COUNT(*) as count
+            FROM drivers
+            WHERE status = 'online'
+        `);
+        
+        // Get total earnings (completed trips)
+        const earningsResult = await pool.query(`
+            SELECT COALESCE(SUM(cost), 0) as total
+            FROM trips
+            WHERE status = 'completed'
+        `);
+        
+        // Get average rating
+        const ratingResult = await pool.query(`
+            SELECT COALESCE(AVG(rating), 0) as avg_rating
+            FROM trips
+            WHERE status = 'completed' AND rating IS NOT NULL
+        `);
+        
+        res.json({
+            success: true,
+            data: {
+                today_trips: parseInt(todayTripsResult.rows[0].count),
+                active_drivers: parseInt(activeDriversResult.rows[0].count),
+                total_earnings: parseFloat(earningsResult.rows[0].total),
+                avg_rating: parseFloat(ratingResult.rows[0].avg_rating).toFixed(1)
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching admin dashboard stats:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ==================== DRIVERS ENDPOINTS ====================
 
 // Get all available drivers

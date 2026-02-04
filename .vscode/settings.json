@@ -59,6 +59,23 @@
         "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node test-api\\.js$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^node server\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node test-trips-count\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node test-api-endpoint\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "nohup": true,
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && sleep 1 && node test-api-endpoint\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

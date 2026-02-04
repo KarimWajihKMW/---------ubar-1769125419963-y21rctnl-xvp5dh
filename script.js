@@ -2063,6 +2063,46 @@ function initDriverMode() {
 function initAdminMode() {
     document.getElementById('admin-ui-container').classList.remove('hidden');
     renderAdminTrips();
+    loadAdminDashboardStats();
+}
+
+// Load admin dashboard statistics from database
+async function loadAdminDashboardStats() {
+    try {
+        const response = await ApiService.admin.getDashboardStats();
+        if (response?.success && response?.data) {
+            const { today_trips, active_drivers, total_earnings, avg_rating } = response.data;
+            
+            // Update today's trips
+            const todayTripsEl = document.getElementById('admin-today-trips');
+            if (todayTripsEl) {
+                todayTripsEl.textContent = today_trips.toLocaleString('ar-EG');
+            }
+            
+            // Update active drivers
+            const activeDriversEl = document.getElementById('admin-active-drivers');
+            if (activeDriversEl) {
+                activeDriversEl.textContent = active_drivers.toLocaleString('ar-EG');
+            }
+            
+            // Update total earnings
+            const earningsEl = document.getElementById('admin-total-earnings');
+            if (earningsEl) {
+                earningsEl.innerHTML = `${parseFloat(total_earnings).toLocaleString('ar-EG')} <span class="text-sm text-gray-400">ر.س</span>`;
+            }
+            
+            // Update average rating
+            const ratingEl = document.getElementById('admin-avg-rating');
+            if (ratingEl) {
+                ratingEl.textContent = avg_rating;
+            }
+            
+            console.log('✅ Admin dashboard stats loaded from database');
+        }
+    } catch (error) {
+        console.error('Failed to load admin dashboard stats:', error);
+        // Keep default values (0) if API fails
+    }
 }
 
 function getGuestDriverIdentity() {

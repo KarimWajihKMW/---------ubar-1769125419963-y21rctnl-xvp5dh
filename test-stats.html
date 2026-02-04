@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار API الإحصائيات</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            direction: rtl;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        button {
+            background: #4F46E5;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #4338CA;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .stats {
+            margin-top: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-title {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .stat-value {
+            color: #333;
+            font-size: 32px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>اختبار API إحصائيات لوحة التحكم</h1>
+        <button onclick="testAPI()">جلب الإحصائيات من قاعدة البيانات</button>
+        
+        <div id="stats" class="stats" style="display:none;">
+            <div class="stat-card">
+                <div class="stat-title">الرحلات اليوم</div>
+                <div class="stat-value" id="today-trips">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">الكباتن النشطين</div>
+                <div class="stat-value" id="active-drivers">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">إجمالي الأرباح</div>
+                <div class="stat-value" id="total-earnings">0 ر.س</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">متوسط التقييم</div>
+                <div class="stat-value" id="avg-rating">0</div>
+            </div>
+        </div>
+        
+        <h2 style="margin-top: 30px;">البيانات الخام:</h2>
+        <pre id="result">انقر على الزر أعلاه لجلب البيانات...</pre>
+    </div>
+
+    <script>
+        async function testAPI() {
+            try {
+                const response = await fetch('/api/admin/dashboard/stats');
+                const data = await response.json();
+                
+                document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+                
+                if (data.success) {
+                    document.getElementById('stats').style.display = 'grid';
+                    document.getElementById('today-trips').textContent = data.data.today_trips.toLocaleString('ar-EG');
+                    document.getElementById('active-drivers').textContent = data.data.active_drivers.toLocaleString('ar-EG');
+                    document.getElementById('total-earnings').textContent = parseFloat(data.data.total_earnings).toLocaleString('ar-EG') + ' ر.س';
+                    document.getElementById('avg-rating').textContent = data.data.avg_rating;
+                }
+            } catch (error) {
+                document.getElementById('result').textContent = 'خطأ: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

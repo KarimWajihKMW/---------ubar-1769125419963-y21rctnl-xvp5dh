@@ -132,6 +132,14 @@ const ApiService = {
                 body: JSON.stringify({ phone, name, email })
             });
         }
+    },
+    
+    // Admin endpoints
+    admin: {
+        // Get dashboard statistics
+        async getDashboardStats() {
+            return ApiService.request('/admin/dashboard/stats');
+        }
     }
 };
 
