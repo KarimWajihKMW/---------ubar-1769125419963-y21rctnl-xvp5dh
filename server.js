@@ -346,6 +346,91 @@ app.patch('/api/trips/:id/status', async (req, res) => {
     }
 });
 
+// Get next pending trip (optionally by car type)
+app.get('/api/trips/pending/next', async (req, res) => {
+    try {
+        const { car_type } = req.query;
+
+        let query = `
+            SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone
+            FROM trips t
+            LEFT JOIN users u ON t.user_id = u.id
+            WHERE t.status = 'pending' AND (t.driver_id IS NULL)
+        `;
+        const params = [];
+
+        if (car_type) {
+            params.push(car_type);
+            query += ` AND t.car_type = $${params.length}`;
+        }
+
+        query += ' ORDER BY t.created_at ASC LIMIT 1';
+
+        const result = await pool.query(query, params);
+
+        res.json({
+            success: true,
+            data: result.rows[0] || null
+        });
+    } catch (err) {
+        console.error('Error fetching pending trip:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Assign driver to trip
+app.patch('/api/trips/:id/assign', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { driver_id, driver_name } = req.body;
+
+        if (!driver_id) {
+            return res.status(400).json({ success: false, error: 'driver_id is required' });
+        }
+
+        const result = await pool.query(
+            `UPDATE trips
+             SET driver_id = $1, driver_name = $2, status = 'assigned', updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3 AND status = 'pending'
+             RETURNING *`,
+            [driver_id, driver_name || null, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Trip not found or already assigned' });
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error assigning driver:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Reject trip (driver rejects)
+app.patch('/api/trips/:id/reject', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query(
+            `UPDATE trips
+             SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status = 'pending'
+             RETURNING *`,
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Trip not found or not pending' });
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error rejecting trip:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // Get trip statistics
 app.get('/api/trips/stats/summary', async (req, res) => {
     try {
@@ -399,6 +484,46 @@ app.get('/api/drivers', async (req, res) => {
         });
     } catch (err) {
         console.error('Error fetching drivers:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Resolve driver profile by email or phone
+app.get('/api/drivers/resolve', async (req, res) => {
+    try {
+        const { email, phone } = req.query;
+
+        if (!email && !phone) {
+            return res.status(400).json({ success: false, error: 'email or phone is required' });
+        }
+
+        const params = [];
+        const conditions = [];
+        let query = 'SELECT id, name, phone, email, car_type, status, approval_status, rating, total_trips FROM drivers';
+
+        if (email) {
+            params.push(String(email).trim().toLowerCase());
+            conditions.push(`LOWER(email) = $${params.length}`);
+        }
+
+        if (phone) {
+            params.push(String(phone).trim());
+            conditions.push(`phone = $${params.length}`);
+        }
+
+        if (conditions.length) {
+            query += ` WHERE ${conditions.join(' OR ')}`;
+        }
+
+        const result = await pool.query(query, params);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Driver not found' });
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error resolving driver:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });

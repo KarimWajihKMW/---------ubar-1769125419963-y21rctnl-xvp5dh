@@ -70,9 +70,25 @@ async function testAPI() {
         console.log('✅ Created trip:', data.data.id);
         
         const createdTripId = data.data.id;
-        
-        // Test 9: Update trip status to completed
-        console.log('\n9️⃣ Testing update trip to completed...');
+
+        // Test 9: Get next pending trip
+        console.log('\n9️⃣ Testing get next pending trip...');
+        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy`);
+        data = await response.json();
+        console.log('✅ Pending trip:', data.data?.id || 'none');
+
+        // Test 1️⃣0️⃣: Assign driver to trip
+        console.log('\n1️⃣0️⃣ Testing assign driver to trip...');
+        response = await fetch(`${baseURL}/trips/${createdTripId}/assign`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ driver_id: 1, driver_name: 'أحمد عبدالله المالكي' })
+        });
+        data = await response.json();
+        console.log('✅ Assigned trip status:', data.data.status);
+
+        // Test 1️⃣1️⃣: Update trip status to completed
+        console.log('\n1️⃣1️⃣ Testing update trip to completed...');
         response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -81,14 +97,44 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Updated trip status:', data.data.status);
 
-        // Test 1️⃣0️⃣: Get single trip
-        console.log('\n1️⃣0️⃣ Testing get single trip...');
+        // Test 1️⃣2️⃣: Get single trip
+        console.log('\n1️⃣2️⃣ Testing get single trip...');
         response = await fetch(`${baseURL}/trips/${createdTripId}`);
         data = await response.json();
         console.log('✅ Trip details:', data.data);
 
-        // Test 1️⃣1️⃣: Get available drivers
-        console.log('\n1️⃣1️⃣ Testing get available drivers...');
+        // Test 1️⃣3️⃣: Reject pending trip
+        console.log('\n1️⃣3️⃣ Testing reject pending trip...');
+        const rejectTrip = {
+            pickup_location: 'طريق الملك عبدالله، الرياض',
+            dropoff_location: 'النخيل مول',
+            car_type: 'economy',
+            cost: 32.00,
+            distance: 8.2,
+            duration: 15,
+            payment_method: 'cash'
+        };
+
+        response = await fetch(`${baseURL}/trips`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(rejectTrip)
+        });
+        data = await response.json();
+        const rejectTripId = data.data.id;
+
+        response = await fetch(`${baseURL}/trips/${rejectTripId}/reject`, { method: 'PATCH' });
+        data = await response.json();
+        console.log('✅ Rejected trip status:', data.data.status);
+
+        // Test 1️⃣4️⃣: Resolve driver profile
+        console.log('\n1️⃣4️⃣ Testing resolve driver profile...');
+        response = await fetch(`${baseURL}/drivers/resolve?email=driver1@ubar.sa`);
+        data = await response.json();
+        console.log('✅ Resolved driver:', data.data?.id, data.data?.name);
+
+        // Test 1️⃣5️⃣: Get available drivers
+        console.log('\n1️⃣5️⃣ Testing get available drivers...');
         response = await fetch(`${baseURL}/drivers`);
         data = await response.json();
         console.log(`✅ Available drivers: ${data.data.length}`);

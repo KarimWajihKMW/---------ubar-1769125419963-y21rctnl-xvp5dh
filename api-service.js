@@ -73,6 +73,29 @@ const ApiService = {
         async getStats(userId = null) {
             const params = userId ? `?user_id=${userId}` : '';
             return ApiService.request(`/trips/stats/summary${params}`);
+        },
+
+        // Get next pending trip (optionally by car type)
+        async getPendingNext(carType = null) {
+            const params = new URLSearchParams();
+            if (carType) params.set('car_type', carType);
+            const query = params.toString();
+            return ApiService.request(`/trips/pending/next${query ? `?${query}` : ''}`);
+        },
+
+        // Assign driver to trip
+        async assignDriver(tripId, driverId, driverName = null) {
+            return ApiService.request(`/trips/${tripId}/assign`, {
+                method: 'PATCH',
+                body: JSON.stringify({ driver_id: driverId, driver_name: driverName })
+            });
+        },
+
+        // Reject trip (driver rejects)
+        async reject(tripId) {
+            return ApiService.request(`/trips/${tripId}/reject`, {
+                method: 'PATCH'
+            });
         }
     },
     
@@ -86,6 +109,15 @@ const ApiService = {
         // Get all drivers
         async getAll() {
             return ApiService.request('/drivers');
+        },
+
+        // Resolve driver profile by email/phone
+        async resolve(email = null, phone = null) {
+            const params = new URLSearchParams();
+            if (email) params.set('email', email);
+            if (phone) params.set('phone', phone);
+            const query = params.toString();
+            return ApiService.request(`/drivers/resolve${query ? `?${query}` : ''}`);
         }
     },
     

@@ -155,6 +155,10 @@ let mapState = {
 let driverAnimationId = null;
 let driverRequestTimeout = null;
 let loginAttempts = 0; // Track failed login attempts
+let driverPollingInterval = null;
+let currentDriverProfile = null;
+let currentIncomingTrip = null;
+let activeDriverTripId = null;
 
 function isMapWorldActive() {
     const mapWorld = document.getElementById('map-world');
@@ -1626,25 +1630,66 @@ window.sendChatMessage = function() {
     simulateDriverResponse(text);
 };
 
-window.driverRejectRequest = function() {
+window.driverRejectRequest = async function() {
+    try {
+        if (currentIncomingTrip?.id) {
+            await ApiService.trips.reject(currentIncomingTrip.id);
+        }
+    } catch (error) {
+        console.error('Reject trip failed:', error);
+        showToast('❌ تعذر رفض الطلب الآن');
+    }
+
+    currentIncomingTrip = null;
     const incoming = document.getElementById('driver-incoming-request');
     if (incoming) incoming.classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
     setDriverPanelVisible(true);
     clearDriverPassengerRoute();
     showToast('تم رفض الطلب');
-    scheduleMockRequest();
+    triggerDriverRequestPolling();
 };
 
-window.driverAcceptRequest = function() {
-    const waiting = document.getElementById('driver-status-waiting');
-    if (waiting) waiting.classList.add('hidden');
-    const incoming = document.getElementById('driver-incoming-request');
-    if (incoming) incoming.classList.add('hidden');
-    document.getElementById('driver-active-trip').classList.remove('hidden');
-    setDriverPanelVisible(true);
-    startDriverToPassengerRoute();
-    showToast('تم قبول الطلب! اذهب للراكب');
+window.driverAcceptRequest = async function() {
+    try {
+        if (!currentIncomingTrip || !currentDriverProfile) {
+            showToast('لا يوجد طلب صالح حالياً');
+            return;
+        }
+
+        const assignResponse = await ApiService.trips.assignDriver(
+            currentIncomingTrip.id,
+            currentDriverProfile.id,
+            currentDriverProfile.name
+        );
+
+        if (!assignResponse?.success) {
+            showToast('تعذر قبول الطلب، حاول مرة أخرى');
+            return;
+        }
+
+        activeDriverTripId = assignResponse.data?.id || currentIncomingTrip.id;
+
+        const waiting = document.getElementById('driver-status-waiting');
+        if (waiting) waiting.classList.add('hidden');
+        const incoming = document.getElementById('driver-incoming-request');
+        if (incoming) incoming.classList.add('hidden');
+        document.getElementById('driver-active-trip').classList.remove('hidden');
+        setDriverPanelVisible(true);
+
+        const pickupLat = currentIncomingTrip.pickup_lat;
+        const pickupLng = currentIncomingTrip.pickup_lng;
+        if (pickupLat !== undefined && pickupLat !== null && pickupLng !== undefined && pickupLng !== null) {
+            setPassengerPickup({ lat: Number(pickupLat), lng: Number(pickupLng), phone: currentIncomingTrip.passenger_phone }, currentIncomingTrip.pickup_location);
+            passengerPickup.phone = currentIncomingTrip.passenger_phone;
+        }
+
+        startDriverToPassengerRoute();
+        showToast('تم قبول الطلب! اذهب للراكب');
+    } catch (error) {
+        console.error('Error accepting driver request:', error);
+        showToast('❌ خطأ أثناء قبول الطلب');
+    }
 };
 
 function setDriverPanelVisible(visible) {
@@ -1719,22 +1764,19 @@ window.driverEndTrip = function() {
     clearDriverPassengerRoute();
     showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
     triggerConfetti();
-    
-    DB.addTrip({
-        id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
-        date: new Date().toISOString(),
-        pickup: "موقع الراكب",
-        dropoff: "وجهة محددة",
-        cost: 25,
-        status: "completed",
-        car: "economy",
-        driver: "الكابتن أحمد",
-        passenger: "راكب تجريبي"
-    });
-    scheduleMockRequest();
+
+    if (activeDriverTripId) {
+        ApiService.trips.updateStatus(activeDriverTripId, 'completed').catch(err => {
+            console.error('Failed to update trip status:', err);
+        });
+    }
+    activeDriverTripId = null;
+    currentIncomingTrip = null;
+    triggerDriverRequestPolling();
 };
 
 window.logoutUser = function() {
+    stopDriverRequestPolling();
     DB.clearSession();
     window.location.reload();
 };
@@ -1779,7 +1821,7 @@ function updateTripEstimatesUI() {
     if (tEl) tEl.innerText = `~${etaMin} دقيقة`;
 }
 
-window.requestRide = function() {
+window.requestRide = async function() {
     if (!currentPickup || !currentDestination) { showToast('حدد الالتقاط والوجهة أولاً'); return; }
     if (!currentCarType) { showToast('اختر نوع السيارة'); return; }
     
@@ -1808,6 +1850,31 @@ window.requestRide = function() {
         return;
     }
     
+    try {
+        const user = DB.getUser();
+        const tripPayload = {
+            user_id: user?.id || 1,
+            pickup_location: currentPickup.label || 'نقطة الالتقاط',
+            dropoff_location: currentDestination.label || 'الوجهة',
+            pickup_lat: currentPickup.lat,
+            pickup_lng: currentPickup.lng,
+            dropoff_lat: currentDestination.lat,
+            dropoff_lng: currentDestination.lng,
+            car_type: currentCarType,
+            cost: currentTripPrice,
+            distance: est.distanceKm,
+            duration: est.etaMin,
+            payment_method: 'cash',
+            status: 'pending'
+        };
+
+        await ApiService.trips.create(tripPayload);
+    } catch (error) {
+        console.error('Failed to create trip:', error);
+        showToast('❌ تعذر إرسال الطلب، حاول مرة أخرى');
+        return;
+    }
+
     // Show loading (searching for driver)
     switchSection('loading');
     // After a short delay, show driver found
@@ -1863,6 +1930,9 @@ function initPassengerMode() {
         clearTimeout(driverRequestTimeout);
         driverRequestTimeout = null;
     }
+    stopDriverRequestPolling();
+    currentIncomingTrip = null;
+    activeDriverTripId = null;
     const driverTopBar = document.getElementById('driver-top-bar');
     if (driverTopBar) driverTopBar.classList.add('hidden');
     const driverMenu = document.getElementById('driver-side-menu');
@@ -1913,6 +1983,8 @@ function initDriverMode() {
     document.body.classList.remove('role-passenger');
     document.getElementById('driver-ui-container').classList.remove('hidden');
     setDriverPanelVisible(true);
+    currentIncomingTrip = null;
+    activeDriverTripId = null;
     const passengerUi = document.getElementById('passenger-ui-container');
     if (passengerUi) passengerUi.classList.add('hidden');
     const passengerTopBar = document.getElementById('passenger-top-bar');
@@ -1930,7 +2002,9 @@ function initDriverMode() {
     initLeafletMap();
     moveLeafletMapToContainer('map-container');
     updateDriverMenuData();
-    scheduleMockRequest();
+    resolveDriverProfile().then(() => {
+        startDriverRequestPolling();
+    });
 }
 
 function initAdminMode() {
@@ -1938,19 +2012,101 @@ function initAdminMode() {
     renderAdminTrips();
 }
 
-function scheduleMockRequest() {
-    if (driverRequestTimeout) clearTimeout(driverRequestTimeout);
-    driverRequestTimeout = setTimeout(() => {
-        const waiting = document.getElementById('driver-status-waiting');
-        const incoming = document.getElementById('driver-incoming-request');
-        if (!incoming) return;
-        const isDriver = currentUserRole === 'driver';
-        if (isDriver && waiting && !waiting.classList.contains('hidden')) {
-            waiting.classList.add('hidden');
-            incoming.classList.remove('hidden');
-            setDriverPanelVisible(true);
+async function resolveDriverProfile() {
+    try {
+        const user = DB.getUser();
+        if (!user) return null;
+        const response = await ApiService.drivers.resolve(user.email, user.phone);
+        if (response?.success) {
+            currentDriverProfile = response.data;
+            return currentDriverProfile;
         }
-    }, 1000);
+    } catch (error) {
+        console.error('Failed to resolve driver profile:', error);
+        showToast('تعذر تحميل بيانات الكابتن');
+    }
+    return null;
+}
+
+function startDriverRequestPolling() {
+    stopDriverRequestPolling();
+    triggerDriverRequestPolling();
+    driverPollingInterval = setInterval(triggerDriverRequestPolling, 6000);
+}
+
+function stopDriverRequestPolling() {
+    if (driverPollingInterval) {
+        clearInterval(driverPollingInterval);
+        driverPollingInterval = null;
+    }
+}
+
+async function triggerDriverRequestPolling() {
+    if (currentUserRole !== 'driver') return;
+    if (!currentDriverProfile) {
+        await resolveDriverProfile();
+        if (!currentDriverProfile) return;
+    }
+
+    const incomingPanel = document.getElementById('driver-incoming-request');
+    const activePanel = document.getElementById('driver-active-trip');
+    if (activePanel && !activePanel.classList.contains('hidden')) return;
+    if (incomingPanel && !incomingPanel.classList.contains('hidden')) return;
+
+    try {
+        const response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type);
+        const trip = response?.data || null;
+        if (!trip) {
+            showDriverWaitingState();
+            return;
+        }
+
+        currentIncomingTrip = trip;
+        renderDriverIncomingTrip(trip);
+    } catch (error) {
+        console.error('Failed to fetch pending trips:', error);
+    }
+}
+
+function showDriverWaitingState() {
+    const waiting = document.getElementById('driver-status-waiting');
+    const incoming = document.getElementById('driver-incoming-request');
+    if (incoming) incoming.classList.add('hidden');
+    if (waiting) waiting.classList.remove('hidden');
+    setDriverPanelVisible(true);
+}
+
+function renderDriverIncomingTrip(trip) {
+    const waiting = document.getElementById('driver-status-waiting');
+    if (waiting) waiting.classList.add('hidden');
+    const incoming = document.getElementById('driver-incoming-request');
+    if (incoming) incoming.classList.remove('hidden');
+
+    const pickupEl = document.getElementById('driver-request-pickup');
+    const dropoffEl = document.getElementById('driver-request-dropoff');
+    const priceEl = document.getElementById('driver-request-price');
+    const distanceEl = document.getElementById('driver-request-distance');
+    const passengerEl = document.getElementById('driver-request-passenger');
+    const carTypeEl = document.getElementById('driver-request-car-type');
+    const tripIdEl = document.getElementById('driver-request-trip-id');
+
+    if (tripIdEl) tripIdEl.innerText = trip.id || '-';
+    if (pickupEl) pickupEl.innerText = trip.pickup_location || 'موقع الراكب';
+    if (dropoffEl) dropoffEl.innerText = trip.dropoff_location || 'الوجهة';
+    if (priceEl) priceEl.innerText = trip.cost || '0';
+    if (distanceEl) distanceEl.innerText = trip.distance || '-';
+    if (passengerEl) passengerEl.innerText = trip.passenger_name || 'راكب جديد';
+    if (carTypeEl) carTypeEl.innerText = trip.car_type || 'اقتصادي';
+
+    if (trip.pickup_lat !== undefined && trip.pickup_lat !== null && trip.pickup_lng !== undefined && trip.pickup_lng !== null) {
+        setPassengerPickup({
+            lat: Number(trip.pickup_lat),
+            lng: Number(trip.pickup_lng),
+            phone: trip.passenger_phone
+        }, trip.pickup_location);
+        passengerPickup.phone = trip.passenger_phone;
+    }
+    setDriverPanelVisible(true);
 }
 
 async function renderAdminTrips() {

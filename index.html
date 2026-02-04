@@ -1702,6 +1702,67 @@
     ============================================== -->
     <div id="driver-ui-container" class="absolute bottom-0 w-full z-20 pointer-events-none hidden">
         <div class="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-hidden">
+            <!-- Driver Incoming Request -->
+            <div id="driver-incoming-request" class="hidden bg-white border-b border-gray-100">
+                <div class="p-6 pb-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs text-emerald-600 font-bold">طلب جديد</p>
+                            <h3 class="text-xl font-extrabold text-gray-800">رحلة قريبة منك</h3>
+                        </div>
+                        <button type="button" onclick="toggleDriverRequestPanel()" class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="driver-request-body" class="px-6 pb-6">
+                    <div class="bg-gray-50 rounded-2xl p-4 space-y-3">
+                        <div class="flex items-center justify-between text-xs text-gray-500 font-bold">
+                            <span>رقم الرحلة</span>
+                            <span id="driver-request-trip-id">-</span>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="flex flex-col items-center mt-1">
+                                <span class="w-2 h-2 rounded-full bg-indigo-600"></span>
+                                <span class="w-0.5 h-6 bg-gray-300"></span>
+                                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                            </div>
+                            <div class="flex-1 space-y-2">
+                                <p class="text-sm text-gray-700 font-bold" id="driver-request-pickup">موقع الراكب</p>
+                                <p class="text-sm text-gray-700 font-bold" id="driver-request-dropoff">الوجهة</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-white rounded-xl p-3 border border-gray-200">
+                                <p class="text-xs text-gray-400 font-bold mb-1">السعر</p>
+                                <p class="text-lg font-extrabold text-gray-800"><span id="driver-request-price">0</span> ر.س</p>
+                            </div>
+                            <div class="bg-white rounded-xl p-3 border border-gray-200">
+                                <p class="text-xs text-gray-400 font-bold mb-1">المسافة</p>
+                                <p class="text-lg font-extrabold text-gray-800"><span id="driver-request-distance">-</span> كم</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between text-sm text-gray-600 font-bold">
+                            <span>الراكب</span>
+                            <span id="driver-request-passenger">راكب جديد</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm text-gray-600 font-bold">
+                            <span>نوع الرحلة</span>
+                            <span id="driver-request-car-type">اقتصادي</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3 mt-4">
+                        <button type="button" onclick="driverRejectRequest()" class="py-3 rounded-xl bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-colors">
+                            رفض
+                        </button>
+                        <button type="button" onclick="driverAcceptRequest()" class="py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-colors">
+                            قبول
+                        </button>
+                    </div>
+                </div>
+            </div>
             
             <!-- Driver Status: Waiting -->
             <div id="driver-status-waiting" class="p-6 text-center">
