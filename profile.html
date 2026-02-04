@@ -70,10 +70,17 @@
 </head>
 <body class="bg-gray-50 p-5">
     <div class="max-w-6xl mx-auto">
-        <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 mb-6 hover:bg-gray-50 transition-colors" onclick="history.back()">
-            <i class="fas fa-arrow-right"></i>
-            رجوع
-        </button>
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+            <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors" onclick="history.back()">
+                <i class="fas fa-arrow-right"></i>
+                رجوع
+            </button>
+            <button id="profile-dark-toggle" class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors">
+                <i id="profile-dark-icon" class="fas fa-moon"></i>
+                <span>الوضع الليلي</span>
+                <span id="profile-dark-label" class="text-xs text-gray-400 font-bold">غير مفعل</span>
+            </button>
+        </div>
 
         <div class="mb-8 text-center">
             <div class="w-24 h-24 rounded-full bg-white border border-gray-100 shadow-sm flex items-center justify-center text-5xl mx-auto mb-4 text-gray-700 relative">
@@ -265,15 +272,47 @@
              document.getElementById('ratingsSection').classList.add('hidden');
         }
 
+    </script>
     <script>
+        const PROFILE_DARK_MODE_KEY = 'akwadra_dark_mode';
+
+        function updateProfileDarkToggleUI() {
+            const isDark = document.body.classList.contains('dark-mode');
+            const label = document.getElementById('profile-dark-label');
+            const icon = document.getElementById('profile-dark-icon');
+            if (label) label.textContent = isDark ? 'مفعل' : 'غير مفعل';
+            if (icon) {
+                icon.classList.toggle('fa-moon', !isDark);
+                icon.classList.toggle('fa-sun', isDark);
+            }
+        }
+
+        function setProfileDarkMode(enabled) {
+            document.body.classList.toggle('dark-mode', enabled);
+            try {
+                localStorage.setItem(PROFILE_DARK_MODE_KEY, enabled ? '1' : '0');
+            } catch (e) {
+                console.error(e);
+            }
+            updateProfileDarkToggleUI();
+        }
+
+        function toggleProfileDarkMode() {
+            const isDark = document.body.classList.contains('dark-mode');
+            setProfileDarkMode(!isDark);
+        }
+
         (function() {
             try {
-                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                if (localStorage.getItem(PROFILE_DARK_MODE_KEY) === '1') {
                     document.body.classList.add('dark-mode');
                 }
             } catch (e) {
                 console.error(e);
             }
+            updateProfileDarkToggleUI();
+            const toggleBtn = document.getElementById('profile-dark-toggle');
+            if (toggleBtn) toggleBtn.addEventListener('click', toggleProfileDarkMode);
         })();
     </script>
 </body>

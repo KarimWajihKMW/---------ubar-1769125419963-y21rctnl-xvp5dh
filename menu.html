@@ -83,10 +83,17 @@
 </head>
 <body class="bg-gray-50 p-5">
     <div class="max-w-6xl mx-auto">
-        <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 mb-6 hover:bg-gray-50 transition-colors" onclick="history.back()">
-            <i class="fas fa-arrow-right"></i>
-            رجوع
-        </button>
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+            <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors" onclick="history.back()">
+                <i class="fas fa-arrow-right"></i>
+                رجوع
+            </button>
+            <button id="menu-dark-toggle" class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors">
+                <i id="menu-dark-icon" class="fas fa-moon"></i>
+                <span>الوضع الليلي</span>
+                <span id="menu-dark-label" class="text-xs text-gray-400 font-bold">غير مفعل</span>
+            </button>
+        </div>
 
         <div class="mb-6 text-center">
             <h1 class="text-2xl font-bold text-gray-800">🚗 أكوادرا تاكسي</h1>
@@ -406,14 +413,45 @@
         });
     </script>
     <script>
+        const MENU_DARK_MODE_KEY = 'akwadra_dark_mode';
+
+        function updateMenuDarkToggleUI() {
+            const isDark = document.body.classList.contains('dark-mode');
+            const label = document.getElementById('menu-dark-label');
+            const icon = document.getElementById('menu-dark-icon');
+            if (label) label.textContent = isDark ? 'مفعل' : 'غير مفعل';
+            if (icon) {
+                icon.classList.toggle('fa-moon', !isDark);
+                icon.classList.toggle('fa-sun', isDark);
+            }
+        }
+
+        function setMenuDarkMode(enabled) {
+            document.body.classList.toggle('dark-mode', enabled);
+            try {
+                localStorage.setItem(MENU_DARK_MODE_KEY, enabled ? '1' : '0');
+            } catch (e) {
+                // ignore
+            }
+            updateMenuDarkToggleUI();
+        }
+
+        function toggleMenuDarkMode() {
+            const isDark = document.body.classList.contains('dark-mode');
+            setMenuDarkMode(!isDark);
+        }
+
         (function() {
             try {
-                if (localStorage.getItem('akwadra_dark_mode') === '1') {
+                if (localStorage.getItem(MENU_DARK_MODE_KEY) === '1') {
                     document.body.classList.add('dark-mode');
                 }
             } catch (e) {
                 // ignore
             }
+            updateMenuDarkToggleUI();
+            const toggleBtn = document.getElementById('menu-dark-toggle');
+            if (toggleBtn) toggleBtn.addEventListener('click', toggleMenuDarkMode);
         })();
     </script>
 </body>
