@@ -159,6 +159,7 @@ let driverPollingInterval = null;
 let currentDriverProfile = null;
 let currentIncomingTrip = null;
 let activeDriverTripId = null;
+let driverDemoRequestAt = 0;
 
 function isMapWorldActive() {
     const mapWorld = document.getElementById('map-world');
@@ -2058,6 +2059,74 @@ async function resolveDriverProfile() {
     return null;
 }
 
+async function createDriverDemoTrip() {
+    const now = Date.now();
+    if (now - driverDemoRequestAt < 15000) return null;
+    driverDemoRequestAt = now;
+
+    const demoTrips = [
+        {
+            pickup: 'شارع طلعت حرب، القاهرة',
+            dropoff: 'ميدان التحرير، القاهرة',
+            pickup_lat: 30.0522,
+            pickup_lng: 31.2437,
+            dropoff_lat: 30.0444,
+            dropoff_lng: 31.2357,
+            cost: 38.5,
+            distance: 6.4,
+            duration: 14
+        },
+        {
+            pickup: 'مدينة نصر، القاهرة',
+            dropoff: 'العباسية، القاهرة',
+            pickup_lat: 30.0561,
+            pickup_lng: 31.3301,
+            dropoff_lat: 30.0664,
+            dropoff_lng: 31.2775,
+            cost: 42.0,
+            distance: 7.9,
+            duration: 18
+        },
+        {
+            pickup: 'المعادي، القاهرة',
+            dropoff: 'كورنيش المعادي',
+            pickup_lat: 29.9602,
+            pickup_lng: 31.2569,
+            dropoff_lat: 29.9506,
+            dropoff_lng: 31.2623,
+            cost: 26.0,
+            distance: 4.1,
+            duration: 10
+        }
+    ];
+
+    const demo = demoTrips[Math.floor(Math.random() * demoTrips.length)];
+    const user = DB.getUser();
+    const payload = {
+        user_id: user?.id || 1,
+        pickup_location: demo.pickup,
+        dropoff_location: demo.dropoff,
+        pickup_lat: demo.pickup_lat,
+        pickup_lng: demo.pickup_lng,
+        dropoff_lat: demo.dropoff_lat,
+        dropoff_lng: demo.dropoff_lng,
+        car_type: currentDriverProfile?.car_type || 'economy',
+        cost: demo.cost,
+        distance: demo.distance,
+        duration: demo.duration,
+        payment_method: 'cash',
+        status: 'pending'
+    };
+
+    try {
+        const created = await ApiService.trips.create(payload);
+        return created?.data || null;
+    } catch (error) {
+        console.error('Failed to create demo trip:', error);
+        return null;
+    }
+}
+
 function startDriverRequestPolling() {
     stopDriverRequestPolling();
     triggerDriverRequestPolling();
@@ -2084,8 +2153,14 @@ async function triggerDriverRequestPolling() {
     if (incomingPanel && !incomingPanel.classList.contains('hidden')) return;
 
     try {
-        const response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
-        const trip = response?.data || null;
+        let response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
+        let trip = response?.data || null;
+        if (!trip) {
+            await createDriverDemoTrip();
+            response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
+            trip = response?.data || null;
+        }
+
         if (!trip) {
             showDriverWaitingState();
             return;
@@ -2095,6 +2170,19 @@ async function triggerDriverRequestPolling() {
         renderDriverIncomingTrip(trip);
     } catch (error) {
         console.error('Failed to fetch pending trips:', error);
+        await createDriverDemoTrip();
+        try {
+            const retry = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
+            const trip = retry?.data || null;
+            if (trip) {
+                currentIncomingTrip = trip;
+                renderDriverIncomingTrip(trip);
+                return;
+            }
+        } catch (retryError) {
+            console.error('Retry pending trips failed:', retryError);
+        }
+        showDriverWaitingState();
     }
 }
 
