@@ -2747,19 +2747,41 @@ window.applyOffer = function(code) {
 
     SafeStorage.setItem('akwadra_active_offer', normalized);
 
+    const hasPriceContext = (currentTripPrice || tripDetails.basePrice || 0) > 0;
+
     const promoInput = document.getElementById('promo-code-input');
     const paymentSection = document.getElementById('state-payment-method');
     const invoiceSection = document.getElementById('state-payment-invoice');
     const isPaymentVisible = (paymentSection && !paymentSection.classList.contains('hidden'))
         || (invoiceSection && !invoiceSection.classList.contains('hidden'));
 
-    if (promoInput && isPaymentVisible && (currentTripPrice || tripDetails.basePrice)) {
+    if (promoInput && isPaymentVisible && hasPriceContext) {
         promoInput.value = normalized;
         window.applyPromoCode();
         return;
     }
 
-    showToast(`✅ تم اختيار العرض: ${normalized} — سيتم تطبيقه عند الدفع`);
+    if (hasPriceContext) {
+        window.switchSection('payment-method');
+        setTimeout(() => {
+            const input = document.getElementById('promo-code-input');
+            if (input) {
+                input.value = normalized;
+                window.applyPromoCode();
+            }
+        }, 150);
+        return;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(normalized).then(() => {
+            showToast(`✅ تم نسخ كود العرض: ${normalized}`);
+        }).catch(() => {
+            showToast(`✅ تم اختيار العرض: ${normalized} — استخدمه عند الدفع`);
+        });
+    } else {
+        showToast(`✅ تم اختيار العرض: ${normalized} — استخدمه عند الدفع`);
+    }
 };
 
 // Filter trips
