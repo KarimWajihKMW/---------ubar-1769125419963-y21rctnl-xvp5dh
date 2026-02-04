@@ -371,6 +371,27 @@
                 height: 75vh;
             }
 
+            #driver-panel-card {
+                transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                will-change: transform;
+            }
+
+            #driver-panel-card.driver-panel-collapsed {
+                transform: translateY(62%);
+            }
+
+            @media (min-width: 768px) {
+                #driver-panel-card.driver-panel-collapsed {
+                    transform: translateY(48%);
+                }
+            }
+
+            @media (min-width: 1024px) {
+                #driver-panel-card.driver-panel-collapsed {
+                    transform: translateY(38%);
+                }
+            }
+
       /* Ensure driver marker is visible */
       .driver-car-marker {
         z-index: 1000 !important;
@@ -382,6 +403,20 @@
 
             #driver-incoming-request.collapsed #driver-request-body {
                 display: none;
+            }
+
+            /* Floating expand button animation */
+            #driver-panel-expand-floating {
+                animation: float-bounce 2s ease-in-out infinite;
+            }
+
+            @keyframes float-bounce {
+                0%, 100% { transform: translateX(-50%) translateY(0); }
+                50% { transform: translateX(-50%) translateY(-10px); }
+            }
+
+            #driver-panel-expand-floating:hover {
+                animation: none;
             }
     </style>
 </head>
@@ -1752,7 +1787,7 @@
          DRIVER UI COMPONENTS
     ============================================== -->
     <div id="driver-ui-container" class="absolute bottom-0 w-full z-20 pointer-events-none hidden">
-        <div class="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-hidden">
+        <div id="driver-panel-card" class="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-hidden">
             <!-- Captain Header -->
             <div class="px-6 pt-6 pb-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
                 <div class="flex items-center justify-between">
@@ -1784,6 +1819,13 @@
                         <p class="text-[10px] text-emerald-100 font-bold">الأرباح</p>
                         <p class="text-sm font-extrabold" id="driver-home-earnings">0 ر.س</p>
                     </div>
+                </div>
+                <div class="mt-4">
+                    <button id="driver-panel-collapse" type="button" onclick="collapseDriverPanel()" class="w-full flex items-center justify-center gap-2 bg-white text-emerald-600 font-bold py-3 rounded-2xl border-2 border-white shadow-lg hover:bg-emerald-50 transition-all">
+                        <i class="fas fa-chevron-down text-lg"></i>
+                        <span>إنزال اللوحة لرؤية الخريطة</span>
+                        <i class="fas fa-map ml-2"></i>
+                    </button>
                 </div>
             </div>
             <!-- Driver Incoming Request -->
@@ -1881,6 +1923,12 @@
 
     <button id="driver-panel-toggle" type="button" onclick="toggleDriverPanel()" class="hidden fixed bottom-6 right-6 z-30 bg-emerald-600 text-white px-4 py-2.5 rounded-full shadow-lg font-bold pointer-events-auto hover:bg-emerald-700 transition-all">
         إظهار لوحة السائق
+    </button>
+    
+    <!-- Floating Expand Button (shown when collapsed) -->
+    <button id="driver-panel-expand-floating" type="button" onclick="expandDriverPanel()" class="hidden fixed bottom-24 left-1/2 transform -translate-x-1/2 z-40 bg-white text-emerald-600 px-6 py-3 rounded-full shadow-2xl font-bold pointer-events-auto hover:bg-emerald-50 transition-all border-2 border-emerald-600">
+        <i class="fas fa-chevron-up text-lg ml-2"></i>
+        <span>رفع اللوحة</span>
     </button>
 
     <!-- City Tour Offer Modal -->

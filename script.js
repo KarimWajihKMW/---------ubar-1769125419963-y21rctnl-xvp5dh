@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         updateDarkModeToggleUI();
     }
+    updateDriverPanelCollapseUI();
 });
 
 // --- Global State ---
@@ -237,6 +238,7 @@ let etaSeconds = 0;
 let driverToPassengerAnim = null;
 let mapSelectionMode = 'destination';
 let isDriverInfoCollapsed = false;
+let isDriverPanelCollapsed = false;
 
 function formatStreetLabel(label) {
     if (!label) return 'موقع محدد';
@@ -289,6 +291,42 @@ function toggleDriverInfoPanel() {
 }
 
 window.toggleDriverInfoPanel = toggleDriverInfoPanel;
+
+function updateDriverPanelCollapseUI() {
+    const collapseBtn = document.getElementById('driver-panel-collapse');
+    const expandFloatingBtn = document.getElementById('driver-panel-expand-floating');
+    if (collapseBtn) {
+        collapseBtn.disabled = isDriverPanelCollapsed;
+        collapseBtn.classList.toggle('opacity-50', isDriverPanelCollapsed);
+        collapseBtn.classList.toggle('cursor-not-allowed', isDriverPanelCollapsed);
+    }
+    if (expandFloatingBtn) {
+        if (isDriverPanelCollapsed) {
+            expandFloatingBtn.classList.remove('hidden');
+        } else {
+            expandFloatingBtn.classList.add('hidden');
+        }
+    }
+}
+
+function setDriverPanelCollapsed(collapsed) {
+    const panelCard = document.getElementById('driver-panel-card');
+    if (!panelCard) return;
+    isDriverPanelCollapsed = collapsed;
+    panelCard.classList.toggle('driver-panel-collapsed', collapsed);
+    updateDriverPanelCollapseUI();
+    if (leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 350);
+    }
+}
+
+window.collapseDriverPanel = function() {
+    setDriverPanelCollapsed(true);
+};
+
+window.expandDriverPanel = function() {
+    setDriverPanelCollapsed(false);
+};
 
 function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
