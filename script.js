@@ -236,6 +236,7 @@ let etaCountdown = null;
 let etaSeconds = 0;
 let driverToPassengerAnim = null;
 let mapSelectionMode = 'destination';
+let isDriverInfoCollapsed = false;
 
 function formatStreetLabel(label) {
     if (!label) return 'موقع محدد';
@@ -254,6 +255,40 @@ function bindStreetLabel(marker, label) {
         className: 'map-street-label'
     }).openTooltip();
 }
+
+function resetDriverInfoPanel() {
+    const infoSection = document.getElementById('driver-info-section');
+    const mapSection = document.getElementById('driver-map-section');
+    const toggleBtn = document.getElementById('driver-info-toggle');
+    if (!infoSection || !mapSection || !toggleBtn) return;
+
+    infoSection.classList.remove('hidden');
+    mapSection.classList.remove('driver-map-expanded');
+    toggleBtn.textContent = 'إخفاء التفاصيل';
+    isDriverInfoCollapsed = false;
+
+    if (leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 100);
+    }
+}
+
+function toggleDriverInfoPanel() {
+    const infoSection = document.getElementById('driver-info-section');
+    const mapSection = document.getElementById('driver-map-section');
+    const toggleBtn = document.getElementById('driver-info-toggle');
+    if (!infoSection || !mapSection || !toggleBtn) return;
+
+    isDriverInfoCollapsed = !isDriverInfoCollapsed;
+    infoSection.classList.toggle('hidden', isDriverInfoCollapsed);
+    mapSection.classList.toggle('driver-map-expanded', isDriverInfoCollapsed);
+    toggleBtn.textContent = isDriverInfoCollapsed ? 'إظهار التفاصيل' : 'إخفاء التفاصيل';
+
+    if (leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 100);
+    }
+}
+
+window.toggleDriverInfoPanel = toggleDriverInfoPanel;
 
 function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
@@ -4171,6 +4206,10 @@ window.switchSection = function(section) {
     }
 
     originalSwitchSection(section);
+
+    if (section === 'driver') {
+        resetDriverInfoPanel();
+    }
     
     const user = DB.getUser();
     if (section === 'profile' && user && user.role === 'passenger') {

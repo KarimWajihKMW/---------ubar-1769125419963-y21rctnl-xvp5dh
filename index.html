@@ -367,6 +367,10 @@
                 box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
             }
 
+            .driver-map-expanded {
+                height: 75vh;
+            }
+
       /* Ensure driver marker is visible */
       .driver-car-marker {
         z-index: 1000 !important;
@@ -1101,9 +1105,13 @@
             <!-- State 4: Driver Found -->
             <div id="state-driver" class="hidden p-0 bg-white flex flex-col h-full">
                 <!-- Map Section - Top Half -->
-                <div class="relative h-[45vh] bg-gray-200 overflow-hidden">
+                <div id="driver-map-section" class="relative h-[45vh] bg-gray-200 overflow-hidden">
                     <!-- Map will show here -->
                     <div id="driver-map-view" class="absolute inset-0 z-1"></div>
+
+                    <button id="driver-info-toggle" onclick="toggleDriverInfoPanel()" class="absolute top-4 left-4 z-20 bg-white/90 text-gray-700 px-4 py-2 rounded-full text-xs sm:text-sm font-bold shadow-lg border border-gray-200 hover:bg-white transition-colors">
+                        إخفاء التفاصيل
+                    </button>
                     
                     <!-- Floating ETA Card -->
                     <div class="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/95 backdrop-blur px-6 py-3 rounded-2xl shadow-xl border-2 border-indigo-200">
@@ -1121,7 +1129,7 @@
                 </div>
                 
                 <!-- Info Section - Bottom Half -->
-                <div class="flex-1 p-4 sm:p-6 overflow-y-auto bg-white">
+                <div id="driver-info-section" class="flex-1 p-4 sm:p-6 overflow-y-auto bg-white">
                     <!-- Driver Info Card -->
                     <div class="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-200">
                         <div class="flex items-center">
