@@ -2746,13 +2746,18 @@ window.applyOffer = function(code) {
     SafeStorage.setItem('akwadra_active_offer', normalized);
 
     const promoInput = document.getElementById('promo-code-input');
-    if (promoInput) {
+    const paymentSection = document.getElementById('state-payment-method');
+    const invoiceSection = document.getElementById('state-payment-invoice');
+    const isPaymentVisible = (paymentSection && !paymentSection.classList.contains('hidden'))
+        || (invoiceSection && !invoiceSection.classList.contains('hidden'));
+
+    if (promoInput && isPaymentVisible && (currentTripPrice || tripDetails.basePrice)) {
         promoInput.value = normalized;
         window.applyPromoCode();
         return;
     }
 
-    showToast(`✅ تم اختيار العرض: ${normalized}`);
+    showToast(`✅ تم اختيار العرض: ${normalized} — سيتم تطبيقه عند الدفع`);
 };
 
 // Filter trips
@@ -3773,11 +3778,13 @@ window.applyPromoCode = async function() {
         'FIRST10': 10
     };
 
+    const priceForDiscount = tripDetails.basePrice || currentTripPrice || 0;
+
     if (resolvedOffer) {
         if (resolvedOffer.discount_type === 'percent') {
-            promoDiscount = Math.floor(currentTripPrice * (resolvedOffer.discount_value / 100));
+            promoDiscount = Math.floor(priceForDiscount * (resolvedOffer.discount_value / 100));
         } else if (resolvedOffer.discount_type === 'fixed') {
-            promoDiscount = Math.min(resolvedOffer.discount_value, currentTripPrice);
+            promoDiscount = Math.min(resolvedOffer.discount_value, priceForDiscount);
         } else if (resolvedOffer.discount_type === 'points') {
             promoDiscount = 0;
         } else {
@@ -3801,9 +3808,9 @@ window.applyPromoCode = async function() {
     if (validPromos[code]) {
         const discountValue = validPromos[code];
         if (discountValue < 1) {
-            promoDiscount = Math.floor(currentTripPrice * discountValue);
+            promoDiscount = Math.floor(priceForDiscount * discountValue);
         } else {
-            promoDiscount = Math.min(discountValue, currentTripPrice);
+            promoDiscount = Math.min(discountValue, priceForDiscount);
         }
 
         appliedPromo = code;
