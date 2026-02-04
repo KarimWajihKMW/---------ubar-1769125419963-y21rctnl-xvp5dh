@@ -3273,6 +3273,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+
+        // Bind driver accept/reject buttons even if inline onclick is blocked by CSP
+        const driverAcceptBtn = document.getElementById('driver-accept-btn');
+        if (driverAcceptBtn) {
+            driverAcceptBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (typeof window.driverAcceptRequest === 'function') {
+                    window.driverAcceptRequest();
+                }
+            });
+        }
+
+        const driverRejectBtn = document.getElementById('driver-reject-btn');
+        if (driverRejectBtn) {
+            driverRejectBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (typeof window.driverRejectRequest === 'function') {
+                    window.driverRejectRequest();
+                }
+            });
+        }
     } catch (e) {
         console.error('Initialization error:', e);
     }
