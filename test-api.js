@@ -71,9 +71,9 @@ async function testAPI() {
         
         const createdTripId = data.data.id;
 
-        // Test 9: Get next pending trip
-        console.log('\n9️⃣ Testing get next pending trip...');
-        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy`);
+        // Test 9: Get next pending trip (with auto demo)
+        console.log('\n9️⃣ Testing get next pending trip (auto demo)...');
+        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy&auto_demo=1`);
         data = await response.json();
         console.log('✅ Pending trip:', data.data?.id || 'none');
 
@@ -127,11 +127,18 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Rejected trip status:', data.data.status);
 
-        // Test 1️⃣4️⃣: Resolve driver profile
-        console.log('\n1️⃣4️⃣ Testing resolve driver profile...');
-        response = await fetch(`${baseURL}/drivers/resolve?email=driver1@ubar.sa`);
+        // Test 1️⃣4️⃣: Resolve driver profile (auto create)
+        console.log('\n1️⃣4️⃣ Testing resolve driver profile (auto create)...');
+        response = await fetch(`${baseURL}/drivers/resolve?email=driver1@ubar.sa&auto_create=1`);
         data = await response.json();
         console.log('✅ Resolved driver:', data.data?.id, data.data?.name);
+
+        // Test 1️⃣4️⃣b: Auto-create driver profile for new email
+        console.log('\n1️⃣4️⃣b Testing auto-create driver profile for new email...');
+        const autoEmail = `autodriver_${Date.now()}@ubar.sa`;
+        response = await fetch(`${baseURL}/drivers/resolve?email=${encodeURIComponent(autoEmail)}&auto_create=1`);
+        data = await response.json();
+        console.log('✅ Auto-created driver:', data.data?.id, data.data?.email);
 
         // Test 1️⃣5️⃣: Get available drivers
         console.log('\n1️⃣5️⃣ Testing get available drivers...');

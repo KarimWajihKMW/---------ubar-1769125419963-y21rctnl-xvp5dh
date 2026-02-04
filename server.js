@@ -349,7 +349,7 @@ app.patch('/api/trips/:id/status', async (req, res) => {
 // Get next pending trip (optionally by car type)
 app.get('/api/trips/pending/next', async (req, res) => {
     try {
-        const { car_type } = req.query;
+        const { car_type, auto_demo } = req.query;
 
         let query = `
             SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone
@@ -367,6 +367,83 @@ app.get('/api/trips/pending/next', async (req, res) => {
         query += ' ORDER BY t.created_at ASC LIMIT 1';
 
         const result = await pool.query(query, params);
+
+        if (result.rows.length === 0 && String(auto_demo) === '1') {
+            const demoId = `TR-${Date.now()}`;
+            const demoCarType = car_type || 'economy';
+            const demoTrips = [
+                {
+                    pickup: 'شارع طلعت حرب، القاهرة',
+                    dropoff: 'ميدان التحرير، القاهرة',
+                    pickup_lat: 30.0522,
+                    pickup_lng: 31.2437,
+                    dropoff_lat: 30.0444,
+                    dropoff_lng: 31.2357,
+                    cost: 38.5,
+                    distance: 6.4,
+                    duration: 14
+                },
+                {
+                    pickup: 'مدينة نصر، القاهرة',
+                    dropoff: 'العباسية، القاهرة',
+                    pickup_lat: 30.0561,
+                    pickup_lng: 31.3301,
+                    dropoff_lat: 30.0664,
+                    dropoff_lng: 31.2775,
+                    cost: 42.0,
+                    distance: 7.9,
+                    duration: 18
+                },
+                {
+                    pickup: 'المعادي، القاهرة',
+                    dropoff: 'كورنيش المعادي',
+                    pickup_lat: 29.9602,
+                    pickup_lng: 31.2569,
+                    dropoff_lat: 29.9506,
+                    dropoff_lng: 31.2623,
+                    cost: 26.0,
+                    distance: 4.1,
+                    duration: 10
+                }
+            ];
+            const demo = demoTrips[Math.floor(Math.random() * demoTrips.length)];
+
+            const insert = await pool.query(
+                `INSERT INTO trips (
+                    id, user_id, driver_id, pickup_location, dropoff_location,
+                    pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                    car_type, cost, distance, duration, payment_method, status
+                ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'cash', 'pending')
+                RETURNING *`,
+                [
+                    demoId,
+                    1,
+                    demo.pickup,
+                    demo.dropoff,
+                    demo.pickup_lat,
+                    demo.pickup_lng,
+                    demo.dropoff_lat,
+                    demo.dropoff_lng,
+                    demoCarType,
+                    demo.cost,
+                    demo.distance,
+                    demo.duration
+                ]
+            );
+
+            const demoTrip = insert.rows[0];
+            const passenger = await pool.query('SELECT name, phone FROM users WHERE id = $1', [demoTrip.user_id]);
+            const passengerRow = passenger.rows[0] || {};
+
+            return res.json({
+                success: true,
+                data: {
+                    ...demoTrip,
+                    passenger_name: passengerRow.name || 'راكب جديد',
+                    passenger_phone: passengerRow.phone || null
+                }
+            });
+        }
 
         res.json({
             success: true,
@@ -491,7 +568,7 @@ app.get('/api/drivers', async (req, res) => {
 // Resolve driver profile by email or phone
 app.get('/api/drivers/resolve', async (req, res) => {
     try {
-        const { email, phone } = req.query;
+        const { email, phone, auto_create } = req.query;
 
         if (!email && !phone) {
             return res.status(400).json({ success: false, error: 'email or phone is required' });
@@ -518,7 +595,30 @@ app.get('/api/drivers/resolve', async (req, res) => {
         const result = await pool.query(query, params);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Driver not found' });
+            if (String(auto_create) !== '1') {
+                return res.status(404).json({ success: false, error: 'Driver not found' });
+            }
+
+            const userLookup = await pool.query(
+                `SELECT id, name, phone, email
+                 FROM users
+                 WHERE (email = $1 OR phone = $2)
+                 LIMIT 1`,
+                [email ? String(email).trim().toLowerCase() : null, phone ? String(phone).trim() : null]
+            );
+
+            const fallbackName = userLookup.rows[0]?.name || 'كابتن جديد';
+            const fallbackPhone = userLookup.rows[0]?.phone || (phone ? String(phone).trim() : `05${Date.now().toString().slice(-8)}`);
+            const fallbackEmail = userLookup.rows[0]?.email || (email ? String(email).trim().toLowerCase() : `driver_${Date.now()}@ubar.sa`);
+
+            const insert = await pool.query(
+                `INSERT INTO drivers (name, phone, email, car_type, status, approval_status, rating, total_trips)
+                 VALUES ($1, $2, $3, 'economy', 'online', 'approved', 5.0, 0)
+                 RETURNING id, name, phone, email, car_type, status, approval_status, rating, total_trips`,
+                [fallbackName, fallbackPhone, fallbackEmail]
+            );
+
+            return res.json({ success: true, data: insert.rows[0], created: true });
         }
 
         res.json({ success: true, data: result.rows[0] });

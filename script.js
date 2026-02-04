@@ -2016,7 +2016,7 @@ async function resolveDriverProfile() {
     try {
         const user = DB.getUser();
         if (!user) return null;
-        const response = await ApiService.drivers.resolve(user.email, user.phone);
+        const response = await ApiService.drivers.resolve(user.email, user.phone, true);
         if (response?.success) {
             currentDriverProfile = response.data;
             return currentDriverProfile;
@@ -2054,7 +2054,7 @@ async function triggerDriverRequestPolling() {
     if (incomingPanel && !incomingPanel.classList.contains('hidden')) return;
 
     try {
-        const response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type);
+        const response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
         const trip = response?.data || null;
         if (!trip) {
             showDriverWaitingState();

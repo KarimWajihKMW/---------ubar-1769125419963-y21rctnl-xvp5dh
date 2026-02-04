@@ -76,9 +76,10 @@ const ApiService = {
         },
 
         // Get next pending trip (optionally by car type)
-        async getPendingNext(carType = null) {
+        async getPendingNext(carType = null, autoDemo = true) {
             const params = new URLSearchParams();
             if (carType) params.set('car_type', carType);
+            if (autoDemo) params.set('auto_demo', '1');
             const query = params.toString();
             return ApiService.request(`/trips/pending/next${query ? `?${query}` : ''}`);
         },
@@ -112,10 +113,11 @@ const ApiService = {
         },
 
         // Resolve driver profile by email/phone
-        async resolve(email = null, phone = null) {
+        async resolve(email = null, phone = null, autoCreate = true) {
             const params = new URLSearchParams();
             if (email) params.set('email', email);
             if (phone) params.set('phone', phone);
+            if (autoCreate) params.set('auto_create', '1');
             const query = params.toString();
             return ApiService.request(`/drivers/resolve${query ? `?${query}` : ''}`);
         }
