@@ -83,6 +83,51 @@ async function ensureDefaultAdmins() {
     }
 }
 
+async function ensureOffersTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS offers (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(30) UNIQUE NOT NULL,
+                title VARCHAR(150) NOT NULL,
+                description TEXT,
+                badge VARCHAR(50),
+                discount_type VARCHAR(20) NOT NULL DEFAULT 'percent',
+                discount_value DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                starts_at TIMESTAMP,
+                ends_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_offers_active ON offers(is_active);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_offers_code ON offers(code);');
+        console.log('✅ Offers table ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure offers table:', err.message);
+    }
+}
+
+async function ensureDefaultOffers() {
+    try {
+        await ensureOffersTable();
+        const existing = await pool.query('SELECT COUNT(*)::int AS count FROM offers');
+        if (existing.rows[0].count > 0) return;
+
+        await pool.query(`
+            INSERT INTO offers (code, title, description, badge, discount_type, discount_value, is_active)
+            VALUES
+                ('WELCOME20', '🎉 خصم 20% على أول رحلة', 'استخدم الكود WELCOME20 على أول طلب لك واحصل على خصم فوري.', 'جديد', 'percent', 20, true),
+                ('2FOR1', '🚗 رحلتان بسعر 1', 'رحلتك الثانية مجاناً عند الدفع بالبطاقة خلال هذا الأسبوع.', 'محدود', 'percent', 50, true),
+                ('DOUBLEPTS', '⭐ نقاط مضاعفة', 'اكسب ضعف النقاط على الرحلات المكتملة في عطلة نهاية الأسبوع.', 'نقاط', 'percent', 0, true)
+        `);
+        console.log('✅ Default offers inserted');
+    } catch (err) {
+        console.error('❌ Failed to ensure default offers:', err.message);
+    }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
@@ -96,6 +141,52 @@ app.get('/api/db/health', async (req, res) => {
     } catch (err) {
         console.error('Database health check failed:', err);
         res.status(500).json({ status: 'ERROR', message: 'Database connection failed' });
+    }
+});
+
+// ==================== OFFERS ENDPOINTS ====================
+
+app.get('/api/offers', async (req, res) => {
+    try {
+        const { active = '1' } = req.query;
+        const params = [];
+        let query = 'SELECT * FROM offers';
+
+        if (active === '1' || active === 'true') {
+            query += ' WHERE is_active = true';
+        }
+
+        query += ' ORDER BY created_at DESC';
+        const result = await pool.query(query, params);
+        res.json({ success: true, data: result.rows, count: result.rows.length });
+    } catch (err) {
+        console.error('Error fetching offers:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/offers/validate', async (req, res) => {
+    try {
+        const code = (req.query.code || '').toString().trim().toUpperCase();
+        if (!code) {
+            return res.status(400).json({ success: false, error: 'Offer code is required' });
+        }
+
+        const result = await pool.query(
+            `SELECT * FROM offers
+             WHERE UPPER(code) = $1 AND is_active = true
+             LIMIT 1`,
+            [code]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Offer not found or inactive' });
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error validating offer:', err);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
@@ -1054,9 +1145,11 @@ app.post('/api/users/login', async (req, res) => {
 });
 
 // Start server
-ensureDefaultAdmins().finally(() => {
-    app.listen(PORT, () => {
-        console.log(`🚀 Server running on port ${PORT}`);
-        console.log(`📍 API available at http://localhost:${PORT}/api`);
+ensureDefaultAdmins()
+    .then(() => ensureDefaultOffers())
+    .finally(() => {
+        app.listen(PORT, () => {
+            console.log(`🚀 Server running on port ${PORT}`);
+            console.log(`📍 API available at http://localhost:${PORT}/api`);
+        });
     });
-});

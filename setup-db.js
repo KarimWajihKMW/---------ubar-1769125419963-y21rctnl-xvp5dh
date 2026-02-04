@@ -53,6 +53,25 @@ async function setupDatabase() {
         `);
         console.log('✅ Drivers table created');
         
+        // Create offers table
+        await client.query(`
+            CREATE TABLE offers (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(30) UNIQUE NOT NULL,
+                title VARCHAR(150) NOT NULL,
+                description TEXT,
+                badge VARCHAR(50),
+                discount_type VARCHAR(20) NOT NULL DEFAULT 'percent',
+                discount_value DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                starts_at TIMESTAMP,
+                ends_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('✅ Offers table created');
+
         // Create trips table with all necessary fields
         await client.query(`
             CREATE TABLE trips (
@@ -92,6 +111,17 @@ async function setupDatabase() {
             console.log('⚠️ Some indexes may already exist');
         }
         
+        // Insert sample offers
+        await client.query(`
+            INSERT INTO offers (code, title, description, badge, discount_type, discount_value, is_active)
+            VALUES
+                ('WELCOME20', '🎉 خصم 20% على أول رحلة', 'استخدم الكود WELCOME20 على أول طلب لك واحصل على خصم فوري.', 'جديد', 'percent', 20, true),
+                ('2FOR1', '🚗 رحلتان بسعر 1', 'رحلتك الثانية مجاناً عند الدفع بالبطاقة خلال هذا الأسبوع.', 'محدود', 'percent', 50, true),
+                ('DOUBLEPTS', '⭐ نقاط مضاعفة', 'اكسب ضعف النقاط على الرحلات المكتملة في عطلة نهاية الأسبوع.', 'نقاط', 'percent', 0, true)
+            ON CONFLICT (code) DO NOTHING;
+        `);
+        console.log('✅ Sample offers inserted');
+
         // Insert sample drivers with realistic data
         await client.query(`
             INSERT INTO drivers (name, phone, email, password, car_type, car_plate, rating, total_trips, status, approval_status, approved_at)

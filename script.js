@@ -2645,31 +2645,73 @@ window.renderAllTrips = async function() {
 };
 
 // Render offers
-window.renderOffers = function() {
+let cachedOffers = [];
+
+async function fetchOffersFromApi() {
+    try {
+        const response = await fetch('/api/offers?active=1');
+        if (!response.ok) throw new Error('Failed to fetch offers');
+        const data = await response.json();
+        return Array.isArray(data.data) ? data.data : [];
+    } catch (err) {
+        return [];
+    }
+}
+
+function normalizeOffer(offer) {
+    return {
+        title: offer.title,
+        description: offer.description,
+        badge: offer.badge || 'عرض',
+        code: (offer.code || '').toUpperCase(),
+        discount_type: offer.discount_type,
+        discount_value: Number(offer.discount_value || 0)
+    };
+}
+
+window.getOfferByCode = function(code) {
+    const normalized = (code || '').toUpperCase();
+    return cachedOffers.find(offer => (offer.code || '').toUpperCase() === normalized) || null;
+};
+
+window.renderOffers = async function() {
     const container = document.getElementById('offers-container');
     const emptyState = document.getElementById('empty-offers-state');
     if (!container || !emptyState) return;
 
-    const offers = [
+    container.innerHTML = '<p class="text-gray-500 text-center py-8">جاري تحميل العروض...</p>';
+    emptyState.classList.add('hidden');
+
+    const apiOffers = await fetchOffersFromApi();
+    const fallbackOffers = [
         {
             title: '🎉 خصم 20% على أول رحلة',
             description: 'استخدم الكود WELCOME20 على أول طلب لك واحصل على خصم فوري.',
             badge: 'جديد',
-            code: 'WELCOME20'
+            code: 'WELCOME20',
+            discount_type: 'percent',
+            discount_value: 20
         },
         {
             title: '🚗 رحلتان بسعر 1',
             description: 'رحلتك الثانية مجاناً عند الدفع بالبطاقة خلال هذا الأسبوع.',
             badge: 'محدود',
-            code: '2FOR1'
+            code: '2FOR1',
+            discount_type: 'percent',
+            discount_value: 50
         },
         {
             title: '⭐ نقاط مضاعفة',
             description: 'اكسب ضعف النقاط على الرحلات المكتملة في عطلة نهاية الأسبوع.',
             badge: 'نقاط',
-            code: 'DOUBLEPTS'
+            code: 'DOUBLEPTS',
+            discount_type: 'points',
+            discount_value: 2
         }
     ];
+
+    const offers = (apiOffers.length ? apiOffers : fallbackOffers).map(normalizeOffer);
+    cachedOffers = offers;
 
     container.innerHTML = '';
     if (!offers.length) {
@@ -2695,12 +2737,22 @@ window.renderOffers = function() {
 };
 
 window.applyOffer = function(code) {
-    if (!code) {
+    const normalized = (code || '').toUpperCase();
+    if (!normalized) {
         showToast('⚠️ هذا العرض غير متاح حالياً');
         return;
     }
-    SafeStorage.setItem('akwadra_active_offer', code);
-    showToast(`✅ تم اختيار العرض: ${code}`);
+
+    SafeStorage.setItem('akwadra_active_offer', normalized);
+
+    const promoInput = document.getElementById('promo-code-input');
+    if (promoInput) {
+        promoInput.value = normalized;
+        window.applyPromoCode();
+        return;
+    }
+
+    showToast(`✅ تم اختيار العرض: ${normalized}`);
 };
 
 // Filter trips
@@ -3688,7 +3740,7 @@ window.selectPaymentMethod = function(method) {
     confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
 };
 
-window.applyPromoCode = function() {
+window.applyPromoCode = async function() {
     const promoInput = document.getElementById('promo-code-input');
     const promoResult = document.getElementById('promo-result');
     const code = promoInput.value.trim().toUpperCase();
@@ -3698,31 +3750,67 @@ window.applyPromoCode = function() {
         return;
     }
     
-    // Mock promo codes (in real app, validate from server)
+    let resolvedOffer = window.getOfferByCode ? window.getOfferByCode(code) : null;
+
+    if (!resolvedOffer) {
+        try {
+            const response = await fetch(`/api/offers/validate?code=${encodeURIComponent(code)}`);
+            if (response.ok) {
+                const data = await response.json();
+                resolvedOffer = data.data ? normalizeOffer(data.data) : null;
+            }
+        } catch (err) {
+            resolvedOffer = null;
+        }
+    }
+
+    // Mock promo codes (fallback)
     const validPromos = {
-        'WELCOME20': 0.20,  // 20% off
-        'CITY20': 0.20,     // City tour offer
-        'SAVE50': 50,       // 50 SAR off
-        'SUMMER15': 0.15,   // 15% off
-        'FIRST10': 10       // 10 SAR off
+        'WELCOME20': 0.20,
+        'CITY20': 0.20,
+        'SAVE50': 50,
+        'SUMMER15': 0.15,
+        'FIRST10': 10
     };
-    
+
+    if (resolvedOffer) {
+        if (resolvedOffer.discount_type === 'percent') {
+            promoDiscount = Math.floor(currentTripPrice * (resolvedOffer.discount_value / 100));
+        } else if (resolvedOffer.discount_type === 'fixed') {
+            promoDiscount = Math.min(resolvedOffer.discount_value, currentTripPrice);
+        } else if (resolvedOffer.discount_type === 'points') {
+            promoDiscount = 0;
+        } else {
+            promoDiscount = 0;
+        }
+
+        appliedPromo = code;
+        promoResult.classList.remove('hidden');
+        if (resolvedOffer.discount_type === 'points') {
+            promoResult.innerHTML = `✅ تم تطبيق الكود: ${code} - نقاط مضاعفة`;
+        } else {
+            promoResult.innerHTML = `✅ تم تطبيق الكود: ${code} - خصم ${promoDiscount} ر.س`;
+        }
+        promoInput.disabled = true;
+
+        updatePaymentSummary();
+        showToast('تم تطبيق الرمز بنجاح!');
+        return;
+    }
+
     if (validPromos[code]) {
         const discountValue = validPromos[code];
         if (discountValue < 1) {
-            // Percentage discount
             promoDiscount = Math.floor(currentTripPrice * discountValue);
         } else {
-            // Fixed discount
             promoDiscount = Math.min(discountValue, currentTripPrice);
         }
-        
+
         appliedPromo = code;
         promoResult.classList.remove('hidden');
         promoResult.innerHTML = `✅ تم تطبيق الكود: ${code} - خصم ${promoDiscount} ر.س`;
         promoInput.disabled = true;
-        
-        // Update price display
+
         updatePaymentSummary();
         showToast('تم تطبيق الرمز بنجاح!');
     } else {
@@ -3875,9 +3963,13 @@ window.proceedToPayment = function() {
             const newBalance = paymentMethod === 'wallet' 
                 ? user.balance - amount
                 : user.balance;
+            let pointsEarned = Math.floor(amount / 5);
+            if (appliedPromo === 'DOUBLEPTS') {
+                pointsEarned *= 2;
+            }
             DB.updateUser({
                 balance: newBalance,
-                points: user.points + Math.floor(amount / 5) // 1 point per 5 SAR
+                points: user.points + pointsEarned
             });
         }
         
@@ -3888,6 +3980,7 @@ window.proceedToPayment = function() {
         selectedPaymentMethod = null;
         appliedPromo = null;
         promoDiscount = 0;
+        SafeStorage.removeItem('akwadra_active_offer');
         
         // Show payment confirmation
         const amountEl = document.getElementById('payment-success-amount');
@@ -3917,6 +4010,15 @@ window.initPaymentFlow = function() {
     });
     document.getElementById('confirm-payment-btn').disabled = true;
     updatePaymentSummary();
+
+    const storedOffer = SafeStorage.getItem('akwadra_active_offer');
+    if (storedOffer) {
+        const promoInput = document.getElementById('promo-code-input');
+        if (promoInput) {
+            promoInput.value = storedOffer;
+            window.applyPromoCode();
+        }
+    }
 };
 
 // ========================================

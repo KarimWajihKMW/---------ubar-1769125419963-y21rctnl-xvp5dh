@@ -17,6 +17,18 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ DB Health:', data);
 
+        // Test 2️⃣b: Get active offers
+        console.log('\n2️⃣b Testing offers endpoint...');
+        response = await fetch(`${baseURL}/offers?active=1`);
+        data = await response.json();
+        console.log(`✅ Active offers: ${data.count}`);
+
+        // Test 2️⃣c: Validate offer code
+        console.log('\n2️⃣c Testing offer validation...');
+        response = await fetch(`${baseURL}/offers/validate?code=WELCOME20`);
+        data = await response.json();
+        console.log('✅ Offer validate:', data.data?.code || 'not found');
+
         // Test 3: Get all trips
         console.log('\n3️⃣ Testing get all trips...');
         response = await fetch(`${baseURL}/trips`);
