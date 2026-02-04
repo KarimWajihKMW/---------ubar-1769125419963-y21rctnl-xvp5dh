@@ -1634,7 +1634,9 @@ window.sendChatMessage = function() {
 
 window.driverRejectRequest = async function() {
     try {
-        if (currentIncomingTrip?.id) {
+        const tripId = currentIncomingTrip?.id;
+        const isLocalDemo = tripId && typeof tripId === 'string' && tripId.startsWith('DEMO-');
+        if (tripId && !isLocalDemo) {
             await ApiService.trips.reject(currentIncomingTrip.id);
         }
     } catch (error) {
@@ -1653,24 +1655,66 @@ window.driverRejectRequest = async function() {
 };
 
 window.driverAcceptRequest = async function() {
+    const acceptBtn = document.getElementById('driver-accept-btn');
+    if (acceptBtn) acceptBtn.disabled = true;
     try {
         if (!currentIncomingTrip || !currentDriverProfile) {
             showToast('لا يوجد طلب صالح حالياً');
             return;
         }
 
-        const assignResponse = await ApiService.trips.assignDriver(
-            currentIncomingTrip.id,
-            currentDriverProfile.id,
-            currentDriverProfile.name
-        );
+        let tripId = currentIncomingTrip.id;
+        const isLocalDemo = tripId && typeof tripId === 'string' && tripId.startsWith('DEMO-');
 
-        if (!assignResponse?.success) {
-            showToast('تعذر قبول الطلب، حاول مرة أخرى');
+        if (!tripId || isLocalDemo) {
+            try {
+                const created = await ApiService.trips.create({
+                    user_id: currentIncomingTrip.user_id || 1,
+                    pickup_location: currentIncomingTrip.pickup_location,
+                    dropoff_location: currentIncomingTrip.dropoff_location,
+                    pickup_lat: currentIncomingTrip.pickup_lat ?? null,
+                    pickup_lng: currentIncomingTrip.pickup_lng ?? null,
+                    dropoff_lat: currentIncomingTrip.dropoff_lat ?? null,
+                    dropoff_lng: currentIncomingTrip.dropoff_lng ?? null,
+                    car_type: currentIncomingTrip.car_type || currentDriverProfile?.car_type || 'economy',
+                    cost: currentIncomingTrip.cost || 0,
+                    distance: currentIncomingTrip.distance || null,
+                    duration: currentIncomingTrip.duration || null,
+                    payment_method: currentIncomingTrip.payment_method || 'cash',
+                    status: 'pending'
+                });
+
+                if (created?.data?.id) {
+                    tripId = created.data.id;
+                    currentIncomingTrip = { ...currentIncomingTrip, id: tripId };
+                }
+            } catch (error) {
+                console.error('Failed to create trip before assign:', error);
+            }
+        }
+
+        if (!tripId) {
+            showToast('تعذر تجهيز الطلب، حاول مرة أخرى');
             return;
         }
 
-        activeDriverTripId = assignResponse.data?.id || currentIncomingTrip.id;
+        let assignResponse = null;
+        try {
+            assignResponse = await ApiService.trips.assignDriver(
+                tripId,
+                currentDriverProfile.id,
+                currentDriverProfile.name
+            );
+        } catch (error) {
+            console.error('Assign trip failed:', error);
+        }
+
+        if (!assignResponse?.success) {
+            showToast('تم قبول الطلب محلياً');
+            activeDriverTripId = tripId;
+        } else {
+            activeDriverTripId = assignResponse.data?.id || tripId;
+        }
 
         const waiting = document.getElementById('driver-status-waiting');
         if (waiting) waiting.classList.add('hidden');
@@ -1691,6 +1735,8 @@ window.driverAcceptRequest = async function() {
     } catch (error) {
         console.error('Error accepting driver request:', error);
         showToast('❌ خطأ أثناء قبول الطلب');
+    } finally {
+        if (acceptBtn) acceptBtn.disabled = false;
     }
 };
 
