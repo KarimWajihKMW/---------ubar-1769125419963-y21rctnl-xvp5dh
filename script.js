@@ -3701,6 +3701,7 @@ window.applyPromoCode = function() {
     // Mock promo codes (in real app, validate from server)
     const validPromos = {
         'WELCOME20': 0.20,  // 20% off
+        'CITY20': 0.20,     // City tour offer
         'SAVE50': 50,       // 50 SAR off
         'SUMMER15': 0.15,   // 15% off
         'FIRST10': 10       // 10 SAR off
@@ -3729,6 +3730,43 @@ window.applyPromoCode = function() {
         promoResult.innerHTML = '❌ الرمز غير صحيح أو منتهي الصلاحية';
         showToast('رمز خصم غير صحيح');
     }
+};
+
+// City tour promo modal
+window.openCityTourOffer = function() {
+    const modal = document.getElementById('city-tour-modal');
+    if (modal) modal.classList.remove('hidden');
+};
+
+window.closeCityTourOffer = function() {
+    const modal = document.getElementById('city-tour-modal');
+    if (modal) modal.classList.add('hidden');
+};
+
+window.copyCityTourCode = function() {
+    const code = 'CITY20';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(() => {
+            showToast('✅ تم نسخ كود الخصم');
+        }).catch(() => {
+            showToast('انسخ الكود: CITY20');
+        });
+    } else {
+        showToast('انسخ الكود: CITY20');
+    }
+};
+
+window.goToPaymentPromo = function() {
+    closeCityTourOffer();
+    const promoInput = document.getElementById('promo-code-input');
+    if (promoInput) {
+        promoInput.value = 'CITY20';
+        showToast('✅ تم إدخال كود الخصم');
+        const promoResult = document.getElementById('promo-result');
+        if (promoResult) promoResult.classList.add('hidden');
+        return;
+    }
+    showToast('استخدم الكود CITY20 عند الدفع');
 };
 
 window.updatePaymentSummary = function() {

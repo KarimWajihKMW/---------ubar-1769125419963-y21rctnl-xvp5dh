@@ -966,7 +966,7 @@
                 </div>
                 
                 <!-- Promo Card -->
-                <div class="mt-8 group cursor-pointer bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-5 text-white shadow-lg shadow-indigo-200 relative overflow-hidden transform transition-transform hover:scale-[1.02]">
+                <div class="mt-8 group cursor-pointer bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-5 text-white shadow-lg shadow-indigo-200 relative overflow-hidden transform transition-transform hover:scale-[1.02]" onclick="openCityTourOffer()" role="button" tabindex="0">
                      <div class="absolute top-0 left-0 w-32 h-32 bg-white/10 rounded-full -translate-x-1/2 -translate-y-1/2 blur-2xl"></div>
                      <div class="flex justify-between items-center relative z-10">
                          <div>
@@ -1856,6 +1856,28 @@
     <button id="driver-panel-toggle" type="button" onclick="toggleDriverPanel()" class="hidden fixed bottom-6 right-6 z-30 bg-emerald-600 text-white px-4 py-2.5 rounded-full shadow-lg font-bold pointer-events-auto hover:bg-emerald-700 transition-all">
         إظهار لوحة السائق
     </button>
+
+    <!-- City Tour Offer Modal -->
+    <div id="city-tour-modal" class="fixed inset-0 z-[120] hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeCityTourOffer()"></div>
+        <div class="relative max-w-md w-[92%] mx-auto mt-24 bg-white rounded-3xl shadow-2xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-extrabold text-gray-800">🎉 عرض جولة في المدينة</h3>
+                <button type="button" onclick="closeCityTourOffer()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">احصل على خصم 20% على الرحلات الطويلة داخل المدينة. استخدم الكود التالي عند الدفع.</p>
+            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex items-center justify-between mb-5">
+                <span class="font-extrabold text-indigo-700 text-lg" id="city-tour-code">CITY20</span>
+                <button type="button" onclick="copyCityTourCode()" class="px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700">نسخ الكود</button>
+            </div>
+            <div class="flex gap-3">
+                <button type="button" onclick="closeCityTourOffer()" class="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200">إغلاق</button>
+                <button type="button" onclick="goToPaymentPromo()" class="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700">استخدام الكود</button>
+            </div>
+        </div>
+    </div>
 
     <!-- =============================================
          ADMIN UI COMPONENTS
