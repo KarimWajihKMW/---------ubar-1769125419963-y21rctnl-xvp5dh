@@ -558,11 +558,10 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
             FROM trips
         `);
         
-        // Get active drivers count
+        // Get ALL drivers count from database (not just online)
         const activeDriversResult = await pool.query(`
             SELECT COUNT(*) as count
             FROM drivers
-            WHERE status = 'online'
         `);
         
         // Get total earnings (completed trips)
