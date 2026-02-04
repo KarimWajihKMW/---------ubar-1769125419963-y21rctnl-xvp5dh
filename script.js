@@ -160,6 +160,7 @@ let currentDriverProfile = null;
 let currentIncomingTrip = null;
 let activeDriverTripId = null;
 let driverDemoRequestAt = 0;
+let driverForceRequestAt = 0;
 
 function isMapWorldActive() {
     const mapWorld = document.getElementById('map-world');
@@ -2005,6 +2006,9 @@ function initDriverMode() {
     updateDriverMenuData();
     resolveDriverProfile().then(() => {
         startDriverRequestPolling();
+        setTimeout(() => {
+            forceDriverIncomingRequest();
+        }, 600);
     });
 }
 
@@ -2125,6 +2129,89 @@ async function createDriverDemoTrip() {
         console.error('Failed to create demo trip:', error);
         return null;
     }
+}
+
+function buildLocalDemoTrip() {
+    const demoTrips = [
+        {
+            pickup_location: 'شارع طلعت حرب، القاهرة',
+            dropoff_location: 'ميدان التحرير، القاهرة',
+            pickup_lat: 30.0522,
+            pickup_lng: 31.2437,
+            dropoff_lat: 30.0444,
+            dropoff_lng: 31.2357,
+            cost: 38.5,
+            distance: 6.4,
+            duration: 14,
+            passenger_name: 'راكب جديد',
+            passenger_phone: '01000000000'
+        },
+        {
+            pickup_location: 'مدينة نصر، القاهرة',
+            dropoff_location: 'العباسية، القاهرة',
+            pickup_lat: 30.0561,
+            pickup_lng: 31.3301,
+            dropoff_lat: 30.0664,
+            dropoff_lng: 31.2775,
+            cost: 42.0,
+            distance: 7.9,
+            duration: 18,
+            passenger_name: 'راكب جديد',
+            passenger_phone: '01000000000'
+        },
+        {
+            pickup_location: 'المعادي، القاهرة',
+            dropoff_location: 'كورنيش المعادي',
+            pickup_lat: 29.9602,
+            pickup_lng: 31.2569,
+            dropoff_lat: 29.9506,
+            dropoff_lng: 31.2623,
+            cost: 26.0,
+            distance: 4.1,
+            duration: 10,
+            passenger_name: 'راكب جديد',
+            passenger_phone: '01000000000'
+        }
+    ];
+
+    const demo = demoTrips[Math.floor(Math.random() * demoTrips.length)];
+    return {
+        id: `DEMO-${Date.now()}`,
+        user_id: 1,
+        driver_id: null,
+        car_type: currentDriverProfile?.car_type || 'economy',
+        status: 'pending',
+        payment_method: 'cash',
+        created_at: new Date().toISOString(),
+        ...demo
+    };
+}
+
+async function forceDriverIncomingRequest() {
+    const now = Date.now();
+    if (now - driverForceRequestAt < 5000) return;
+    driverForceRequestAt = now;
+
+    if (!currentDriverProfile) {
+        await resolveDriverProfile();
+    }
+
+    try {
+        await createDriverDemoTrip();
+        const response = await ApiService.trips.getPendingNext(currentDriverProfile?.car_type, true);
+        const trip = response?.data || null;
+        if (trip) {
+            currentIncomingTrip = trip;
+            renderDriverIncomingTrip(trip);
+            return;
+        }
+    } catch (error) {
+        console.error('Force request failed:', error);
+    }
+
+    const localTrip = buildLocalDemoTrip();
+    currentIncomingTrip = localTrip;
+    renderDriverIncomingTrip(localTrip);
 }
 
 function startDriverRequestPolling() {
