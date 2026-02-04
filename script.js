@@ -2030,11 +2030,11 @@ function initDriverMode() {
     document.body.classList.add('role-driver');
     document.body.classList.remove('role-passenger');
     document.getElementById('driver-ui-container').classList.remove('hidden');
-    setDriverPanelVisible(true);
+    setDriverPanelVisible(false);
     currentIncomingTrip = null;
     activeDriverTripId = null;
     const passengerUi = document.getElementById('passenger-ui-container');
-    if (passengerUi) passengerUi.classList.add('hidden');
+    if (passengerUi) passengerUi.classList.remove('hidden');
     const passengerTopBar = document.getElementById('passenger-top-bar');
     if (passengerTopBar) passengerTopBar.classList.add('hidden');
     const passengerMenu = document.getElementById('side-menu');
@@ -2044,11 +2044,12 @@ function initDriverMode() {
     const driverTopBar = document.getElementById('driver-top-bar');
     if (driverTopBar) driverTopBar.classList.remove('hidden');
     const um = document.getElementById('user-marker');
-    if(um) um.classList.add('hidden');
+    if(um) um.classList.remove('hidden');
     const world = document.getElementById('map-world');
     if (world) world.classList.add('hidden');
     initLeafletMap();
     moveLeafletMapToContainer('map-container');
+    switchSection('destination');
     updateDriverMenuData();
     resolveDriverProfile().then(() => {
         startDriverRequestPolling();
