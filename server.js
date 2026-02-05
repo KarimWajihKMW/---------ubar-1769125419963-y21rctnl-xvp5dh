@@ -129,6 +129,16 @@ async function ensureDefaultOffers() {
     }
 }
 
+async function ensureUserProfileColumns() {
+    try {
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS car_type VARCHAR(50);`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS car_plate VARCHAR(20);`);
+        console.log('✅ User profile columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure user profile columns:', err.message);
+    }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
@@ -972,7 +982,7 @@ app.get('/api/users', async (req, res) => {
     try {
         const { role, limit = 50, offset = 0 } = req.query;
 
-        let query = 'SELECT id, phone, name, email, role, created_at FROM users WHERE 1=1';
+        let query = 'SELECT id, phone, name, email, role, car_type, car_plate, created_at FROM users WHERE 1=1';
         const params = [];
         let paramCount = 0;
 
@@ -1025,7 +1035,7 @@ app.get('/api/users/:id', async (req, res) => {
         const { id } = req.params;
 
         const result = await pool.query(
-            'SELECT id, phone, name, email, role, created_at FROM users WHERE id = $1',
+            'SELECT id, phone, name, email, role, car_type, car_plate, created_at FROM users WHERE id = $1',
             [id]
         );
 
@@ -1050,7 +1060,7 @@ app.get('/api/users/:id', async (req, res) => {
 app.put('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { phone, name, email, password } = req.body;
+        const { phone, name, email, password, car_type, car_plate } = req.body;
 
         // Check if user exists
         const existing = await pool.query(
@@ -1087,6 +1097,18 @@ app.put('/api/users/:id', async (req, res) => {
             params.push(String(email).trim().toLowerCase());
         }
 
+        if (car_type !== undefined && String(car_type).trim()) {
+            paramCount++;
+            updates.push(`car_type = $${paramCount}`);
+            params.push(String(car_type).trim());
+        }
+
+        if (car_plate !== undefined && String(car_plate).trim()) {
+            paramCount++;
+            updates.push(`car_plate = $${paramCount}`);
+            params.push(String(car_plate).trim());
+        }
+
         if (password !== undefined && String(password).trim()) {
             paramCount++;
             updates.push(`password = $${paramCount}`);
@@ -1104,7 +1126,7 @@ app.put('/api/users/:id', async (req, res) => {
         updates.push(`updated_at = CURRENT_TIMESTAMP`);
         params.push(id);
 
-        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, phone, name, email, role, created_at, updated_at`;
+        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, phone, name, email, role, car_type, car_plate, created_at, updated_at`;
 
         const result = await pool.query(query, params);
 
@@ -1606,6 +1628,7 @@ app.post('/api/users/login', async (req, res) => {
 // Start server
 ensureDefaultAdmins()
     .then(() => ensureDefaultOffers())
+    .then(() => ensureUserProfileColumns())
     .finally(() => {
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);

@@ -290,7 +290,7 @@
                 if (nameEl) nameEl.textContent = overrides.name;
             }
             Object.keys(overrides).forEach((field) => {
-                if (field === 'name') return;
+                if (['name', 'phone', 'email', 'carType', 'plate'].includes(field)) return;
                 const el = document.querySelector(`[data-field="${field}"]`);
                 if (el && overrides[field]) {
                     el.textContent = overrides[field];
@@ -347,6 +347,8 @@
                 // Update editable fields
                 const phoneField = document.querySelector('[data-field="phone"]');
                 const emailField = document.querySelector('[data-field="email"]');
+                const carTypeField = document.querySelector('[data-field="carType"]');
+                const plateField = document.querySelector('[data-field="plate"]');
                 
                 if (phoneField) {
                     phoneField.textContent = currentUser.phone || '';
@@ -355,6 +357,12 @@
                 if (emailField) {
                     emailField.textContent = currentUser.email || '';
                     console.log('📧 البريد الإلكتروني:', currentUser.email);
+                }
+                if (carTypeField && currentUser.car_type) {
+                    carTypeField.textContent = currentUser.car_type;
+                }
+                if (plateField && currentUser.car_plate) {
+                    plateField.textContent = currentUser.car_plate;
                 }
 
                 // Apply local overrides (fields not stored in users table)
@@ -446,15 +454,17 @@
                 const updateData = {
                     name: nameElement.textContent.trim(),
                     phone: allFields.phone || (currentUser ? currentUser.phone : ''),
-                    email: allFields.email || (currentUser ? currentUser.email : '')
+                    email: allFields.email || (currentUser ? currentUser.email : ''),
+                    car_type: allFields.carType || (currentUser ? currentUser.car_type : ''),
+                    car_plate: allFields.plate || (currentUser ? currentUser.car_plate : '')
                 };
 
-                const overridesToSave = {
-                    name: updateData.name,
-                    phone: updateData.phone,
-                    email: updateData.email,
-                    ...allFields
-                };
+                const overridesToSave = {};
+                Object.keys(allFields).forEach((field) => {
+                    if (!['phone', 'email', 'carType', 'plate'].includes(field) && allFields[field]) {
+                        overridesToSave[field] = allFields[field];
+                    }
+                });
 
                 console.log('📝 البيانات الجديدة:', updateData);
                 console.log('📝 البيانات القديمة:', currentUser);
@@ -498,6 +508,8 @@
                         name: currentUser.name,
                         phone: currentUser.phone,
                         email: currentUser.email,
+                        car_type: currentUser.car_type,
+                        car_plate: currentUser.car_plate,
                         updated_at: currentUser.updated_at
                     };
                     
@@ -538,6 +550,8 @@
                         name: updateData.name,
                         phone: updateData.phone,
                         email: updateData.email,
+                        car_type: updateData.car_type,
+                        car_plate: updateData.car_plate,
                         updated_at: new Date().toISOString()
                     };
                     SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
