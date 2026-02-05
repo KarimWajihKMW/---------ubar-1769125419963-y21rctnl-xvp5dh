@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إعدادات الراكب - أكوادرا</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Cairo', sans-serif; }
+        body.dark-mode { background: #0f172a; color: #e2e8f0; }
+        body.dark-mode .bg-white { background: #0b1220 !important; }
+        body.dark-mode .bg-gray-50 { background: #111827 !important; }
+        body.dark-mode .text-gray-800 { color: #e5e7eb !important; }
+        body.dark-mode .text-gray-700 { color: #cbd5e1 !important; }
+        body.dark-mode .text-gray-600 { color: #cbd5e1 !important; }
+        body.dark-mode .text-gray-500 { color: #94a3b8 !important; }
+        body.dark-mode .border-gray-100 { border-color: #1f2937 !important; }
+        body.dark-mode .shadow-sm { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35) !important; }
+    </style>
+</head>
+<body class="bg-gray-50 p-5">
+    <div class="max-w-2xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+            <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors" onclick="goBack()">
+                <i class="fas fa-arrow-right"></i>
+                رجوع
+            </button>
+            <button id="settings-dark-toggle" class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors">
+                <i id="settings-dark-icon" class="fas fa-moon"></i>
+                <span>الوضع الليلي</span>
+                <span id="settings-dark-label" class="text-xs text-gray-400 font-bold">غير مفعل</span>
+            </button>
+        </div>
+
+        <div class="mb-6 text-center">
+            <h1 class="text-2xl font-bold text-gray-800">⚙️ إعدادات الراكب</h1>
+            <p class="text-gray-500">اضبط تفضيلاتك بسهولة</p>
+        </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">الحساب</h2>
+            <div class="space-y-3">
+                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <div>
+                        <div class="text-sm text-gray-500">الاسم</div>
+                        <div class="font-bold text-gray-800" id="settings-user-name">—</div>
+                    </div>
+                    <i class="fas fa-user text-indigo-500"></i>
+                </div>
+                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <div>
+                        <div class="text-sm text-gray-500">البريد الإلكتروني</div>
+                        <div class="font-bold text-gray-800" id="settings-user-email">—</div>
+                    </div>
+                    <i class="fas fa-envelope text-emerald-500"></i>
+                </div>
+                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <div>
+                        <div class="text-sm text-gray-500">رقم الجوال</div>
+                        <div class="font-bold text-gray-800" id="settings-user-phone">—</div>
+                    </div>
+                    <i class="fas fa-phone text-amber-500"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">التفضيلات</h2>
+            <div class="space-y-4">
+                <label class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100 cursor-pointer">
+                    <span class="text-gray-700 font-semibold">إشعارات الرحلات</span>
+                    <input id="pref-notify-trips" type="checkbox" class="w-5 h-5 text-indigo-600" />
+                </label>
+                <label class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100 cursor-pointer">
+                    <span class="text-gray-700 font-semibold">عروض وتسويق</span>
+                    <input id="pref-notify-marketing" type="checkbox" class="w-5 h-5 text-indigo-600" />
+                </label>
+                <label class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100 cursor-pointer">
+                    <span class="text-gray-700 font-semibold">السماح بتحديد الموقع</span>
+                    <input id="pref-location" type="checkbox" class="w-5 h-5 text-indigo-600" />
+                </label>
+                <div class="bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <div class="text-gray-700 font-semibold mb-2">اللغة</div>
+                    <select id="pref-language" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-gray-700 bg-white">
+                        <option value="ar">العربية</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">الدعم والمساعدة</h2>
+            <div class="space-y-3">
+                <a class="flex items-center p-4 rounded-2xl hover:bg-gray-50 transition-colors" href="support.html?returnTo=settings.html">
+                    <div class="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 ml-4 shrink-0">
+                        <i class="fas fa-headset"></i>
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="font-bold text-gray-800">الدعم والمساعدة</h3>
+                        <p class="text-gray-500 text-sm">الأسئلة الشائعة والتواصل</p>
+                    </div>
+                </a>
+                <a class="flex items-center p-4 rounded-2xl hover:bg-gray-50 transition-colors" href="tel:920000123">
+                    <div class="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 ml-4 shrink-0">
+                        <i class="fas fa-phone"></i>
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="font-bold text-gray-800">اتصال مباشر</h3>
+                        <p class="text-gray-500 text-sm">920000123</p>
+                    </div>
+                </a>
+                <a class="flex items-center p-4 rounded-2xl hover:bg-gray-50 transition-colors" href="https://wa.me/966920000123" target="_blank" rel="noopener">
+                    <div class="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center text-green-600 ml-4 shrink-0">
+                        <i class="fas fa-comment"></i>
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="font-bold text-gray-800">واتساب الدعم</h3>
+                        <p class="text-gray-500 text-sm">محادثة مباشرة</p>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">الخصوصية</h2>
+            <div class="space-y-3 text-sm text-gray-600">
+                <p>نحن نحمي بياناتك ولا نشاركها بدون إذن.</p>
+                <p>يمكنك تعديل التفضيلات في أي وقت.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DARK_MODE_KEY = 'akwadra_dark_mode';
+        const PREF_KEY = 'akwadra_passenger_prefs';
+
+        function updateDarkModeToggleUI() {
+            const isDark = document.body.classList.contains('dark-mode');
+            const label = document.getElementById('settings-dark-label');
+            const icon = document.getElementById('settings-dark-icon');
+            if (label) label.textContent = isDark ? 'مفعل' : 'غير مفعل';
+            if (icon) {
+                icon.classList.toggle('fa-moon', !isDark);
+                icon.classList.toggle('fa-sun', isDark);
+            }
+        }
+
+        function setDarkMode(enabled) {
+            document.body.classList.toggle('dark-mode', enabled);
+            try { localStorage.setItem(DARK_MODE_KEY, enabled ? '1' : '0'); } catch (e) {}
+            updateDarkModeToggleUI();
+        }
+
+        function toggleDarkMode() {
+            const isDark = document.body.classList.contains('dark-mode');
+            setDarkMode(!isDark);
+        }
+
+        function getReturnTo() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('returnTo');
+        }
+
+        function goBack() {
+            const returnTo = getReturnTo();
+            if (returnTo) {
+                window.location.href = returnTo;
+                return;
+            }
+            window.location.href = 'index.html';
+        }
+
+        function loadUser() {
+            try {
+                const raw = localStorage.getItem('akwadra_user');
+                if (!raw) return;
+                const user = JSON.parse(raw);
+                const nameEl = document.getElementById('settings-user-name');
+                const emailEl = document.getElementById('settings-user-email');
+                const phoneEl = document.getElementById('settings-user-phone');
+                if (nameEl) nameEl.textContent = user.name || '—';
+                if (emailEl) emailEl.textContent = user.email || '—';
+                if (phoneEl) phoneEl.textContent = user.phone || '—';
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        function loadPrefs() {
+            const defaults = { trips: true, marketing: false, location: true, language: 'ar' };
+            try {
+                const raw = localStorage.getItem(PREF_KEY);
+                const prefs = raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+                const trips = document.getElementById('pref-notify-trips');
+                const marketing = document.getElementById('pref-notify-marketing');
+                const location = document.getElementById('pref-location');
+                const language = document.getElementById('pref-language');
+                if (trips) trips.checked = !!prefs.trips;
+                if (marketing) marketing.checked = !!prefs.marketing;
+                if (location) location.checked = !!prefs.location;
+                if (language) language.value = prefs.language || 'ar';
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        function savePrefs() {
+            const prefs = {
+                trips: !!document.getElementById('pref-notify-trips')?.checked,
+                marketing: !!document.getElementById('pref-notify-marketing')?.checked,
+                location: !!document.getElementById('pref-location')?.checked,
+                language: document.getElementById('pref-language')?.value || 'ar'
+            };
+            try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {}
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            try {
+                if (localStorage.getItem(DARK_MODE_KEY) === '1') {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {}
+            updateDarkModeToggleUI();
+            loadUser();
+            loadPrefs();
+
+            const toggle = document.getElementById('settings-dark-toggle');
+            if (toggle) toggle.addEventListener('click', toggleDarkMode);
+
+            ['pref-notify-trips', 'pref-notify-marketing', 'pref-location', 'pref-language'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', savePrefs);
+            });
+        });
+    </script>
+</body>
+</html>
