@@ -1,6 +1,43 @@
 const DARK_MODE_KEY = 'akwadra_dark_mode';
 const PREF_KEY = 'akwadra_passenger_prefs';
 
+const LANGUAGES = [
+    'aa','ab','ae','af','ak','am','an','ar','as','av','ay','az','ba','be','bg','bh','bi','bm','bn','bo','br','bs','ca','ce','ch','co','cr','cs','cu','cv','cy','da','de','dv','dz','ee','el','en','eo','es','et','eu','fa','ff','fi','fj','fo','fr','fy','ga','gd','gl','gn','gu','gv','ha','he','hi','ho','hr','ht','hu','hy','hz','ia','id','ie','ig','ii','ik','io','is','it','iu','ja','jv','ka','kg','ki','kj','kk','kl','km','kn','ko','kr','ks','ku','kv','kw','ky','la','lb','lg','li','ln','lo','lt','lu','lv','mg','mh','mi','mk','ml','mn','mr','ms','mt','my','na','nb','nd','ne','ng','nl','nn','no','nr','nv','ny','oc','oj','om','or','os','pa','pi','pl','ps','pt','qu','rm','rn','ro','ru','rw','sa','sc','sd','se','sg','si','sk','sl','sm','sn','so','sq','sr','ss','st','su','sv','sw','ta','te','tg','th','ti','tk','tl','tn','to','tr','ts','tt','tw','ty','ug','uk','ur','uz','ve','vi','vo','wa','wo','xh','yi','yo','za','zh','zu'
+];
+
+const RTL_LANGS = new Set(['ar','fa','he','ur','ps','sd','ug','dv','ku','yi']);
+
+function applyLanguage(code) {
+    if (!code) return;
+    document.documentElement.lang = code;
+    document.documentElement.dir = RTL_LANGS.has(code) ? 'rtl' : 'ltr';
+}
+
+function populateLanguages() {
+    const select = document.getElementById('pref-language');
+    if (!select) return;
+    select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'اختر اللغة';
+    select.appendChild(placeholder);
+
+    let displayNames = null;
+    try {
+        displayNames = new Intl.DisplayNames(['ar'], { type: 'language' });
+    } catch (e) {
+        displayNames = null;
+    }
+
+    LANGUAGES.forEach(code => {
+        const opt = document.createElement('option');
+        opt.value = code;
+        const label = displayNames ? displayNames.of(code) : null;
+        opt.textContent = label ? `${label} (${code})` : code;
+        select.appendChild(opt);
+    });
+}
+
 function updateDarkModeToggleUI() {
     const isDark = document.body.classList.contains('dark-mode');
     const label = document.getElementById('settings-dark-label');
@@ -66,6 +103,7 @@ function loadPrefs() {
         if (marketing) marketing.checked = !!prefs.marketing;
         if (location) location.checked = !!prefs.location;
         if (language) language.value = prefs.language || 'ar';
+        applyLanguage(prefs.language || 'ar');
     } catch (e) {
         // ignore
     }
@@ -81,6 +119,7 @@ function savePrefs() {
         language: document.getElementById('pref-language')?.value || 'ar'
     };
     try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {}
+    applyLanguage(prefs.language || 'ar');
     const status = document.getElementById('prefs-status');
     if (status) {
         status.textContent = 'تم حفظ التفضيلات';
@@ -105,6 +144,13 @@ function setupAccordions() {
     });
 }
 
+function openTranslatedPage() {
+    const code = document.getElementById('pref-language')?.value || 'ar';
+    const url = window.location.href.split('#')[0];
+    const translateUrl = `https://translate.google.com/translate?sl=auto&tl=${encodeURIComponent(code)}&u=${encodeURIComponent(url)}`;
+    window.open(translateUrl, '_blank');
+}
+
 window.addEventListener('DOMContentLoaded', () => {
     try {
         if (localStorage.getItem(DARK_MODE_KEY) === '1') {
@@ -113,6 +159,7 @@ window.addEventListener('DOMContentLoaded', () => {
     } catch (e) {}
     updateDarkModeToggleUI();
     loadUser();
+    populateLanguages();
     loadPrefs();
 
     const toggle = document.getElementById('settings-dark-toggle');
@@ -123,8 +170,11 @@ window.addEventListener('DOMContentLoaded', () => {
         if (el) el.addEventListener('change', savePrefs);
     });
 
-    const backBtn = document.querySelector('button[onclick="goBack()"]');
+    const backBtn = document.getElementById('settings-back-btn');
     if (backBtn) backBtn.addEventListener('click', goBack);
+
+    const translateBtn = document.getElementById('translate-page-btn');
+    if (translateBtn) translateBtn.addEventListener('click', openTranslatedPage);
 
     setupAccordions();
 });
