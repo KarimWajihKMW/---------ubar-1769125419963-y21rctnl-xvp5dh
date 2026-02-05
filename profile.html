@@ -151,7 +151,13 @@
             </div>
 
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
-                <div class="text-3xl mb-3">🚗</div>
+                <div class="text-3xl mb-3">�</div>
+                <div class="font-bold text-gray-800 info-value text-base" data-field="password">••••••••</div>
+                <div class="text-gray-500 text-sm">كلمة المرور</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">�🚗</div>
                 <div class="font-bold text-gray-800 info-value text-base" data-field="carType">اقتصادي</div>
                 <div class="text-gray-500 text-sm">نوع السيارة</div>
             </div>
@@ -482,6 +488,26 @@
             values.forEach(val => {
                 val.contentEditable = "true";
                 val.classList.add('editing');
+                
+                // Special handling for password field
+                if (val.getAttribute('data-field') === 'password') {
+                    val.addEventListener('focus', function() {
+                        if (this.textContent === '••••••••') {
+                            this.textContent = '';
+                            this.style.color = '#1f2937';
+                        }
+                    });
+                    
+                    val.addEventListener('blur', function() {
+                        if (this.textContent.trim() === '') {
+                            this.textContent = '••••••••';
+                            this.style.color = '#9ca3af';
+                        }
+                    });
+                    
+                    // Set placeholder style
+                    val.style.color = '#9ca3af';
+                }
             });
             
             document.getElementById('editBtnCard').classList.add('hidden');
@@ -569,6 +595,11 @@
                     rating: allFields.rating ? parseFloat(allFields.rating) : (currentUser.rating || 5.0),
                     status: allFields.status || currentUser.status || 'عضو جديد'
                 };
+
+                // Add password only if it's been changed (not dots)
+                if (allFields.password && allFields.password !== '••••••••' && allFields.password.trim().length > 0) {
+                    updateData.password = allFields.password.trim();
+                }
 
                 // Validate
                 if (!updateData.name) {
@@ -703,7 +734,12 @@
                     points: allFields.points ? parseInt(allFields.points, 10) : (currentUser ? currentUser.points : 0),
                     rating: allFields.rating ? parseFloat(allFields.rating) : (currentUser ? currentUser.rating : 5.0),
                     status: allFields.status || (currentUser ? currentUser.status : 'عضو جديد')
-                };, 'balance', 'points', 'rating', 'status'
+                };
+
+                // Add password only if it's been changed (not dots)
+                if (allFields.password && allFields.password !== '••••••••' && allFields.password.trim().length > 0) {
+                    updateData.password = allFields.password.trim();
+                }
 
                 const overridesToSave = {};
                 Object.keys(allFields).forEach((field) => {
