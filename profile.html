@@ -270,6 +270,23 @@
             };
         }
 
+        function normalizePhoneKey(value) {
+            const digits = String(value || '').trim().replace(/\D/g, '');
+            if (!digits) return String(value || '').trim();
+            if (digits.startsWith('20')) {
+                const local = digits.slice(2).replace(/^0+/, '');
+                return local ? `0${local}` : digits;
+            }
+            if (digits.startsWith('966')) {
+                const local = digits.slice(3).replace(/^0+/, '');
+                return local ? `0${local}` : digits;
+            }
+            if (!digits.startsWith('0') && digits.length <= 10) {
+                return `0${digits}`;
+            }
+            return digits;
+        }
+
         function setProfileOverrides(userId, phone, overrides) {
             const map = getProfileOverridesMap();
             if (userId) {
@@ -366,7 +383,8 @@
                 }
 
                 // Apply local overrides (fields not stored in users table)
-                applyProfileOverrides(userId, currentUser.phone || userData.phone);
+                const phoneKey = normalizePhoneKey(currentUser.phone || userData.phone);
+                applyProfileOverrides(userId, phoneKey);
 
                 // Store original values
                 storeOriginalValues();
@@ -451,9 +469,10 @@
                     }
                 });
 
+                const normalizedPhone = normalizePhoneKey(allFields.phone || (currentUser ? currentUser.phone : ''));
                 const updateData = {
                     name: nameElement.textContent.trim(),
-                    phone: allFields.phone || (currentUser ? currentUser.phone : ''),
+                    phone: normalizedPhone,
                     email: allFields.email || (currentUser ? currentUser.email : ''),
                     car_type: allFields.carType || (currentUser ? currentUser.car_type : ''),
                     car_plate: allFields.plate || (currentUser ? currentUser.car_plate : '')
@@ -518,7 +537,7 @@
                     console.log('✅ تم تحديث localStorage');
 
                     // Persist all fields locally as last-known edits
-                    setProfileOverrides(currentUser.id, currentUser.phone, overridesToSave);
+                    setProfileOverrides(currentUser.id, normalizePhoneKey(currentUser.phone), overridesToSave);
 
                     // Update UI
                     nameElement.contentEditable = "false";
@@ -555,7 +574,7 @@
                         updated_at: new Date().toISOString()
                     };
                     SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
-                    setProfileOverrides(currentUser.id, updateData.phone, overridesToSave);
+                    setProfileOverrides(currentUser.id, normalizePhoneKey(updateData.phone), overridesToSave);
                     alert('✅ تم حفظ التغييرات محلياً، وسيتم مزامنتها عند توفر الخادم');
                 }
 

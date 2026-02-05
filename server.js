@@ -42,6 +42,55 @@ const upload = multer({
     }
 });
 
+function normalizePhoneCandidates(input) {
+    const raw = String(input || '').trim();
+    const digits = raw.replace(/\D/g, '');
+    const candidates = new Set();
+
+    if (raw) candidates.add(raw);
+    if (digits) {
+        candidates.add(digits);
+        const withoutZeros = digits.replace(/^0+/, '');
+        if (withoutZeros) {
+            candidates.add(withoutZeros);
+            candidates.add(`0${withoutZeros}`);
+        }
+        if (digits.startsWith('20') && digits.length > 2) {
+            const local = digits.slice(2).replace(/^0+/, '');
+            if (local) {
+                candidates.add(local);
+                candidates.add(`0${local}`);
+            }
+        }
+        if (digits.startsWith('966') && digits.length > 3) {
+            const local = digits.slice(3).replace(/^0+/, '');
+            if (local) {
+                candidates.add(local);
+                candidates.add(`0${local}`);
+            }
+        }
+    }
+
+    return Array.from(candidates);
+}
+
+function normalizePhoneForStore(input) {
+    const digits = String(input || '').trim().replace(/\D/g, '');
+    if (!digits) return String(input || '').trim();
+    if (digits.startsWith('20')) {
+        const local = digits.slice(2).replace(/^0+/, '');
+        return local ? `0${local}` : digits;
+    }
+    if (digits.startsWith('966')) {
+        const local = digits.slice(3).replace(/^0+/, '');
+        return local ? `0${local}` : digits;
+    }
+    if (!digits.startsWith('0') && digits.length <= 10) {
+        return `0${digits}`;
+    }
+    return digits;
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -1080,9 +1129,10 @@ app.put('/api/users/:id', async (req, res) => {
         let paramCount = 0;
 
         if (phone !== undefined && String(phone).trim()) {
+            const normalizedPhone = normalizePhoneForStore(phone);
             paramCount++;
             updates.push(`phone = $${paramCount}`);
-            params.push(String(phone).trim());
+            params.push(normalizedPhone);
         }
 
         if (name !== undefined && String(name).trim()) {
@@ -1599,12 +1649,13 @@ app.post('/api/users/login', async (req, res) => {
             });
         }
 
-        const normalizedPhone = String(phone).trim();
+        const normalizedPhone = normalizePhoneForStore(phone);
         const normalizedEmail = email && String(email).trim() ? String(email).trim().toLowerCase() : `passenger_${normalizedPhone.replace(/\D/g, '') || Date.now()}@ubar.sa`;
         const normalizedName = name && String(name).trim() ? String(name).trim() : 'راكب جديد';
-        
+        const phoneCandidates = normalizePhoneCandidates(phone);
+
         // Check if user exists
-        let result = await pool.query('SELECT * FROM users WHERE phone = $1', [normalizedPhone]);
+        let result = await pool.query('SELECT * FROM users WHERE phone = ANY($1)', [phoneCandidates]);
         
         if (result.rows.length === 0) {
             // Create new user
