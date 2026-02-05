@@ -66,6 +66,28 @@
             padding: 0 5px;
             border-radius: 4px;
         }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-50 p-5">
@@ -468,8 +490,183 @@
             document.getElementById('cancelBtnCard').classList.remove('hidden');
             document.getElementById('cancelBtnCard').classList.add('block');
             
+            // Add auto-save listeners
+            enableAutoSave();
+            
             // Focus name field
             nameElement.focus();
+        }
+
+        // Auto-save functionality
+        let autoSaveTimeout = null;
+        
+        function enableAutoSave() {
+            const nameElement = document.querySelector('h1');
+            const editableFields = document.querySelectorAll('.info-value');
+            
+            // Add auto-save on blur for name
+            nameElement.addEventListener('blur', handleAutoSave);
+            nameElement.addEventListener('input', scheduleAutoSave);
+            
+            // Add auto-save on blur for all editable fields
+            editableFields.forEach(field => {
+                field.addEventListener('blur', handleAutoSave);
+                field.addEventListener('input', scheduleAutoSave);
+            });
+        }
+        
+        function scheduleAutoSave() {
+            // Clear existing timeout
+            if (autoSaveTimeout) {
+                clearTimeout(autoSaveTimeout);
+            }
+            
+            // Schedule save for 1 second after user stops typing
+            autoSaveTimeout = setTimeout(() => {
+                handleAutoSave();
+            }, 1000);
+        }
+        
+        async function handleAutoSave() {
+            // Clear any scheduled save
+            if (autoSaveTimeout) {
+                clearTimeout(autoSaveTimeout);
+                autoSaveTimeout = null;
+            }
+            
+            await saveProfileEditsAuto();
+        }
+        
+        async function saveProfileEditsAuto() {
+            console.log('💾 حفظ تلقائي...');
+            
+            try {
+                if (!currentUser || !currentUser.id) {
+                    console.error('❌ لم يتم تحميل بيانات المستخدم');
+                    return;
+                }
+
+                // Get updated values
+                const nameElement = document.querySelector('h1');
+                const allFields = {};
+                
+                document.querySelectorAll('.info-value').forEach((val) => {
+                    const field = val.getAttribute('data-field');
+                    if (field) {
+                        allFields[field] = val.textContent.trim();
+                    }
+                });
+
+                const normalizedPhone = normalizePhoneKey(allFields.phone || currentUser.phone);
+                const updateData = {
+                    name: nameElement.textContent.trim(),
+                    phone: normalizedPhone,
+                    email: allFields.email || currentUser.email || '',
+                    car_type: allFields.carType || currentUser.car_type || '',
+                    car_plate: allFields.plate || currentUser.car_plate || '',
+                    balance: allFields.balance ? parseFloat(allFields.balance) : (currentUser.balance || 0),
+                    points: allFields.points ? parseInt(allFields.points, 10) : (currentUser.points || 0),
+                    rating: allFields.rating ? parseFloat(allFields.rating) : (currentUser.rating || 5.0),
+                    status: allFields.status || currentUser.status || 'عضو جديد'
+                };
+
+                // Validate
+                if (!updateData.name) {
+                    console.warn('⚠️ الاسم فارغ - يتم التخطي');
+                    return;
+                }
+
+                if (!updateData.phone) {
+                    console.warn('⚠️ رقم الهاتف فارغ - يتم التخطي');
+                    return;
+                }
+
+                console.log('🌐 جاري إرسال التحديث إلى قاعدة البيانات...');
+                
+                // Save to database based on user role
+                let response = null;
+                try {
+                    if (currentUser.role === 'passenger') {
+                        response = await ApiService.passengers.update(currentUser.id, updateData);
+                    } else {
+                        response = await ApiService.users.update(currentUser.id, updateData);
+                    }
+                } catch (error) {
+                    console.warn('⚠️ فشل الحفظ التلقائي على الخادم', error);
+                    showAutoSaveNotification('❌ فشل الحفظ التلقائي', 'error');
+                    return;
+                }
+                
+                if (response && response.success) {
+                    currentUser = response.data;
+                    console.log('✅ تم الحفظ التلقائي في قاعدة البيانات');
+                    
+                    // Update localStorage with new data
+                    const storedUser = JSON.parse(SafeStorage.getItem(USER_KEY) || '{}');
+                    const updatedStoredUser = {
+                        ...storedUser,
+                        name: currentUser.name,
+                        phone: currentUser.phone,
+                        email: currentUser.email,
+                        car_type: currentUser.car_type,
+                        car_plate: currentUser.car_plate,
+                        balance: currentUser.balance,
+                        points: currentUser.points,
+                        rating: currentUser.rating,
+                        status: currentUser.status,
+                        avatar: currentUser.avatar,
+                        updated_at: currentUser.updated_at
+                    };
+                    
+                    SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
+                    console.log('✅ تم تحديث localStorage');
+
+                    // Store new original values
+                    storeOriginalValues();
+
+                    // Show success notification
+                    showAutoSaveNotification('✅ تم الحفظ تلقائياً', 'success');
+                }
+
+            } catch (error) {
+                console.error('❌ خطأ في الحفظ التلقائي:', error);
+                showAutoSaveNotification('❌ خطأ في الحفظ', 'error');
+            }
+        }
+        
+        function showAutoSaveNotification(message, type = 'success') {
+            // Remove existing notification if any
+            const existing = document.getElementById('autoSaveNotification');
+            if (existing) {
+                existing.remove();
+            }
+            
+            // Create notification
+            const notification = document.createElement('div');
+            notification.id = 'autoSaveNotification';
+            notification.textContent = message;
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === 'success' ? '#48bb78' : '#f56565'};
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 10000;
+                font-family: 'Cairo', sans-serif;
+                font-weight: 600;
+                animation: slideIn 0.3s ease-out;
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
         }
 
         async function saveProfileEdits() {
