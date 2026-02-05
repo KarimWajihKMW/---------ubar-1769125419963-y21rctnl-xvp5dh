@@ -384,9 +384,26 @@
                     const response = await ApiService.users.getById(userId);
                     console.log('✅ البيانات المحملة من قاعدة البيانات:', response.data);
                     currentUser = response.data;
+                    
+                    // Ensure balance and points have values
+                    if (currentUser.balance === null || currentUser.balance === undefined) {
+                        currentUser.balance = 0.00;
+                    }
+                    if (currentUser.points === null || currentUser.points === undefined) {
+                        currentUser.points = 0;
+                    }
+                    
+                    console.log('💰 رصيد المحفظة من قاعدة البيانات:', currentUser.balance);
+                    console.log('⭐ نقاط أكوادرا من قاعدة البيانات:', currentUser.points);
                 } catch (error) {
                     console.warn('⚠️ فشل جلب البيانات من قاعدة البيانات، سيتم استخدام البيانات المحلية', error);
-                    currentUser = userData;
+                    currentUser = {
+                        ...userData,
+                        balance: userData.balance !== undefined ? userData.balance : 0.00,
+                        points: userData.points !== undefined ? userData.points : 0
+                    };
+                    console.log('💰 رصيد المحفظة من localStorage:', currentUser.balance);
+                    console.log('⭐ نقاط أكوادرا من localStorage:', currentUser.points);
                 }
 
                 // Update UI with user data
@@ -419,10 +436,18 @@
                     plateField.textContent = currentUser.car_plate;
                 }
                 if (balanceField) {
-                    balanceField.textContent = currentUser.balance !== undefined ? parseFloat(currentUser.balance).toFixed(2) : '0.00';
+                    const balanceValue = currentUser.balance !== null && currentUser.balance !== undefined 
+                        ? parseFloat(currentUser.balance).toFixed(2) 
+                        : '0.00';
+                    balanceField.textContent = balanceValue;
+                    console.log('💰 تم تحديث عرض رصيد المحفظة:', balanceValue);
                 }
                 if (pointsField) {
-                    pointsField.textContent = currentUser.points !== undefined ? currentUser.points : '0';
+                    const pointsValue = currentUser.points !== null && currentUser.points !== undefined 
+                        ? parseInt(currentUser.points, 10) 
+                        : 0;
+                    pointsField.textContent = pointsValue;
+                    console.log('⭐ تم تحديث عرض نقاط أكوادرا:', pointsValue);
                 }
                 if (ratingField) {
                     ratingField.textContent = currentUser.rating !== undefined ? parseFloat(currentUser.rating).toFixed(1) : '5.0';
@@ -579,17 +604,28 @@
                 });
 
                 const normalizedPhone = normalizePhoneKey(allFields.phone || currentUser.phone);
+                
+                // Parse balance and points carefully - always use current database values
+                const currentBalance = currentUser.balance !== null && currentUser.balance !== undefined 
+                    ? parseFloat(currentUser.balance) 
+                    : 0.00;
+                const currentPoints = currentUser.points !== null && currentUser.points !== undefined 
+                    ? parseInt(currentUser.points, 10) 
+                    : 0;
+                
                 const updateData = {
                     name: nameElement.textContent.trim(),
                     phone: normalizedPhone,
                     email: allFields.email || currentUser.email || '',
                     car_type: allFields.carType || currentUser.car_type || '',
                     car_plate: allFields.plate || currentUser.car_plate || '',
-                    balance: allFields.balance ? parseFloat(allFields.balance) : (currentUser.balance || 0),
-                    points: allFields.points ? parseInt(allFields.points, 10) : (currentUser.points || 0),
+                    balance: currentBalance,
+                    points: currentPoints,
                     rating: allFields.rating ? parseFloat(allFields.rating) : (currentUser.rating || 5.0),
                     status: allFields.status || currentUser.status || 'عضو جديد'
                 };
+                
+                console.log('💾 البيانات التي سيتم حفظها - الرصيد:', updateData.balance, 'النقاط:', updateData.points);
 
                 // Add password only if it's been changed (not dots)
                 if (allFields.password && allFields.password !== '••••••••' && allFields.password.trim().length > 0) {

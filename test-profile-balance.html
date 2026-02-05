@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار رصيد الملف الشخصي</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow p-6">
+        <h1 class="text-2xl font-bold mb-6">اختبار تحميل الرصيد ونقاط أكوادرا</h1>
+        
+        <div class="space-y-4">
+            <div>
+                <label class="text-gray-600">معرف المستخدم:</label>
+                <input type="number" id="userId" value="3" class="border rounded px-3 py-2 w-full">
+            </div>
+            
+            <button onclick="testLoadUser()" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+                تحميل البيانات
+            </button>
+            
+            <div class="mt-6 p-4 bg-gray-100 rounded">
+                <h2 class="font-bold mb-3">النتائج:</h2>
+                <div id="results"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="api-service.js"></script>
+    <script>
+        async function testLoadUser() {
+            const userId = document.getElementById('userId').value;
+            const resultsDiv = document.getElementById('results');
+            
+            resultsDiv.innerHTML = '<p class="text-blue-600">جاري التحميل...</p>';
+            
+            try {
+                console.log('🔍 Fetching user data for ID:', userId);
+                const response = await ApiService.users.getById(userId);
+                console.log('✅ Response:', response);
+                
+                const user = response.data;
+                
+                const html = `
+                    <div class="space-y-2">
+                        <p><strong>الاسم:</strong> ${user.name}</p>
+                        <p><strong>الهاتف:</strong> ${user.phone}</p>
+                        <p><strong>البريد:</strong> ${user.email}</p>
+                        <p class="text-green-600 text-lg"><strong>💰 رصيد المحفظة:</strong> ${user.balance !== undefined ? parseFloat(user.balance).toFixed(2) : '0.00'} ر.س</p>
+                        <p class="text-purple-600 text-lg"><strong>⭐ نقاط أكوادرا:</strong> ${user.points !== undefined ? user.points : '0'}</p>
+                        <p><strong>التقييم:</strong> ${user.rating !== undefined ? parseFloat(user.rating).toFixed(1) : '5.0'}</p>
+                        <p><strong>الحالة:</strong> ${user.status || 'عضو جديد'}</p>
+                    </div>
+                    <hr class="my-4">
+                    <details class="mt-4">
+                        <summary class="cursor-pointer font-bold">البيانات الخام</summary>
+                        <pre class="mt-2 text-xs bg-white p-2 rounded overflow-auto">${JSON.stringify(user, null, 2)}</pre>
+                    </details>
+                `;
+                
+                resultsDiv.innerHTML = html;
+                
+            } catch (error) {
+                console.error('❌ Error:', error);
+                resultsDiv.innerHTML = `<p class="text-red-600">خطأ: ${error.message}</p>`;
+            }
+        }
+        
+        // Auto-load on page load
+        window.addEventListener('load', () => {
+            testLoadUser();
+        });
+    </script>
+</body>
+</html>
