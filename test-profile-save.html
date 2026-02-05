@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار حفظ البيانات</title>
+    <script src="api-service.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            direction: rtl;
+            text-align: right;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            direction: ltr;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 اختبار حفظ بيانات المستخدم</h1>
+    
+    <div class="test-section">
+        <h2>1. تسجيل الدخول بالهاتف</h2>
+        <input type="text" id="testPhone" placeholder="رقم الهاتف" value="0551234567">
+        <input type="text" id="testName" placeholder="الاسم" value="عبدالعزيز أحمد">
+        <button onclick="testLogin()">تسجيل الدخول</button>
+        <div id="loginResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. عرض البيانات من localStorage</h2>
+        <button onclick="showLocalStorage()">عرض localStorage</button>
+        <div id="localStorageResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. تحميل البيانات من قاعدة البيانات</h2>
+        <button onclick="loadFromDB()">تحميل من قاعدة البيانات</button>
+        <div id="dbLoadResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. تحديث الاسم</h2>
+        <input type="text" id="newName" placeholder="الاسم الجديد" value="عبدالعزيز أحمد (محدث)">
+        <button onclick="updateName()">تحديث الاسم</button>
+        <div id="updateResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. التحقق من البيانات بعد التحديث</h2>
+        <button onclick="verifyUpdate()">التحقق</button>
+        <div id="verifyResult"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>6. محاكاة الخروج والدخول</h2>
+        <button onclick="simulateLogout()">خروج</button>
+        <button onclick="simulateLogin()">دخول مرة أخرى</button>
+        <div id="simulateResult"></div>
+    </div>
+
+    <script>
+        const USER_KEY = 'akwadra_user';
+        let currentUserId = null;
+
+        async function testLogin() {
+            const phone = document.getElementById('testPhone').value;
+            const name = document.getElementById('testName').value;
+            const result = document.getElementById('loginResult');
+
+            try {
+                result.innerHTML = '⏳ جاري تسجيل الدخول...';
+                
+                const response = await ApiService.users.login(phone, name);
+                
+                if (response.success) {
+                    currentUserId = response.data.id;
+                    localStorage.setItem(USER_KEY, JSON.stringify(response.data));
+                    
+                    result.innerHTML = `<div class="success">✅ تم تسجيل الدخول بنجاح</div>
+                        <pre>${JSON.stringify(response.data, null, 2)}</pre>`;
+                } else {
+                    result.innerHTML = `<div class="error">❌ ${response.error}</div>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+            }
+        }
+
+        function showLocalStorage() {
+            const result = document.getElementById('localStorageResult');
+            const userData = localStorage.getItem(USER_KEY);
+            
+            if (userData) {
+                result.innerHTML = `<div class="success">✅ البيانات موجودة في localStorage</div>
+                    <pre>${JSON.stringify(JSON.parse(userData), null, 2)}</pre>`;
+            } else {
+                result.innerHTML = `<div class="error">❌ لا توجد بيانات في localStorage</div>`;
+            }
+        }
+
+        async function loadFromDB() {
+            const result = document.getElementById('dbLoadResult');
+            const userData = localStorage.getItem(USER_KEY);
+            
+            if (!userData) {
+                result.innerHTML = `<div class="error">❌ قم بتسجيل الدخول أولاً</div>`;
+                return;
+            }
+
+            const userId = JSON.parse(userData).id;
+            
+            try {
+                result.innerHTML = '⏳ جاري التحميل من قاعدة البيانات...';
+                
+                const response = await ApiService.users.getById(userId);
+                
+                if (response.success) {
+                    result.innerHTML = `<div class="success">✅ تم التحميل من قاعدة البيانات</div>
+                        <pre>${JSON.stringify(response.data, null, 2)}</pre>`;
+                } else {
+                    result.innerHTML = `<div class="error">❌ ${response.error}</div>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+            }
+        }
+
+        async function updateName() {
+            const result = document.getElementById('updateResult');
+            const userData = localStorage.getItem(USER_KEY);
+            
+            if (!userData) {
+                result.innerHTML = `<div class="error">❌ قم بتسجيل الدخول أولاً</div>`;
+                return;
+            }
+
+            const userId = JSON.parse(userData).id;
+            const newName = document.getElementById('newName').value;
+            
+            try {
+                result.innerHTML = '⏳ جاري التحديث...';
+                
+                const response = await ApiService.users.update(userId, { name: newName });
+                
+                if (response.success) {
+                    // Update localStorage
+                    const storedUser = JSON.parse(userData);
+                    storedUser.name = response.data.name;
+                    localStorage.setItem(USER_KEY, JSON.stringify(storedUser));
+                    
+                    result.innerHTML = `<div class="success">✅ تم التحديث في قاعدة البيانات و localStorage</div>
+                        <pre>${JSON.stringify(response.data, null, 2)}</pre>`;
+                } else {
+                    result.innerHTML = `<div class="error">❌ ${response.error}</div>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+            }
+        }
+
+        async function verifyUpdate() {
+            const result = document.getElementById('verifyResult');
+            const userData = localStorage.getItem(USER_KEY);
+            
+            if (!userData) {
+                result.innerHTML = `<div class="error">❌ قم بتسجيل الدخول أولاً</div>`;
+                return;
+            }
+
+            const userId = JSON.parse(userData).id;
+            
+            try {
+                result.innerHTML = '⏳ جاري التحقق...';
+                
+                const response = await ApiService.users.getById(userId);
+                
+                if (response.success) {
+                    const localName = JSON.parse(userData).name;
+                    const dbName = response.data.name;
+                    
+                    result.innerHTML = `<div class="success">✅ التحقق من البيانات</div>
+                        <p><strong>الاسم في localStorage:</strong> ${localName}</p>
+                        <p><strong>الاسم في قاعدة البيانات:</strong> ${dbName}</p>
+                        ${localName === dbName ? 
+                            '<p class="success">✅ البيانات متطابقة!</p>' : 
+                            '<p class="error">❌ البيانات غير متطابقة!</p>'}
+                        <pre>${JSON.stringify(response.data, null, 2)}</pre>`;
+                } else {
+                    result.innerHTML = `<div class="error">❌ ${response.error}</div>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+            }
+        }
+
+        function simulateLogout() {
+            const result = document.getElementById('simulateResult');
+            localStorage.removeItem(USER_KEY);
+            result.innerHTML = `<div class="success">✅ تم الخروج (تم حذف localStorage)</div>`;
+        }
+
+        async function simulateLogin() {
+            const result = document.getElementById('simulateResult');
+            const phone = document.getElementById('testPhone').value;
+            const name = document.getElementById('testName').value;
+
+            try {
+                result.innerHTML = '⏳ جاري تسجيل الدخول مرة أخرى...';
+                
+                // Login again
+                const response = await ApiService.users.login(phone, name);
+                
+                if (response.success) {
+                    // Save to localStorage
+                    localStorage.setItem(USER_KEY, JSON.stringify(response.data));
+                    
+                    result.innerHTML = `<div class="success">✅ تم تسجيل الدخول مرة أخرى</div>
+                        <p><strong>اسم المستخدم الحالي:</strong> ${response.data.name}</p>
+                        <p>هل الاسم المحدث موجود؟ ${response.data.name.includes('محدث') ? '<span class="success">✅ نعم</span>' : '<span class="error">❌ لا</span>'}</p>
+                        <pre>${JSON.stringify(response.data, null, 2)}</pre>`;
+                } else {
+                    result.innerHTML = `<div class="error">❌ ${response.error}</div>`;
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+            }
+        }
+
+        // Auto-load localStorage on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            showLocalStorage();
+        });
+    </script>
+</body>
+</html>

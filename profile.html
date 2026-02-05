@@ -210,10 +210,15 @@
 
         // Load user data from database
         async function loadUserData() {
+            console.log('🔄 بدء تحميل بيانات المستخدم...');
+            
             try {
                 // Get user ID from localStorage
                 const userDataStr = localStorage.getItem(USER_KEY);
+                console.log('📦 localStorage data:', userDataStr);
+                
                 if (!userDataStr) {
+                    console.error('❌ لا توجد بيانات في localStorage');
                     alert('لم يتم العثور على بيانات المستخدم. يرجى تسجيل الدخول مرة أخرى.');
                     window.location.href = 'index.html';
                     return;
@@ -221,32 +226,50 @@
 
                 const userData = JSON.parse(userDataStr);
                 const userId = userData.id;
+                
+                console.log('👤 User ID:', userId);
+                console.log('👤 User data from localStorage:', userData);
 
                 if (!userId) {
+                    console.error('❌ معرف المستخدم غير صحيح');
                     alert('معرف المستخدم غير صحيح');
                     window.location.href = 'index.html';
                     return;
                 }
 
+                console.log('🌐 جاري جلب البيانات من قاعدة البيانات...');
+                
                 // Fetch user data from database
                 const response = await ApiService.users.getById(userId);
+                console.log('✅ البيانات المحملة من قاعدة البيانات:', response.data);
+                
                 currentUser = response.data;
 
                 // Update UI with user data
-                document.querySelector('h1').textContent = currentUser.name || 'مستخدم';
+                const nameElement = document.querySelector('h1');
+                nameElement.textContent = currentUser.name || 'مستخدم';
+                console.log('🏷️ تم تحديث الاسم في الواجهة:', currentUser.name);
                 
                 // Update editable fields
                 const phoneField = document.querySelector('[data-field="phone"]');
                 const emailField = document.querySelector('[data-field="email"]');
                 
-                if (phoneField) phoneField.textContent = currentUser.phone || '';
-                if (emailField) emailField.textContent = currentUser.email || '';
+                if (phoneField) {
+                    phoneField.textContent = currentUser.phone || '';
+                    console.log('📱 رقم الهاتف:', currentUser.phone);
+                }
+                if (emailField) {
+                    emailField.textContent = currentUser.email || '';
+                    console.log('📧 البريد الإلكتروني:', currentUser.email);
+                }
 
                 // Store original values
                 storeOriginalValues();
+                
+                console.log('✅ تم تحميل البيانات بنجاح!');
 
             } catch (error) {
-                console.error('Error loading user data:', error);
+                console.error('❌ خطأ في تحميل بيانات المستخدم:', error);
                 alert('خطأ في تحميل بيانات المستخدم: ' + error.message);
             }
         }
@@ -301,8 +324,11 @@
         }
 
         async function saveProfileEdits() {
+            console.log('💾 بدء عملية حفظ التعديلات...');
+            
             try {
                 if (!currentUser || !currentUser.id) {
+                    console.error('❌ لم يتم تحميل بيانات المستخدم');
                     alert('خطأ: لم يتم تحميل بيانات المستخدم');
                     return;
                 }
@@ -318,30 +344,49 @@
                     email: emailField ? emailField.textContent.trim() : currentUser.email
                 };
 
+                console.log('📝 البيانات الجديدة:', updateData);
+                console.log('📝 البيانات القديمة:', currentUser);
+
                 // Validate
                 if (!updateData.name) {
+                    console.error('❌ الاسم فارغ');
                     alert('الرجاء إدخال الاسم');
                     return;
                 }
 
                 if (!updateData.phone) {
+                    console.error('❌ رقم الهاتف فارغ');
                     alert('الرجاء إدخال رقم الهاتف');
                     return;
                 }
 
+                console.log('🌐 جاري إرسال التحديث إلى قاعدة البيانات...');
+                
                 // Save to database
                 const response = await ApiService.users.update(currentUser.id, updateData);
                 
+                console.log('📨 استجابة الخادم:', response);
+                
                 if (response.success) {
                     currentUser = response.data;
+                    console.log('✅ تم التحديث في قاعدة البيانات');
+                    console.log('📊 البيانات المحدثة:', currentUser);
                     
                     // Update localStorage with new data
                     const storedUser = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
+                    console.log('🗄️ localStorage قبل التحديث:', storedUser);
+                    
                     const updatedStoredUser = {
                         ...storedUser,
-                        ...currentUser
+                        name: currentUser.name,
+                        phone: currentUser.phone,
+                        email: currentUser.email,
+                        updated_at: currentUser.updated_at
                     };
+                    
                     localStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
+                    console.log('🗄️ localStorage بعد التحديث:', updatedStoredUser);
+                    console.log('✅ تم تحديث localStorage');
 
                     // Update UI
                     nameElement.contentEditable = "false";
@@ -363,13 +408,15 @@
                     // Store new original values
                     storeOriginalValues();
 
+                    console.log('✅✅✅ تم حفظ التغييرات بنجاح!');
                     alert('✅ تم حفظ التغييرات بنجاح في قاعدة البيانات');
                 } else {
+                    console.error('❌ فشل التحديث:', response.error);
                     alert('خطأ في الحفظ: ' + (response.error || 'خطأ غير معروف'));
                 }
 
             } catch (error) {
-                console.error('Error saving profile:', error);
+                console.error('❌ خطأ في حفظ التغييرات:', error);
                 alert('❌ خطأ في حفظ التغييرات: ' + error.message);
             }
         }
