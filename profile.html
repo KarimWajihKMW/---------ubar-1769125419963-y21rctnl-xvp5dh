@@ -92,20 +92,30 @@
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <!-- Stats -->
+            <!-- Stats from Database -->
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
                 <div class="text-3xl mb-3">⭐</div>
-                <div class="font-bold text-gray-800 text-xl">4.8</div>
+                <div class="font-bold text-gray-800 text-xl info-value" data-field="rating">5.0</div>
                 <div class="text-gray-500 text-sm">التقييم العام</div>
             </div>
 
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
-                <div class="text-3xl mb-3">🚖</div>
-                <div class="font-bold text-gray-800 text-xl">342</div>
-                <div class="text-gray-500 text-sm">عدد الرحلات</div>
+                <div class="text-3xl mb-3">🎁</div>
+                <div class="font-bold text-gray-800 text-xl info-value" data-field="points">0</div>
+                <div class="text-gray-500 text-sm">النقاط</div>
             </div>
 
-            <!-- Profile Info Cards -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">💰</div>
+                <div class="font-bold text-gray-800 text-xl info-value" data-field="balance">0.00</div>
+                <div class="text-gray-500 text-sm">الرصيد (ر.س)</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">👤</div>
+                <div class="font-bold text-gray-800 text-base info-value" data-field="status">عضو جديد</div>
+                <div class="text-gray-500 text-sm">حالة العضوية</div>
+            </div>
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
                 <div class="text-3xl mb-3">📱</div>
                 <div class="font-bold text-gray-800 info-value text-base" data-field="phone">0501234567</div>
@@ -366,6 +376,10 @@
                 const emailField = document.querySelector('[data-field="email"]');
                 const carTypeField = document.querySelector('[data-field="carType"]');
                 const plateField = document.querySelector('[data-field="plate"]');
+                const balanceField = document.querySelector('[data-field="balance"]');
+                const pointsField = document.querySelector('[data-field="points"]');
+                const ratingField = document.querySelector('[data-field="rating"]');
+                const statusField = document.querySelector('[data-field="status"]');
                 
                 if (phoneField) {
                     phoneField.textContent = currentUser.phone || '';
@@ -380,6 +394,18 @@
                 }
                 if (plateField && currentUser.car_plate) {
                     plateField.textContent = currentUser.car_plate;
+                }
+                if (balanceField) {
+                    balanceField.textContent = currentUser.balance !== undefined ? parseFloat(currentUser.balance).toFixed(2) : '0.00';
+                }
+                if (pointsField) {
+                    pointsField.textContent = currentUser.points !== undefined ? currentUser.points : '0';
+                }
+                if (ratingField) {
+                    ratingField.textContent = currentUser.rating !== undefined ? parseFloat(currentUser.rating).toFixed(1) : '5.0';
+                }
+                if (statusField) {
+                    statusField.textContent = currentUser.status || 'عضو جديد';
                 }
 
                 // Apply local overrides (fields not stored in users table)
@@ -475,8 +501,12 @@
                     phone: normalizedPhone,
                     email: allFields.email || (currentUser ? currentUser.email : ''),
                     car_type: allFields.carType || (currentUser ? currentUser.car_type : ''),
-                    car_plate: allFields.plate || (currentUser ? currentUser.car_plate : '')
-                };
+                    car_plate: allFields.plate || (currentUser ? currentUser.car_plate : ''),
+                    balance: allFields.balance ? parseFloat(allFields.balance) : (currentUser ? currentUser.balance : 0),
+                    points: allFields.points ? parseInt(allFields.points, 10) : (currentUser ? currentUser.points : 0),
+                    rating: allFields.rating ? parseFloat(allFields.rating) : (currentUser ? currentUser.rating : 5.0),
+                    status: allFields.status || (currentUser ? currentUser.status : 'عضو جديد')
+                };, 'balance', 'points', 'rating', 'status'
 
                 const overridesToSave = {};
                 Object.keys(allFields).forEach((field) => {
@@ -529,6 +559,11 @@
                         email: currentUser.email,
                         car_type: currentUser.car_type,
                         car_plate: currentUser.car_plate,
+                        balance: currentUser.balance,
+                        points: currentUser.points,
+                        rating: currentUser.rating,
+                        status: currentUser.status,
+                        avatar: currentUser.avatar,
                         updated_at: currentUser.updated_at
                     };
                     

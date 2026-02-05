@@ -182,7 +182,25 @@ async function ensureUserProfileColumns() {
     try {
         await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS car_type VARCHAR(50);`);
         await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS car_plate VARCHAR(20);`);
-        console.log('✅ User profile columns ensured');
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance DECIMAL(10, 2) DEFAULT 0.00;`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0;`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS rating DECIMAL(3, 2) DEFAULT 5.00;`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'عضو جديد';`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;`);
+        
+        // Update existing users to have default values where NULL
+        await pool.query(`
+            UPDATE users 
+            SET 
+                balance = COALESCE(balance, 0.00),
+                points = COALESCE(points, 0),
+                rating = COALESCE(rating, 5.00),
+                status = COALESCE(status, 'عضو جديد'),
+                avatar = COALESCE(avatar, 'https://api.dicebear.com/7.x/avataaars/svg?seed=' || COALESCE(name, 'User'))
+            WHERE balance IS NULL OR points IS NULL OR rating IS NULL OR status IS NULL OR avatar IS NULL;
+        `);
+        
+        console.log('✅ User profile columns ensured with all user data fields');
     } catch (err) {
         console.error('❌ Failed to ensure user profile columns:', err.message);
     }
@@ -1031,7 +1049,7 @@ app.get('/api/users', async (req, res) => {
     try {
         const { role, limit = 50, offset = 0 } = req.query;
 
-        let query = 'SELECT id, phone, name, email, role, car_type, car_plate, created_at FROM users WHERE 1=1';
+        let query = 'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at FROM users WHERE 1=1';
         const params = [];
         let paramCount = 0;
 
@@ -1084,7 +1102,7 @@ app.get('/api/users/:id', async (req, res) => {
         const { id } = req.params;
 
         const result = await pool.query(
-            'SELECT id, phone, name, email, role, car_type, car_plate, created_at FROM users WHERE id = $1',
+            'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at FROM users WHERE id = $1',
             [id]
         );
 
@@ -1109,7 +1127,7 @@ app.get('/api/users/:id', async (req, res) => {
 app.put('/api/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { phone, name, email, password, car_type, car_plate } = req.body;
+        const { phone, name, email, password, car_type, car_plate, balance, points, rating, status, avatar } = req.body;
 
         // Check if user exists
         const existing = await pool.query(
@@ -1159,6 +1177,36 @@ app.put('/api/users/:id', async (req, res) => {
             params.push(String(car_plate).trim());
         }
 
+        if (balance !== undefined) {
+            paramCount++;
+            updates.push(`balance = $${paramCount}`);
+            params.push(parseFloat(balance) || 0);
+        }
+
+        if (points !== undefined) {
+            paramCount++;
+            updates.push(`points = $${paramCount}`);
+            params.push(parseInt(points, 10) || 0);
+        }
+
+        if (rating !== undefined) {
+            paramCount++;
+            updates.push(`rating = $${paramCount}`);
+            params.push(parseFloat(rating) || 5.0);
+        }
+
+        if (status !== undefined && String(status).trim()) {
+            paramCount++;
+            updates.push(`status = $${paramCount}`);
+            params.push(String(status).trim());
+        }
+
+        if (avatar !== undefined && String(avatar).trim()) {
+            paramCount++;
+            updates.push(`avatar = $${paramCount}`);
+            params.push(String(avatar).trim());
+        }
+
         if (password !== undefined && String(password).trim()) {
             paramCount++;
             updates.push(`password = $${paramCount}`);
@@ -1176,7 +1224,7 @@ app.put('/api/users/:id', async (req, res) => {
         updates.push(`updated_at = CURRENT_TIMESTAMP`);
         params.push(id);
 
-        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, phone, name, email, role, car_type, car_plate, created_at, updated_at`;
+        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at`;
 
         const result = await pool.query(query, params);
 
