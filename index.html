@@ -839,10 +839,27 @@
                 <span class="font-bold group-hover:translate-x-[-5px] transition-transform">العروض</span>
                 <span class="mr-auto w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
             </a>
-            <a href="support.html?returnTo=index.html" class="flex items-center px-8 py-3.5 text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-r-[5px] border-transparent hover:border-indigo-600 transition-all group">
-                <i class="fas fa-headset w-8 text-center ml-2 text-gray-400 group-hover:text-indigo-600 transition-colors"></i>
-                <span class="font-bold group-hover:translate-x-[-5px] transition-transform">الدعم والمساعدة</span>
-            </a>
+            <button id="passenger-settings-btn" type="button" onclick="togglePassengerSettings()" class="flex items-center px-8 py-3.5 text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-r-[5px] border-transparent hover:border-indigo-600 transition-all group w-full">
+                <i class="fas fa-gear w-8 text-center ml-2 text-gray-400 group-hover:text-indigo-600 transition-colors"></i>
+                <span class="font-bold group-hover:translate-x-[-5px] transition-transform">إعدادات</span>
+                <i id="passenger-settings-icon" class="fas fa-chevron-down mr-auto text-xs text-gray-400 transition-transform"></i>
+            </button>
+            <div id="passenger-settings-panel" class="hidden px-6">
+                <div class="mt-1 mb-2 rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden">
+                    <a href="support.html?returnTo=index.html" onclick="return openPassengerSettingsLink('support.html?returnTo=index.html')" class="flex items-center px-4 py-3 text-gray-700 hover:bg-white transition-colors">
+                        <i class="fas fa-headset w-7 text-center ml-2 text-indigo-500"></i>
+                        <span class="text-sm font-semibold">الدعم والمساعدة</span>
+                    </a>
+                    <a href="tel:920000123" onclick="return openPassengerSettingsLink('tel:920000123')" class="flex items-center px-4 py-3 text-gray-700 hover:bg-white transition-colors">
+                        <i class="fas fa-phone w-7 text-center ml-2 text-emerald-500"></i>
+                        <span class="text-sm font-semibold">اتصال مباشر</span>
+                    </a>
+                    <a href="https://wa.me/966920000123" onclick="return openPassengerSettingsLink('https://wa.me/966920000123')" class="flex items-center px-4 py-3 text-gray-700 hover:bg-white transition-colors" target="_blank" rel="noopener">
+                        <i class="fas fa-comment w-7 text-center ml-2 text-green-500"></i>
+                        <span class="text-sm font-semibold">واتساب الدعم</span>
+                    </a>
+                </div>
+            </div>
             <button type="button" onclick="toggleDarkMode()" class="flex items-center px-8 py-3.5 text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 border-r-[5px] border-transparent hover:border-indigo-600 transition-all group w-full">
                 <i class="fas fa-moon w-8 text-center ml-2 text-gray-400 group-hover:text-indigo-600 transition-colors" data-dark-toggle-icon></i>
                 <span class="font-bold group-hover:translate-x-[-5px] transition-transform">الوضع الليلي</span>

@@ -3414,6 +3414,32 @@ function toggleMenu() {
     }
 }
 
+function ensurePassengerSession() {
+    if (typeof DB !== 'undefined' && DB.hasSession && DB.hasSession()) return true;
+    if (typeof window.openAuthModal === 'function') {
+        window.openAuthModal();
+    }
+    return false;
+}
+
+function togglePassengerSettings() {
+    if (!ensurePassengerSession()) return;
+    const panel = document.getElementById('passenger-settings-panel');
+    const icon = document.getElementById('passenger-settings-icon');
+    const button = document.getElementById('passenger-settings-btn');
+    if (!panel) return;
+    const isHidden = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !isHidden);
+    if (icon) icon.classList.toggle('rotate-180', isHidden);
+    if (button) button.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+}
+
+function openPassengerSettingsLink(url) {
+    if (!ensurePassengerSession()) return false;
+    if (url) window.location.href = url;
+    return false;
+}
+
 function toggleDriverMenu() {
     const sideMenu = document.getElementById('driver-side-menu');
     const menuOverlay = document.getElementById('driver-menu-overlay');
@@ -3928,6 +3954,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeMenuBtn) closeMenuBtn.addEventListener('click', toggleMenu);
     if (menuOverlay) menuOverlay.addEventListener('click', toggleMenu);
     document.querySelectorAll('#side-menu a').forEach(link => link.addEventListener('click', toggleMenu));
+
+    const passengerSettingsBtn = document.getElementById('passenger-settings-btn');
+    if (passengerSettingsBtn) passengerSettingsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        togglePassengerSettings();
+    });
 
     const driverMenuBtn = document.getElementById('driver-menu-btn');
     const driverCloseMenuBtn = document.getElementById('driver-close-menu-btn');
