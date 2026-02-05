@@ -404,31 +404,42 @@
 
                 console.log('🌐 جاري جلب البيانات من قاعدة البيانات...');
                 
-                // Fetch user data from database
+                // ALWAYS fetch fresh data from database - NEVER use localStorage for protected fields
                 try {
                     const response = await ApiService.users.getById(userId);
                     console.log('✅ البيانات المحملة من قاعدة البيانات:', response.data);
-                    currentUser = response.data;
                     
-                    // Ensure balance and points have values
-                    if (currentUser.balance === null || currentUser.balance === undefined) {
-                        currentUser.balance = 0.00;
-                    }
-                    if (currentUser.points === null || currentUser.points === undefined) {
-                        currentUser.points = 0;
-                    }
+                    // Use ONLY database values for protected fields
+                    currentUser = {
+                        ...response.data,
+                        // Ensure protected fields always have values from database
+                        balance: response.data.balance !== null && response.data.balance !== undefined 
+                            ? response.data.balance 
+                            : 0.00,
+                        points: response.data.points !== null && response.data.points !== undefined 
+                            ? response.data.points 
+                            : 0,
+                        rating: response.data.rating !== null && response.data.rating !== undefined 
+                            ? response.data.rating 
+                            : 5.0,
+                        status: response.data.status || 'عضو جديد'
+                    };
                     
                     console.log('💰 رصيد المحفظة من قاعدة البيانات:', currentUser.balance);
-                    console.log('⭐ نقاط أكوادرا من قاعدة البيانات:', currentUser.points);
+                    console.log('🎁 نقاط أكوادرا من قاعدة البيانات:', currentUser.points);
+                    console.log('⭐ التقييم من قاعدة البيانات:', currentUser.rating);
+                    console.log('👤 الحالة من قاعدة البيانات:', currentUser.status);
+                    
+                    // Update localStorage with fresh database values
+                    SafeStorage.setItem(USER_KEY, JSON.stringify(currentUser));
+                    console.log('✅ تم تحديث localStorage بالبيانات الطازجة من قاعدة البيانات');
+                    
                 } catch (error) {
-                    console.warn('⚠️ فشل جلب البيانات من قاعدة البيانات، سيتم استخدام البيانات المحلية', error);
-                    currentUser = {
-                        ...userData,
-                        balance: userData.balance !== undefined ? userData.balance : 0.00,
-                        points: userData.points !== undefined ? userData.points : 0
-                    };
-                    console.log('💰 رصيد المحفظة من localStorage:', currentUser.balance);
-                    console.log('⭐ نقاط أكوادرا من localStorage:', currentUser.points);
+                    console.error('❌ فشل جلب البيانات من قاعدة البيانات:', error);
+                    alert('⚠️ فشل تحميل البيانات من قاعدة البيانات. يرجى المحاولة مرة أخرى.');
+                    // Don't fallback to localStorage for protected fields - redirect to login
+                    window.location.href = 'index.html';
+                    return;
                 }
 
                 // Update UI with user data
@@ -461,9 +472,7 @@
                     plateField.textContent = currentUser.car_plate;
                 }
                 if (balanceField) {
-                    const balanceValue = currentUser.balance !== null && currentUser.balance !== undefined 
-                        ? parseFloat(currentUser.balance).toFixed(2) 
-                        : '0.00';
+                    const balanceValue = parseFloat(currentUser.balance || 0).toFixed(2);
                     balanceField.textContent = balanceValue;
                     console.log('💰 تم تحديث عرض رصيد المحفظة:', balanceValue);
                 }
