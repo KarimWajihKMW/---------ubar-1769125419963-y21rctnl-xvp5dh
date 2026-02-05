@@ -504,10 +504,25 @@
                     <div class="space-y-2">
                         <label class="text-xs font-bold text-gray-500 mr-1">رقم الهاتف</label>
                         <div class="flex items-center bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus-within:ring-2 ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
-                            <span class="text-gray-400 font-bold border-l border-gray-300 pl-3 ml-3 flex items-center gap-1">
-                                <img src="https://flagcdn.com/w20/sa.png" class="w-5 rounded-sm" alt="SA">
-                                +966
-                            </span>
+                            <div class="text-gray-400 font-bold border-l border-gray-300 pl-3 ml-3 flex items-center gap-2">
+                                <img id="phone-flag" src="https://flagcdn.com/w20/sa.png" class="w-5 rounded-sm" alt="SA">
+                                <select id="phone-country" class="bg-transparent text-gray-600 font-bold focus:outline-none">
+                                    <option value="sa" data-dial="+966" data-flag="sa" selected>السعودية</option>
+                                    <option value="ae" data-dial="+971" data-flag="ae">الإمارات</option>
+                                    <option value="kw" data-dial="+965" data-flag="kw">الكويت</option>
+                                    <option value="qa" data-dial="+974" data-flag="qa">قطر</option>
+                                    <option value="bh" data-dial="+973" data-flag="bh">البحرين</option>
+                                    <option value="om" data-dial="+968" data-flag="om">عُمان</option>
+                                    <option value="eg" data-dial="+20" data-flag="eg">مصر</option>
+                                    <option value="jo" data-dial="+962" data-flag="jo">الأردن</option>
+                                    <option value="lb" data-dial="+961" data-flag="lb">لبنان</option>
+                                    <option value="sy" data-dial="+963" data-flag="sy">سوريا</option>
+                                    <option value="iq" data-dial="+964" data-flag="iq">العراق</option>
+                                    <option value="ye" data-dial="+967" data-flag="ye">اليمن</option>
+                                    <option value="ps" data-dial="+970" data-flag="ps">فلسطين</option>
+                                </select>
+                                <span id="phone-dial-code">+966</span>
+                            </div>
                             <input type="tel" id="phone-input" placeholder="55 123 4567" class="bg-transparent flex-1 outline-none text-gray-800 font-bold placeholder-gray-300 ltr-input" dir="ltr">
                         </div>
                     </div>

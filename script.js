@@ -1177,6 +1177,27 @@ const DB = {
 
 // Other window functions defined here
 
+function updatePhoneCountryUI() {
+    const select = document.getElementById('phone-country');
+    const dial = document.getElementById('phone-dial-code');
+    const flag = document.getElementById('phone-flag');
+    if (!select || !dial || !flag) return;
+    const option = select.options[select.selectedIndex];
+    const dialCode = (option && option.dataset && option.dataset.dial) ? option.dataset.dial : '+966';
+    const flagCode = (option && option.dataset && option.dataset.flag) ? option.dataset.flag : 'sa';
+
+    dial.textContent = dialCode;
+    flag.src = `https://flagcdn.com/w20/${flagCode}.png`;
+    flag.alt = flagCode.toUpperCase();
+}
+
+function getSelectedDialCode() {
+    const select = document.getElementById('phone-country');
+    if (!select) return '+966';
+    const option = select.options[select.selectedIndex];
+    return (option && option.dataset && option.dataset.dial) ? option.dataset.dial : '+966';
+}
+
 
 window.openAuthModal = function() {
     const am = document.getElementById('auth-modal');
@@ -1190,6 +1211,11 @@ window.openAuthModal = function() {
     document.getElementById('auth-otp-section').classList.add('hidden');
     document.getElementById('auth-phone-form').classList.remove('hidden');
     document.getElementById('phone-input').value = '';
+    const countrySelect = document.getElementById('phone-country');
+    if (countrySelect) {
+        countrySelect.value = 'sa';
+        updatePhoneCountryUI();
+    }
 };
 
 window.closeAuthModal = function() {
@@ -1370,11 +1396,15 @@ window.switchAuthTab = function(type) {
 };
 
 window.sendOTP = function() {
-    const phone = document.getElementById('phone-input').value;
-    if (!phone || phone.length < 9) {
+    const phoneRaw = document.getElementById('phone-input').value;
+    const phoneDigits = phoneRaw.replace(/\D/g, '');
+    if (!phoneDigits || phoneDigits.length < 9) {
         showToast('يرجى إدخال رقم هاتف صحيح');
         return;
     }
+
+    const dialCode = getSelectedDialCode();
+    const displayPhone = `${dialCode} ${phoneDigits}`;
 
     const btn = document.getElementById('send-otp-btn');
     const originalText = btn.innerHTML;
@@ -1387,7 +1417,7 @@ window.sendOTP = function() {
         
         document.getElementById('auth-phone-form').classList.add('hidden');
         document.getElementById('auth-otp-section').classList.remove('hidden');
-        document.getElementById('otp-phone-display').innerText = "+966 " + phone;
+        document.getElementById('otp-phone-display').innerText = displayPhone;
         
         const firstOtp = document.querySelector('.otp-input');
         if(firstOtp) firstOtp.focus();
@@ -1413,9 +1443,11 @@ window.verifyOTP = async function() {
     try {
         const phoneRaw = document.getElementById('phone-input')?.value || '';
         const phoneDigits = phoneRaw.replace(/\D/g, '');
+        const dialCode = getSelectedDialCode();
+        const fullPhone = phoneDigits ? `${dialCode}${phoneDigits}` : phoneRaw;
         const emailFallback = phoneDigits ? `passenger_${phoneDigits}@ubar.sa` : `passenger_${Date.now()}@ubar.sa`;
         const payload = {
-            phone: phoneDigits || phoneRaw,
+            phone: fullPhone,
             name: 'راكب جديد',
             email: emailFallback
         };
@@ -3732,6 +3764,12 @@ document.addEventListener('DOMContentLoaded', () => {
         DB.init();
         centerMap();
         animateAmbientCars();
+
+        const phoneCountrySelect = document.getElementById('phone-country');
+        if (phoneCountrySelect) {
+            updatePhoneCountryUI();
+            phoneCountrySelect.addEventListener('change', updatePhoneCountryUI);
+        }
         
         const roleModal = document.getElementById('role-selection-modal');
         const params = new URLSearchParams(window.location.search);
