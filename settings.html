@@ -18,6 +18,8 @@
         body.dark-mode .text-gray-500 { color: #94a3b8 !important; }
         body.dark-mode .border-gray-100 { border-color: #1f2937 !important; }
         body.dark-mode .shadow-sm { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35) !important; }
+        .accordion-panel { display: none; }
+        .accordion-panel.open { display: block; }
     </style>
 </head>
 <body class="bg-gray-50 p-5">
@@ -42,26 +44,54 @@
         <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
             <h2 class="text-lg font-bold text-gray-800 mb-4">الحساب</h2>
             <div class="space-y-3">
-                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
-                    <div>
+                <button type="button" class="w-full flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100" data-accordion-target="account-name-panel">
+                    <div class="text-right">
                         <div class="text-sm text-gray-500">الاسم</div>
                         <div class="font-bold text-gray-800" id="settings-user-name">—</div>
                     </div>
-                    <i class="fas fa-user text-indigo-500"></i>
+                    <div class="flex items-center gap-3">
+                        <i class="fas fa-user text-indigo-500"></i>
+                        <i class="fas fa-chevron-down text-gray-400 text-xs" data-accordion-icon></i>
+                    </div>
+                </button>
+                <div id="account-name-panel" class="accordion-panel bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <p class="text-sm text-gray-600 mb-3">يمكنك تعديل بياناتك من صفحة الملف الشخصي.</p>
+                    <a href="profile.html" class="inline-flex items-center gap-2 text-sm font-bold text-indigo-600 hover:text-indigo-700">
+                        <i class="fas fa-user-pen"></i>
+                        تعديل الملف الشخصي
+                    </a>
                 </div>
-                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
-                    <div>
+
+                <button type="button" class="w-full flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100" data-accordion-target="account-email-panel">
+                    <div class="text-right">
                         <div class="text-sm text-gray-500">البريد الإلكتروني</div>
                         <div class="font-bold text-gray-800" id="settings-user-email">—</div>
                     </div>
-                    <i class="fas fa-envelope text-emerald-500"></i>
+                    <div class="flex items-center gap-3">
+                        <i class="fas fa-envelope text-emerald-500"></i>
+                        <i class="fas fa-chevron-down text-gray-400 text-xs" data-accordion-icon></i>
+                    </div>
+                </button>
+                <div id="account-email-panel" class="accordion-panel bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <p class="text-sm text-gray-600 mb-3">لو محتاج تغير البريد أو كلمة المرور اتبع الخطوات التالية.</p>
+                    <a href="email-password-guide.html" class="inline-flex items-center gap-2 text-sm font-bold text-indigo-600 hover:text-indigo-700">
+                        <i class="fas fa-shield-keyhole"></i>
+                        دليل تغيير البريد وكلمة المرور
+                    </a>
                 </div>
-                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
-                    <div>
+
+                <button type="button" class="w-full flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100" data-accordion-target="account-phone-panel">
+                    <div class="text-right">
                         <div class="text-sm text-gray-500">رقم الجوال</div>
                         <div class="font-bold text-gray-800" id="settings-user-phone">—</div>
                     </div>
-                    <i class="fas fa-phone text-amber-500"></i>
+                    <div class="flex items-center gap-3">
+                        <i class="fas fa-phone text-amber-500"></i>
+                        <i class="fas fa-chevron-down text-gray-400 text-xs" data-accordion-icon></i>
+                    </div>
+                </button>
+                <div id="account-phone-panel" class="accordion-panel bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <p class="text-sm text-gray-600">لو محتاج تحديث رقمك، تواصل مع الدعم لتأكيد الرقم الجديد.</p>
                 </div>
             </div>
         </div>
@@ -69,18 +99,18 @@
         <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
             <h2 class="text-lg font-bold text-gray-800 mb-4">التفضيلات</h2>
             <div class="space-y-4">
-                <label class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100 cursor-pointer">
-                    <span class="text-gray-700 font-semibold">إشعارات الرحلات</span>
+                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <label for="pref-notify-trips" class="text-gray-700 font-semibold cursor-pointer">إشعارات الرحلات</label>
                     <input id="pref-notify-trips" type="checkbox" class="w-5 h-5 text-indigo-600" />
-                </label>
-                <label class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100 cursor-pointer">
-                    <span class="text-gray-700 font-semibold">عروض وتسويق</span>
+                </div>
+                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <label for="pref-notify-marketing" class="text-gray-700 font-semibold cursor-pointer">عروض وتسويق</label>
                     <input id="pref-notify-marketing" type="checkbox" class="w-5 h-5 text-indigo-600" />
-                </label>
-                <label class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100 cursor-pointer">
-                    <span class="text-gray-700 font-semibold">السماح بتحديد الموقع</span>
+                </div>
+                <div class="flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                    <label for="pref-location" class="text-gray-700 font-semibold cursor-pointer">السماح بتحديد الموقع</label>
                     <input id="pref-location" type="checkbox" class="w-5 h-5 text-indigo-600" />
-                </label>
+                </div>
                 <div class="bg-gray-50 rounded-2xl p-4 border border-gray-100">
                     <div class="text-gray-700 font-semibold mb-2">اللغة</div>
                     <select id="pref-language" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-gray-700 bg-white">
@@ -88,6 +118,7 @@
                         <option value="en">English</option>
                     </select>
                 </div>
+                <div id="prefs-status" class="text-xs text-gray-500"></div>
             </div>
         </div>
 
@@ -126,9 +157,22 @@
 
         <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
             <h2 class="text-lg font-bold text-gray-800 mb-4">الخصوصية</h2>
-            <div class="space-y-3 text-sm text-gray-600">
-                <p>نحن نحمي بياناتك ولا نشاركها بدون إذن.</p>
-                <p>يمكنك تعديل التفضيلات في أي وقت.</p>
+            <div class="space-y-3">
+                <button type="button" class="w-full flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100" data-accordion-target="privacy-panel">
+                    <span class="text-gray-700 font-semibold">سياسة الخصوصية</span>
+                    <i class="fas fa-chevron-down text-gray-400 text-xs" data-accordion-icon></i>
+                </button>
+                <div id="privacy-panel" class="accordion-panel bg-gray-50 rounded-2xl p-4 border border-gray-100 text-sm text-gray-600">
+                    <p>نحن نحمي بياناتك ولا نشاركها بدون إذن.</p>
+                    <p class="mt-2">يمكنك تعديل التفضيلات في أي وقت من هذه الصفحة.</p>
+                </div>
+                <button type="button" class="w-full flex items-center justify-between bg-gray-50 rounded-2xl p-4 border border-gray-100" data-accordion-target="delete-panel">
+                    <span class="text-gray-700 font-semibold">حذف الحساب</span>
+                    <i class="fas fa-chevron-down text-gray-400 text-xs" data-accordion-icon></i>
+                </button>
+                <div id="delete-panel" class="accordion-panel bg-gray-50 rounded-2xl p-4 border border-gray-100 text-sm text-gray-600">
+                    <p>لو محتاج حذف الحساب، تواصل مع الدعم وسيتم المراجعة خلال 24 ساعة.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -207,6 +251,8 @@
             }
         }
 
+        let prefsTimer = null;
+
         function savePrefs() {
             const prefs = {
                 trips: !!document.getElementById('pref-notify-trips')?.checked,
@@ -215,6 +261,28 @@
                 language: document.getElementById('pref-language')?.value || 'ar'
             };
             try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {}
+            const status = document.getElementById('prefs-status');
+            if (status) {
+                status.textContent = 'تم حفظ التفضيلات';
+                if (prefsTimer) clearTimeout(prefsTimer);
+                prefsTimer = setTimeout(() => { status.textContent = ''; }, 1500);
+            }
+        }
+
+        function setupAccordions() {
+            document.querySelectorAll('[data-accordion-target]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const targetId = btn.getAttribute('data-accordion-target');
+                    if (!targetId) return;
+                    const panel = document.getElementById(targetId);
+                    if (!panel) return;
+                    const isOpen = panel.classList.contains('open');
+                    panel.classList.toggle('open', !isOpen);
+                    btn.querySelectorAll('[data-accordion-icon]').forEach(icon => {
+                        icon.classList.toggle('rotate-180', !isOpen);
+                    });
+                });
+            });
         }
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -234,6 +302,8 @@
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('change', savePrefs);
             });
+
+            setupAccordions();
         });
     </script>
 </body>
