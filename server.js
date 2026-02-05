@@ -1251,7 +1251,7 @@ app.get('/api/passengers', async (req, res) => {
     try {
         const { search, limit = 50, offset = 0 } = req.query;
 
-        let query = 'SELECT id, phone, name, email, created_at, updated_at FROM users WHERE role = $1';
+        let query = 'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at FROM users WHERE role = $1';
         const params = ['passenger'];
         let paramCount = 1;
 
@@ -1304,7 +1304,7 @@ app.get('/api/passengers/:id', async (req, res) => {
         const { id } = req.params;
 
         const result = await pool.query(
-            'SELECT id, phone, name, email, created_at, updated_at FROM users WHERE id = $1 AND role = $2',
+            'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at FROM users WHERE id = $1 AND role = $2',
             [id, 'passenger']
         );
 
@@ -1410,7 +1410,7 @@ app.post('/api/passengers', async (req, res) => {
 app.put('/api/passengers/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { phone, name, email, password } = req.body;
+        const { phone, name, email, password, car_type, car_plate, balance, points, rating, status, avatar } = req.body;
 
         // Check if passenger exists
         const existing = await pool.query(
@@ -1430,9 +1430,10 @@ app.put('/api/passengers/:id', async (req, res) => {
         let paramCount = 0;
 
         if (phone !== undefined && String(phone).trim()) {
+            const normalizedPhone = normalizePhoneForStore(phone);
             paramCount++;
             updates.push(`phone = $${paramCount}`);
-            params.push(String(phone).trim());
+            params.push(normalizedPhone);
         }
 
         if (name !== undefined && String(name).trim()) {
@@ -1445,6 +1446,48 @@ app.put('/api/passengers/:id', async (req, res) => {
             paramCount++;
             updates.push(`email = $${paramCount}`);
             params.push(String(email).trim().toLowerCase());
+        }
+
+        if (car_type !== undefined && String(car_type).trim()) {
+            paramCount++;
+            updates.push(`car_type = $${paramCount}`);
+            params.push(String(car_type).trim());
+        }
+
+        if (car_plate !== undefined && String(car_plate).trim()) {
+            paramCount++;
+            updates.push(`car_plate = $${paramCount}`);
+            params.push(String(car_plate).trim());
+        }
+
+        if (balance !== undefined) {
+            paramCount++;
+            updates.push(`balance = $${paramCount}`);
+            params.push(parseFloat(balance) || 0);
+        }
+
+        if (points !== undefined) {
+            paramCount++;
+            updates.push(`points = $${paramCount}`);
+            params.push(parseInt(points, 10) || 0);
+        }
+
+        if (rating !== undefined) {
+            paramCount++;
+            updates.push(`rating = $${paramCount}`);
+            params.push(parseFloat(rating) || 5.0);
+        }
+
+        if (status !== undefined && String(status).trim()) {
+            paramCount++;
+            updates.push(`status = $${paramCount}`);
+            params.push(String(status).trim());
+        }
+
+        if (avatar !== undefined && String(avatar).trim()) {
+            paramCount++;
+            updates.push(`avatar = $${paramCount}`);
+            params.push(String(avatar).trim());
         }
 
         if (password !== undefined && String(password).trim()) {
@@ -1464,7 +1507,7 @@ app.put('/api/passengers/:id', async (req, res) => {
         updates.push(`updated_at = CURRENT_TIMESTAMP`);
         params.push(id);
 
-        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} AND role = 'passenger' RETURNING id, phone, name, email, role, created_at, updated_at`;
+        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} AND role = 'passenger' RETURNING id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at`;
 
         const result = await pool.query(query, params);
 
