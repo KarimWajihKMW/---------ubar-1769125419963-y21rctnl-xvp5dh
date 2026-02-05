@@ -96,6 +96,14 @@
         "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node test-passengers-api\\.js$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^pkill -f \"node server\\.js\" 2>/dev/null; sleep 1 && node server\\.js > server\\.log 2>&1 & echo \\$!$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^node test-profile-refresh\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

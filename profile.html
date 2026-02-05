@@ -67,6 +67,25 @@
             border-radius: 4px;
         }
 
+        .info-value[data-field="balance"],
+        .info-value[data-field="points"],
+        .info-value[data-field="rating"],
+        .info-value[data-field="status"] {
+            position: relative;
+        }
+
+        .info-value[data-field="balance"]::after,
+        .info-value[data-field="points"]::after,
+        .info-value[data-field="rating"]::after,
+        .info-value[data-field="status"]::after {
+            content: '🔒';
+            font-size: 10px;
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            opacity: 0.5;
+        }
+
         @keyframes slideIn {
             from {
                 transform: translateX(100%);
@@ -185,6 +204,12 @@
                 <div class="text-3xl mb-3">❌</div>
                 <div class="font-bold text-gray-800">إلغاء</div>
                 <div class="text-gray-600 text-sm">إلغاء التعديل</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-green-50 transition-colors cursor-pointer" id="refreshBtnCard" tabindex="0" role="button">
+                <div class="text-3xl mb-3">🔄</div>
+                <div class="font-bold text-gray-800">تحديث</div>
+                <div class="text-gray-500 text-sm">تحديث البيانات</div>
             </div>
 
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" id="ratingsBtnCard" tabindex="0" role="button">
@@ -506,6 +531,14 @@
 
             const values = document.querySelectorAll('.info-value');
             values.forEach(val => {
+                const field = val.getAttribute('data-field');
+                
+                // Make balance, points, and rating read-only (not editable)
+                if (field === 'balance' || field === 'points' || field === 'rating' || field === 'status') {
+                    console.log('🔒 حقل للقراءة فقط:', field);
+                    return; // Skip making these fields editable
+                }
+                
                 val.contentEditable = "true";
                 val.classList.add('editing');
                 
@@ -605,24 +638,15 @@
 
                 const normalizedPhone = normalizePhoneKey(allFields.phone || currentUser.phone);
                 
-                // Parse balance and points carefully - always use current database values
-                const currentBalance = currentUser.balance !== null && currentUser.balance !== undefined 
-                    ? parseFloat(currentUser.balance) 
-                    : 0.00;
-                const currentPoints = currentUser.points !== null && currentUser.points !== undefined 
-                    ? parseInt(currentUser.points, 10) 
-                    : 0;
-                
+                // IMPORTANT: DO NOT update balance, points, rating, or status from UI
+                // These fields are managed by the system and database only
                 const updateData = {
                     name: nameElement.textContent.trim(),
                     phone: normalizedPhone,
                     email: allFields.email || currentUser.email || '',
                     car_type: allFields.carType || currentUser.car_type || '',
-                    car_plate: allFields.plate || currentUser.car_plate || '',
-                    balance: currentBalance,
-                    points: currentPoints,
-                    rating: allFields.rating ? parseFloat(allFields.rating) : (currentUser.rating || 5.0),
-                    status: allFields.status || currentUser.status || 'عضو جديد'
+                    car_plate: allFields.plate || currentUser.car_plate || ''
+                    // balance, points, rating, status are NOT included - database values preserved
                 };
                 
                 console.log('💾 البيانات التي سيتم حفظها - الرصيد:', updateData.balance, 'النقاط:', updateData.points);
@@ -758,16 +782,16 @@
                 });
 
                 const normalizedPhone = normalizePhoneKey(allFields.phone || (currentUser ? currentUser.phone : ''));
+                
+                // IMPORTANT: DO NOT update balance, points, rating, or status from UI
+                // These fields are managed by the system and database only
                 const updateData = {
                     name: nameElement.textContent.trim(),
                     phone: normalizedPhone,
                     email: allFields.email || (currentUser ? currentUser.email : ''),
                     car_type: allFields.carType || (currentUser ? currentUser.car_type : ''),
-                    car_plate: allFields.plate || (currentUser ? currentUser.car_plate : ''),
-                    balance: allFields.balance ? parseFloat(allFields.balance) : (currentUser ? currentUser.balance : 0),
-                    points: allFields.points ? parseInt(allFields.points, 10) : (currentUser ? currentUser.points : 0),
-                    rating: allFields.rating ? parseFloat(allFields.rating) : (currentUser ? currentUser.rating : 5.0),
-                    status: allFields.status || (currentUser ? currentUser.status : 'عضو جديد')
+                    car_plate: allFields.plate || (currentUser ? currentUser.car_plate : '')
+                    // balance, points, rating, status are NOT included - database values preserved
                 };
 
                 // Add password only if it's been changed (not dots)
@@ -917,12 +941,66 @@
              document.getElementById('ratingsSection').classList.add('hidden');
         }
 
+        async function refreshUserData() {
+            console.log('🔄 تحديث البيانات من قاعدة البيانات...');
+            
+            const refreshBtn = document.getElementById('refreshBtnCard');
+            const originalHTML = refreshBtn ? refreshBtn.innerHTML : '';
+            
+            // Show loading state
+            if (refreshBtn) {
+                refreshBtn.innerHTML = `
+                    <div class="text-3xl mb-3">⏳</div>
+                    <div class="font-bold text-gray-800">جاري التحديث...</div>
+                    <div class="text-gray-500 text-sm">يرجى الانتظار</div>
+                `;
+                refreshBtn.style.pointerEvents = 'none';
+            }
+            
+            try {
+                await loadUserData();
+                
+                // Show success state briefly
+                if (refreshBtn) {
+                    refreshBtn.innerHTML = `
+                        <div class="text-3xl mb-3">✅</div>
+                        <div class="font-bold text-green-600">تم التحديث!</div>
+                        <div class="text-green-500 text-sm">البيانات محدثة</div>
+                    `;
+                    
+                    setTimeout(() => {
+                        refreshBtn.innerHTML = originalHTML;
+                        refreshBtn.style.pointerEvents = '';
+                    }, 1500);
+                }
+                
+                console.log('✅ تم تحديث البيانات بنجاح!');
+            } catch (error) {
+                console.error('❌ فشل تحديث البيانات:', error);
+                
+                // Show error state
+                if (refreshBtn) {
+                    refreshBtn.innerHTML = `
+                        <div class="text-3xl mb-3">❌</div>
+                        <div class="font-bold text-red-600">فشل التحديث</div>
+                        <div class="text-red-500 text-sm">حاول مرة أخرى</div>
+                    `;
+                    
+                    setTimeout(() => {
+                        refreshBtn.innerHTML = originalHTML;
+                        refreshBtn.style.pointerEvents = '';
+                    }, 2000);
+                }
+            }
+        }
+
         function bindProfileActions() {
             const bindings = [
                 { id: 'profile-back-btn', handler: () => history.back() },
                 { id: 'editBtnCard', handler: editProfile },
                 { id: 'saveBtnCard', handler: saveProfileEdits },
                 { id: 'cancelBtnCard', handler: cancelProfileEdits },
+                { id: 'refreshBtnCard', handler: refreshUserData },
                 { id: 'ratingsBtnCard', handler: viewRatings },
                 { id: 'menuBtnCard', handler: goToMenu },
                 { id: 'logoutBtnCard', handler: logout },
