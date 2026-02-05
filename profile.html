@@ -207,6 +207,79 @@
         let currentUser = null;
         let originalValues = {};
         const USER_KEY = 'akwadra_user';
+        const PROFILE_OVERRIDES_KEY = 'akwadra_profile_overrides';
+
+        const SafeStorage = {
+            _memory: {},
+            _isAvailable: null,
+            _checkAvailability() {
+                if (this._isAvailable !== null) return this._isAvailable;
+                try {
+                    const x = '__storage_test__';
+                    window.localStorage.setItem(x, x);
+                    window.localStorage.removeItem(x);
+                    this._isAvailable = true;
+                } catch (e) {
+                    console.warn('LocalStorage unavailable; using memory fallback.');
+                    this._isAvailable = false;
+                }
+                return this._isAvailable;
+            },
+            getItem(key) {
+                if (this._checkAvailability()) {
+                    return window.localStorage.getItem(key);
+                }
+                return this._memory[key] || null;
+            },
+            setItem(key, value) {
+                if (this._checkAvailability()) {
+                    window.localStorage.setItem(key, value);
+                } else {
+                    this._memory[key] = value;
+                }
+            },
+            removeItem(key) {
+                if (this._checkAvailability()) {
+                    window.localStorage.removeItem(key);
+                } else {
+                    delete this._memory[key];
+                }
+            }
+        };
+
+        function getProfileOverridesMap() {
+            try {
+                const raw = SafeStorage.getItem(PROFILE_OVERRIDES_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch (e) {
+                console.warn('Failed to parse profile overrides', e);
+                return {};
+            }
+        }
+
+        function getProfileOverrides(userId) {
+            if (!userId) return {};
+            const map = getProfileOverridesMap();
+            return map[String(userId)] || {};
+        }
+
+        function setProfileOverrides(userId, overrides) {
+            if (!userId) return;
+            const map = getProfileOverridesMap();
+            const key = String(userId);
+            map[key] = { ...(map[key] || {}), ...(overrides || {}) };
+            SafeStorage.setItem(PROFILE_OVERRIDES_KEY, JSON.stringify(map));
+        }
+
+        function applyProfileOverrides(userId) {
+            const overrides = getProfileOverrides(userId);
+            Object.keys(overrides).forEach((field) => {
+                const el = document.querySelector(`[data-field="${field}"]`);
+                if (el && overrides[field]) {
+                    el.textContent = overrides[field];
+                }
+            });
+        }
 
         // Load user data from database
         async function loadUserData() {
@@ -214,7 +287,7 @@
             
             try {
                 // Get user ID from localStorage
-                const userDataStr = localStorage.getItem(USER_KEY);
+                const userDataStr = SafeStorage.getItem(USER_KEY);
                 console.log('📦 localStorage data:', userDataStr);
                 
                 if (!userDataStr) {
@@ -240,10 +313,14 @@
                 console.log('🌐 جاري جلب البيانات من قاعدة البيانات...');
                 
                 // Fetch user data from database
-                const response = await ApiService.users.getById(userId);
-                console.log('✅ البيانات المحملة من قاعدة البيانات:', response.data);
-                
-                currentUser = response.data;
+                try {
+                    const response = await ApiService.users.getById(userId);
+                    console.log('✅ البيانات المحملة من قاعدة البيانات:', response.data);
+                    currentUser = response.data;
+                } catch (error) {
+                    console.warn('⚠️ فشل جلب البيانات من قاعدة البيانات، سيتم استخدام البيانات المحلية', error);
+                    currentUser = userData;
+                }
 
                 // Update UI with user data
                 const nameElement = document.querySelector('h1');
@@ -262,6 +339,9 @@
                     emailField.textContent = currentUser.email || '';
                     console.log('📧 البريد الإلكتروني:', currentUser.email);
                 }
+
+                // Apply local overrides (fields not stored in users table)
+                applyProfileOverrides(userId);
 
                 // Store original values
                 storeOriginalValues();
@@ -292,7 +372,7 @@
 
         function logout() {
             if(confirm('هل أنت متأكد من تسجيل الخروج؟')) {
-                localStorage.removeItem(USER_KEY);
+                SafeStorage.removeItem(USER_KEY);
                 window.location.href = 'index.html';
             }
         }
@@ -338,10 +418,18 @@
                 const phoneField = document.querySelector('[data-field="phone"]');
                 const emailField = document.querySelector('[data-field="email"]');
 
+                const allFields = {};
+                document.querySelectorAll('.info-value').forEach((val) => {
+                    const field = val.getAttribute('data-field');
+                    if (field) {
+                        allFields[field] = val.textContent.trim();
+                    }
+                });
+
                 const updateData = {
                     name: nameElement.textContent.trim(),
-                    phone: phoneField ? phoneField.textContent.trim() : currentUser.phone,
-                    email: emailField ? emailField.textContent.trim() : currentUser.email
+                    phone: allFields.phone || (currentUser ? currentUser.phone : ''),
+                    email: allFields.email || (currentUser ? currentUser.email : '')
                 };
 
                 console.log('📝 البيانات الجديدة:', updateData);
@@ -373,7 +461,7 @@
                     console.log('📊 البيانات المحدثة:', currentUser);
                     
                     // Update localStorage with new data
-                    const storedUser = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
+                    const storedUser = JSON.parse(SafeStorage.getItem(USER_KEY) || '{}');
                     console.log('🗄️ localStorage قبل التحديث:', storedUser);
                     
                     const updatedStoredUser = {
@@ -384,9 +472,18 @@
                         updated_at: currentUser.updated_at
                     };
                     
-                    localStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
+                    SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
                     console.log('🗄️ localStorage بعد التحديث:', updatedStoredUser);
                     console.log('✅ تم تحديث localStorage');
+
+                    // Persist extra fields locally (not stored in users table)
+                    const extraFields = {};
+                    Object.keys(allFields).forEach((field) => {
+                        if (!['phone', 'email'].includes(field) && allFields[field]) {
+                            extraFields[field] = allFields[field];
+                        }
+                    });
+                    setProfileOverrides(currentUser.id, extraFields);
 
                     // Update UI
                     nameElement.contentEditable = "false";
