@@ -93,7 +93,7 @@
 <body class="bg-gray-50 p-5">
     <div class="max-w-6xl mx-auto">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
-            <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors" onclick="history.back()">
+            <button id="profile-back-btn" class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors">
                 <i class="fas fa-arrow-right"></i>
                 رجوع
             </button>
@@ -169,37 +169,37 @@
             </div>
             
             <!-- Actions -->
-             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="editProfile()" id="editBtnCard">
+             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" id="editBtnCard" tabindex="0" role="button">
                 <div class="text-3xl mb-3">✏️</div>
                 <div class="font-bold text-gray-800">تعديل</div>
                 <div class="text-gray-500 text-sm">تعديل البيانات</div>
             </div>
 
-            <div class="hidden bg-indigo-600 p-5 rounded-2xl shadow-sm border border-indigo-600 text-center hover:bg-indigo-700 transition-colors cursor-pointer" onclick="saveProfileEdits()" id="saveBtnCard">
+            <div class="hidden bg-indigo-600 p-5 rounded-2xl shadow-sm border border-indigo-600 text-center hover:bg-indigo-700 transition-colors cursor-pointer" id="saveBtnCard" tabindex="0" role="button">
                 <div class="text-3xl mb-3 text-white">💾</div>
                 <div class="font-bold text-white">حفظ</div>
                 <div class="text-indigo-100 text-sm">حفظ التغييرات</div>
             </div>
 
-            <div class="hidden bg-gray-200 p-5 rounded-2xl shadow-sm border border-gray-300 text-center hover:bg-gray-300 transition-colors cursor-pointer" onclick="cancelProfileEdits()" id="cancelBtnCard">
+            <div class="hidden bg-gray-200 p-5 rounded-2xl shadow-sm border border-gray-300 text-center hover:bg-gray-300 transition-colors cursor-pointer" id="cancelBtnCard" tabindex="0" role="button">
                 <div class="text-3xl mb-3">❌</div>
                 <div class="font-bold text-gray-800">إلغاء</div>
                 <div class="text-gray-600 text-sm">إلغاء التعديل</div>
             </div>
 
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="viewRatings()">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" id="ratingsBtnCard" tabindex="0" role="button">
                 <div class="text-3xl mb-3">💬</div>
                 <div class="font-bold text-gray-800">التقييمات</div>
                 <div class="text-gray-500 text-sm">آراء الركاب</div>
             </div>
             
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" onclick="goToMenu()">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" id="menuBtnCard" tabindex="0" role="button">
                 <div class="text-3xl mb-3">🏠</div>
                 <div class="font-bold text-gray-800">القائمة</div>
                 <div class="text-gray-500 text-sm">العودة للرئيسية</div>
             </div>
 
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-red-50 transition-colors cursor-pointer group" onclick="logout()">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-red-50 transition-colors cursor-pointer group" id="logoutBtnCard" tabindex="0" role="button">
                 <div class="text-3xl mb-3 group-hover:scale-110 transition-transform">🚪</div>
                 <div class="font-bold text-red-600">خروج</div>
                 <div class="text-red-400 text-sm">تسجيل الخروج</div>
@@ -211,7 +211,7 @@
                 <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
                     💬 تقييمات الركاب
                 </h2>
-                <button class="text-sm text-gray-500 hover:text-gray-700" onclick="hideRatings()">إخفاء</button>
+                <button id="ratingsHideBtn" class="text-sm text-gray-500 hover:text-gray-700">إخفاء</button>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="p-4 rounded-2xl bg-gray-50 border border-gray-100">
@@ -917,8 +917,37 @@
              document.getElementById('ratingsSection').classList.add('hidden');
         }
 
+        function bindProfileActions() {
+            const bindings = [
+                { id: 'profile-back-btn', handler: () => history.back() },
+                { id: 'editBtnCard', handler: editProfile },
+                { id: 'saveBtnCard', handler: saveProfileEdits },
+                { id: 'cancelBtnCard', handler: cancelProfileEdits },
+                { id: 'ratingsBtnCard', handler: viewRatings },
+                { id: 'menuBtnCard', handler: goToMenu },
+                { id: 'logoutBtnCard', handler: logout },
+                { id: 'ratingsHideBtn', handler: hideRatings }
+            ];
+
+            bindings.forEach(({ id, handler }) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    handler();
+                });
+                el.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        handler();
+                    }
+                });
+            });
+        }
+
         // Load user data when page loads
         document.addEventListener('DOMContentLoaded', () => {
+            bindProfileActions();
             loadUserData();
         });
 
