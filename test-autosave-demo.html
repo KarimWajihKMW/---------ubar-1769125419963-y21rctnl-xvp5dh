@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار الحفظ التلقائي - Akwadra</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 10px;
+        }
+
+        .test-title {
+            font-weight: bold;
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+
+        .test-status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+
+        .status-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-running {
+            background: #dbeafe;
+            color: #1e3a8a;
+        }
+
+        .status-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+        }
+
+        .log {
+            background: #1a202c;
+            color: #48bb78;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 اختبار الحفظ التلقائي للملف الشخصي</h1>
+        
+        <div class="test-section">
+            <div class="test-title">1️⃣ جلب راكب للاختبار</div>
+            <div id="status1" class="test-status status-pending">⏳ في الانتظار</div>
+            <div id="data1" style="margin-top: 10px; font-size: 14px;"></div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">2️⃣ تحديث بيانات الملف الشخصي</div>
+            <div id="status2" class="test-status status-pending">⏳ في الانتظار</div>
+            <div id="data2" style="margin-top: 10px; font-size: 14px;"></div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">3️⃣ التحقق من الحفظ في قاعدة البيانات</div>
+            <div id="status3" class="test-status status-pending">⏳ في الانتظار</div>
+            <div id="data3" style="margin-top: 10px; font-size: 14px;"></div>
+        </div>
+
+        <button onclick="runTest()" id="runBtn">
+            🚀 تشغيل الاختبار
+        </button>
+
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const timestamp = new Date().toLocaleTimeString('ar-EG');
+            const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+            entry.textContent = `[${timestamp}] ${icon} ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        async function runTest() {
+            const btn = document.getElementById('runBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ جاري التشغيل...';
+
+            // Clear previous logs
+            document.getElementById('log').innerHTML = '';
+            
+            log('بدء اختبار الحفظ التلقائي...');
+
+            try {
+                // Test 1: Fetch passenger
+                log('الخطوة 1: جلب راكب للاختبار...');
+                document.getElementById('status1').className = 'test-status status-running';
+                document.getElementById('status1').textContent = '⏳ جاري التنفيذ...';
+                
+                const response1 = await fetch('/api/passengers');
+                const data1 = await response1.json();
+                
+                if (!data1.success || data1.data.length === 0) {
+                    throw new Error('لا يوجد ركاب في قاعدة البيانات');
+                }
+                
+                const testPassenger = data1.data[0];
+                log(`تم العثور على راكب: ${testPassenger.name} (ID: ${testPassenger.id})`);
+                
+                document.getElementById('status1').className = 'test-status status-success';
+                document.getElementById('status1').textContent = '✅ نجح';
+                document.getElementById('data1').innerHTML = `
+                    <strong>الاسم:</strong> ${testPassenger.name}<br>
+                    <strong>الهاتف:</strong> ${testPassenger.phone}<br>
+                    <strong>البريد:</strong> ${testPassenger.email || 'غير محدد'}
+                `;
+
+                // Test 2: Update profile
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                log('الخطوة 2: تحديث بيانات الملف الشخصي...');
+                document.getElementById('status2').className = 'test-status status-running';
+                document.getElementById('status2').textContent = '⏳ جاري التنفيذ...';
+                
+                const timestamp = Date.now();
+                const newName = `تم التحديث تلقائياً ${timestamp}`;
+                const newEmail = `autosaved_${timestamp}@test.sa`;
+                
+                log(`الاسم الجديد: ${newName}`);
+                log(`البريد الجديد: ${newEmail}`);
+                
+                const updateData = {
+                    name: newName,
+                    phone: testPassenger.phone,
+                    email: newEmail
+                };
+                
+                const response2 = await fetch(`/api/passengers/${testPassenger.id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
+                const data2 = await response2.json();
+                
+                if (!data2.success) {
+                    throw new Error(data2.error || 'فشل التحديث');
+                }
+                
+                log('تم تحديث البيانات بنجاح', 'success');
+                
+                document.getElementById('status2').className = 'test-status status-success';
+                document.getElementById('status2').textContent = '✅ نجح';
+                document.getElementById('data2').innerHTML = `
+                    <strong>الاسم المحدث:</strong> ${data2.data.name}<br>
+                    <strong>البريد المحدث:</strong> ${data2.data.email}
+                `;
+
+                // Test 3: Verify in database
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                log('الخطوة 3: التحقق من الحفظ في قاعدة البيانات...');
+                document.getElementById('status3').className = 'test-status status-running';
+                document.getElementById('status3').textContent = '⏳ جاري التنفيذ...';
+                
+                const response3 = await fetch(`/api/passengers/${testPassenger.id}`);
+                const data3 = await response3.json();
+                
+                if (!data3.success) {
+                    throw new Error('فشل جلب البيانات للتحقق');
+                }
+                
+                const savedPassenger = data3.data;
+                
+                if (savedPassenger.name !== newName) {
+                    throw new Error(`عدم تطابق الاسم! المتوقع: ${newName}, الموجود: ${savedPassenger.name}`);
+                }
+                
+                if (savedPassenger.email !== newEmail) {
+                    throw new Error(`عدم تطابق البريد! المتوقع: ${newEmail}, الموجود: ${savedPassenger.email}`);
+                }
+                
+                log('تم التحقق من حفظ البيانات بنجاح', 'success');
+                
+                document.getElementById('status3').className = 'test-status status-success';
+                document.getElementById('status3').textContent = '✅ نجح';
+                document.getElementById('data3').innerHTML = `
+                    <strong>✅ الاسم محفوظ:</strong> ${savedPassenger.name}<br>
+                    <strong>✅ البريد محفوظ:</strong> ${savedPassenger.email}<br>
+                    <strong>✅ وقت التحديث:</strong> ${new Date(savedPassenger.updated_at).toLocaleString('ar-EG')}
+                `;
+
+                log('====================================', 'success');
+                log('✅✅✅ نجحت جميع الاختبارات! ✅✅✅', 'success');
+                log('====================================', 'success');
+                log('الحفظ التلقائي يعمل بشكل صحيح!', 'success');
+
+                btn.textContent = '✅ نجح الاختبار - إعادة التشغيل';
+                btn.disabled = false;
+
+            } catch (error) {
+                log(`خطأ: ${error.message}`, 'error');
+                console.error(error);
+                
+                // Mark failed test
+                if (document.getElementById('status1').textContent.includes('⏳')) {
+                    document.getElementById('status1').className = 'test-status status-error';
+                    document.getElementById('status1').textContent = '❌ فشل';
+                } else if (document.getElementById('status2').textContent.includes('⏳')) {
+                    document.getElementById('status2').className = 'test-status status-error';
+                    document.getElementById('status2').textContent = '❌ فشل';
+                } else if (document.getElementById('status3').textContent.includes('⏳')) {
+                    document.getElementById('status3').className = 'test-status status-error';
+                    document.getElementById('status3').textContent = '❌ فشل';
+                }
+
+                btn.textContent = '❌ فشل الاختبار - إعادة المحاولة';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
