@@ -257,22 +257,34 @@
             }
         }
 
-        function getProfileOverrides(userId) {
-            if (!userId) return {};
+        function getProfileOverridesByKey(key) {
+            if (!key) return {};
             const map = getProfileOverridesMap();
-            return map[String(userId)] || {};
+            return map[String(key)] || {};
         }
 
-        function setProfileOverrides(userId, overrides) {
-            if (!userId) return;
+        function getProfileOverrides(userId, phone) {
+            return {
+                ...getProfileOverridesByKey(userId),
+                ...getProfileOverridesByKey(phone)
+            };
+        }
+
+        function setProfileOverrides(userId, phone, overrides) {
             const map = getProfileOverridesMap();
-            const key = String(userId);
-            map[key] = { ...(map[key] || {}), ...(overrides || {}) };
+            if (userId) {
+                const key = String(userId);
+                map[key] = { ...(map[key] || {}), ...(overrides || {}) };
+            }
+            if (phone) {
+                const key = String(phone);
+                map[key] = { ...(map[key] || {}), ...(overrides || {}) };
+            }
             SafeStorage.setItem(PROFILE_OVERRIDES_KEY, JSON.stringify(map));
         }
 
-        function applyProfileOverrides(userId) {
-            const overrides = getProfileOverrides(userId);
+        function applyProfileOverrides(userId, phone) {
+            const overrides = getProfileOverrides(userId, phone);
             if (overrides.name) {
                 const nameEl = document.querySelector('h1');
                 if (nameEl) nameEl.textContent = overrides.name;
@@ -346,7 +358,7 @@
                 }
 
                 // Apply local overrides (fields not stored in users table)
-                applyProfileOverrides(userId);
+                applyProfileOverrides(userId, currentUser.phone || userData.phone);
 
                 // Store original values
                 storeOriginalValues();
@@ -494,7 +506,7 @@
                     console.log('✅ تم تحديث localStorage');
 
                     // Persist all fields locally as last-known edits
-                    setProfileOverrides(currentUser.id, overridesToSave);
+                    setProfileOverrides(currentUser.id, currentUser.phone, overridesToSave);
 
                     // Update UI
                     nameElement.contentEditable = "false";
@@ -529,7 +541,7 @@
                         updated_at: new Date().toISOString()
                     };
                     SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
-                    setProfileOverrides(currentUser.id, overridesToSave);
+                    setProfileOverrides(currentUser.id, updateData.phone, overridesToSave);
                     alert('✅ تم حفظ التغييرات محلياً، وسيتم مزامنتها عند توفر الخادم');
                 }
 
