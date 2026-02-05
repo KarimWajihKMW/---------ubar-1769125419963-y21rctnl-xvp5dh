@@ -3047,15 +3047,21 @@ function updateUIWithUserData() {
     const pp = document.getElementById('profile-points');
     if(pp) pp.innerText = user.points;
 
+    const emailLabel = document.getElementById('profile-email');
+    if (emailLabel) emailLabel.innerText = user.email || 'غير محدد';
+
     if (!passengerProfileEdit.editing) {
         const nameInput = document.getElementById('profile-name-input');
         if (nameInput) nameInput.value = user.name || '';
+        const emailInput = document.getElementById('profile-email-input');
+        if (emailInput) emailInput.value = user.email || '';
     }
 }
 
 const passengerProfileEdit = {
     editing: false,
     originalName: '',
+    originalEmail: '',
     originalAvatar: '',
     pendingAvatar: null
 };
@@ -3064,12 +3070,20 @@ function setPassengerProfileEditMode(enabled) {
     passengerProfileEdit.editing = enabled;
     const nameLabel = document.getElementById('profile-name');
     const nameInput = document.getElementById('profile-name-input');
+    const emailLabel = document.getElementById('profile-email');
+    const emailInput = document.getElementById('profile-email-input');
+    const passwordMask = document.getElementById('profile-password-mask');
+    const passwordWrap = document.getElementById('profile-password-wrap');
     const editBtn = document.getElementById('profile-edit-btn');
     const saveBtn = document.getElementById('profile-save-btn');
     const cancelBtn = document.getElementById('profile-cancel-btn');
 
     if (nameLabel) nameLabel.classList.toggle('hidden', enabled);
     if (nameInput) nameInput.classList.toggle('hidden', !enabled);
+    if (emailLabel) emailLabel.classList.toggle('hidden', enabled);
+    if (emailInput) emailInput.classList.toggle('hidden', !enabled);
+    if (passwordMask) passwordMask.classList.toggle('hidden', enabled);
+    if (passwordWrap) passwordWrap.classList.toggle('hidden', !enabled);
     if (editBtn) editBtn.classList.toggle('hidden', enabled);
     if (saveBtn) saveBtn.classList.toggle('hidden', !enabled);
     if (cancelBtn) cancelBtn.classList.toggle('hidden', !enabled);
@@ -3079,11 +3093,16 @@ function loadPassengerProfileEditDefaults() {
     const user = DB.getUser();
     if (!user) return;
     passengerProfileEdit.originalName = user.name || '';
+    passengerProfileEdit.originalEmail = user.email || '';
     passengerProfileEdit.originalAvatar = user.avatar || '';
     passengerProfileEdit.pendingAvatar = null;
 
     const nameInput = document.getElementById('profile-name-input');
     if (nameInput) nameInput.value = passengerProfileEdit.originalName;
+    const emailInput = document.getElementById('profile-email-input');
+    if (emailInput) emailInput.value = passengerProfileEdit.originalEmail;
+    const passwordInput = document.getElementById('profile-password-input');
+    if (passwordInput) passwordInput.value = '';
 }
 
 window.editPassengerProfile = function() {
@@ -3096,7 +3115,7 @@ window.editPassengerProfile = function() {
     setPassengerProfileEditMode(true);
 };
 
-window.savePassengerProfile = function() {
+window.savePassengerProfile = async function() {
     const user = DB.getUser();
     if (!user) {
         showToast('⚠️ يرجى تسجيل الدخول أولاً');
@@ -3105,26 +3124,88 @@ window.savePassengerProfile = function() {
 
     const nameInput = document.getElementById('profile-name-input');
     const newName = nameInput ? nameInput.value.trim() : '';
+    const emailInput = document.getElementById('profile-email-input');
+    const newEmail = emailInput ? emailInput.value.trim() : '';
+    const passwordInput = document.getElementById('profile-password-input');
+    const newPassword = passwordInput ? passwordInput.value.trim() : '';
     if (!newName || newName.length < 2) {
         showToast('⚠️ أدخل اسم صحيح');
         if (nameInput) nameInput.focus();
         return;
     }
-
-    const updates = { name: newName };
-    if (passengerProfileEdit.pendingAvatar) {
-        updates.avatar = passengerProfileEdit.pendingAvatar;
+    if (!newEmail) {
+        showToast('⚠️ أدخل البريد الإلكتروني');
+        if (emailInput) emailInput.focus();
+        return;
+    }
+    if (!newEmail.includes('@')) {
+        showToast('⚠️ البريد الإلكتروني غير صحيح');
+        if (emailInput) emailInput.focus();
+        return;
+    }
+    if (newPassword && newPassword.length < 6) {
+        showToast('⚠️ كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+        if (passwordInput) passwordInput.focus();
+        return;
     }
 
-    DB.updateUser(updates);
-    setPassengerProfileEditMode(false);
-    passengerProfileEdit.pendingAvatar = null;
-    showToast('✅ تم حفظ البيانات');
+    const updates = {
+        name: newName,
+        email: newEmail
+    };
+    if (newPassword) {
+        updates.password = newPassword;
+    }
+
+    try {
+        showToast('⏳ جاري الحفظ...');
+        const response = await fetch(`/api/passengers/${user.id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updates)
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'فشل حفظ البيانات');
+        }
+
+        const mergedUser = { ...user, ...result.data };
+        if (passengerProfileEdit.pendingAvatar) {
+            mergedUser.avatar = passengerProfileEdit.pendingAvatar;
+        }
+
+        DB.setUser(mergedUser);
+        setPassengerProfileEditMode(false);
+        passengerProfileEdit.pendingAvatar = null;
+        if (passwordInput) passwordInput.value = '';
+        showToast('✅ تم حفظ البيانات');
+    } catch (error) {
+        console.error('Passenger profile save error:', error);
+        const fallbackUpdates = {
+            name: newName,
+            email: newEmail
+        };
+        if (passengerProfileEdit.pendingAvatar) {
+            fallbackUpdates.avatar = passengerProfileEdit.pendingAvatar;
+        }
+        DB.updateUser(fallbackUpdates);
+        setPassengerProfileEditMode(false);
+        passengerProfileEdit.pendingAvatar = null;
+        if (passwordInput) passwordInput.value = '';
+        showToast('⚠️ تم حفظ البيانات محلياً');
+    }
 };
 
 window.cancelPassengerProfile = function() {
     const nameInput = document.getElementById('profile-name-input');
     if (nameInput) nameInput.value = passengerProfileEdit.originalName || '';
+    const emailInput = document.getElementById('profile-email-input');
+    if (emailInput) emailInput.value = passengerProfileEdit.originalEmail || '';
+    const passwordInput = document.getElementById('profile-password-input');
+    if (passwordInput) passwordInput.value = '';
 
     const avatarEl = document.getElementById('profile-avatar');
     if (avatarEl && passengerProfileEdit.originalAvatar) {
