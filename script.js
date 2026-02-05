@@ -3423,7 +3423,6 @@ function ensurePassengerSession() {
 }
 
 function togglePassengerSettings() {
-    if (!ensurePassengerSession()) return;
     const panel = document.getElementById('passenger-settings-panel');
     const icon = document.getElementById('passenger-settings-icon');
     const button = document.getElementById('passenger-settings-btn');
