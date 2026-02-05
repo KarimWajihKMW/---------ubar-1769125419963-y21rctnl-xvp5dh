@@ -134,6 +134,49 @@ const ApiService = {
         }
     },
     
+    // Passengers endpoints
+    passengers: {
+        // Get all passengers with optional search
+        async getAll(params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/passengers?${queryString}`);
+        },
+        
+        // Get single passenger by ID
+        async getById(id) {
+            return ApiService.request(`/passengers/${id}`);
+        },
+        
+        // Create new passenger
+        async create(passengerData) {
+            return ApiService.request('/passengers', {
+                method: 'POST',
+                body: JSON.stringify(passengerData)
+            });
+        },
+        
+        // Update passenger
+        async update(id, passengerData) {
+            return ApiService.request(`/passengers/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(passengerData)
+            });
+        },
+        
+        // Delete passenger
+        async delete(id) {
+            return ApiService.request(`/passengers/${id}`, {
+                method: 'DELETE'
+            });
+        },
+        
+        // Get passenger trips
+        async getTrips(id, params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/passengers/${id}/trips?${queryString}`);
+        }
+    },
+    
     // Admin endpoints
     admin: {
         // Get dashboard statistics

@@ -1019,6 +1019,359 @@ app.get('/api/users', async (req, res) => {
     }
 });
 
+// ==================== PASSENGERS ENDPOINTS ====================
+
+// Get all passengers with filtering and search
+app.get('/api/passengers', async (req, res) => {
+    try {
+        const { search, limit = 50, offset = 0 } = req.query;
+
+        let query = 'SELECT id, phone, name, email, created_at, updated_at FROM users WHERE role = $1';
+        const params = ['passenger'];
+        let paramCount = 1;
+
+        if (search && search.trim()) {
+            paramCount++;
+            query += ` AND (name ILIKE $${paramCount} OR phone ILIKE $${paramCount} OR email ILIKE $${paramCount})`;
+            params.push(`%${search.trim()}%`);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        paramCount++;
+        query += ` LIMIT $${paramCount}`;
+        params.push(limit);
+
+        paramCount++;
+        query += ` OFFSET $${paramCount}`;
+        params.push(offset);
+
+        const result = await pool.query(query, params);
+
+        let countQuery = 'SELECT COUNT(*) FROM users WHERE role = $1';
+        const countParams = ['passenger'];
+        let countParamIndex = 1;
+
+        if (search && search.trim()) {
+            countParamIndex++;
+            countQuery += ` AND (name ILIKE $${countParamIndex} OR phone ILIKE $${countParamIndex} OR email ILIKE $${countParamIndex})`;
+            countParams.push(`%${search.trim()}%`);
+        }
+
+        const countResult = await pool.query(countQuery, countParams);
+
+        res.json({
+            success: true,
+            data: result.rows,
+            total: parseInt(countResult.rows[0].count, 10),
+            limit: parseInt(limit, 10),
+            offset: parseInt(offset, 10)
+        });
+    } catch (err) {
+        console.error('Error fetching passengers:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get single passenger by ID
+app.get('/api/passengers/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query(
+            'SELECT id, phone, name, email, created_at, updated_at FROM users WHERE id = $1 AND role = $2',
+            [id, 'passenger']
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Passenger not found'
+            });
+        }
+
+        // Get passenger statistics
+        const tripsStats = await pool.query(
+            `SELECT 
+                COUNT(*) as total_trips,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_trips,
+                COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_trips,
+                COALESCE(SUM(CASE WHEN status = 'completed' THEN cost ELSE 0 END), 0) as total_spent
+             FROM trips 
+             WHERE user_id = $1`,
+            [id]
+        );
+
+        const passengerData = {
+            ...result.rows[0],
+            stats: tripsStats.rows[0]
+        };
+
+        res.json({
+            success: true,
+            data: passengerData
+        });
+    } catch (err) {
+        console.error('Error fetching passenger:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Create new passenger
+app.post('/api/passengers', async (req, res) => {
+    try {
+        const { phone, name, email, password } = req.body;
+
+        if (!phone || !name) {
+            return res.status(400).json({
+                success: false,
+                error: 'Phone and name are required'
+            });
+        }
+
+        const normalizedPhone = String(phone).trim();
+        const normalizedName = String(name).trim();
+        const normalizedEmail = email && String(email).trim() 
+            ? String(email).trim().toLowerCase() 
+            : `passenger_${normalizedPhone.replace(/\D/g, '') || Date.now()}@ubar.sa`;
+        const normalizedPassword = password && String(password).trim() 
+            ? String(password).trim() 
+            : '12345678';
+
+        // Check if phone already exists
+        const existingPhone = await pool.query(
+            'SELECT id FROM users WHERE phone = $1',
+            [normalizedPhone]
+        );
+
+        if (existingPhone.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Phone number already registered'
+            });
+        }
+
+        // Check if email already exists
+        const existingEmail = await pool.query(
+            'SELECT id FROM users WHERE email = $1',
+            [normalizedEmail]
+        );
+
+        if (existingEmail.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Email already registered'
+            });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO users (phone, name, email, password, role, updated_at)
+             VALUES ($1, $2, $3, $4, 'passenger', CURRENT_TIMESTAMP)
+             RETURNING id, phone, name, email, role, created_at, updated_at`,
+            [normalizedPhone, normalizedName, normalizedEmail, normalizedPassword]
+        );
+
+        res.status(201).json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error creating passenger:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Update passenger
+app.put('/api/passengers/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { phone, name, email, password } = req.body;
+
+        // Check if passenger exists
+        const existing = await pool.query(
+            'SELECT id FROM users WHERE id = $1 AND role = $2',
+            [id, 'passenger']
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Passenger not found'
+            });
+        }
+
+        const updates = [];
+        const params = [];
+        let paramCount = 0;
+
+        if (phone !== undefined && String(phone).trim()) {
+            paramCount++;
+            updates.push(`phone = $${paramCount}`);
+            params.push(String(phone).trim());
+        }
+
+        if (name !== undefined && String(name).trim()) {
+            paramCount++;
+            updates.push(`name = $${paramCount}`);
+            params.push(String(name).trim());
+        }
+
+        if (email !== undefined && String(email).trim()) {
+            paramCount++;
+            updates.push(`email = $${paramCount}`);
+            params.push(String(email).trim().toLowerCase());
+        }
+
+        if (password !== undefined && String(password).trim()) {
+            paramCount++;
+            updates.push(`password = $${paramCount}`);
+            params.push(String(password).trim());
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No valid fields to update'
+            });
+        }
+
+        paramCount++;
+        updates.push(`updated_at = CURRENT_TIMESTAMP`);
+        params.push(id);
+
+        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} AND role = 'passenger' RETURNING id, phone, name, email, role, created_at, updated_at`;
+
+        const result = await pool.query(query, params);
+
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error updating passenger:', err);
+        if (err.code === '23505') {
+            return res.status(400).json({
+                success: false,
+                error: 'Phone or email already in use'
+            });
+        }
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Delete passenger
+app.delete('/api/passengers/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Check if passenger exists
+        const existing = await pool.query(
+            'SELECT id FROM users WHERE id = $1 AND role = $2',
+            [id, 'passenger']
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Passenger not found'
+            });
+        }
+
+        // Check if passenger has active trips
+        const activeTrips = await pool.query(
+            `SELECT COUNT(*) as count FROM trips 
+             WHERE user_id = $1 AND status NOT IN ('completed', 'cancelled')`,
+            [id]
+        );
+
+        if (parseInt(activeTrips.rows[0].count) > 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Cannot delete passenger with active trips'
+            });
+        }
+
+        await pool.query(
+            'DELETE FROM users WHERE id = $1 AND role = $2',
+            [id, 'passenger']
+        );
+
+        res.json({
+            success: true,
+            message: 'Passenger deleted successfully'
+        });
+    } catch (err) {
+        console.error('Error deleting passenger:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get passenger trips
+app.get('/api/passengers/:id/trips', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, limit = 50, offset = 0 } = req.query;
+
+        // Check if passenger exists
+        const passengerCheck = await pool.query(
+            'SELECT id FROM users WHERE id = $1 AND role = $2',
+            [id, 'passenger']
+        );
+
+        if (passengerCheck.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Passenger not found'
+            });
+        }
+
+        let query = 'SELECT * FROM trips WHERE user_id = $1';
+        const params = [id];
+        let paramCount = 1;
+
+        if (status && status !== 'all') {
+            paramCount++;
+            query += ` AND status = $${paramCount}`;
+            params.push(status);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        paramCount++;
+        query += ` LIMIT $${paramCount}`;
+        params.push(limit);
+
+        paramCount++;
+        query += ` OFFSET $${paramCount}`;
+        params.push(offset);
+
+        const result = await pool.query(query, params);
+
+        let countQuery = 'SELECT COUNT(*) FROM trips WHERE user_id = $1';
+        const countParams = [id];
+        let countParamIndex = 1;
+
+        if (status && status !== 'all') {
+            countParamIndex++;
+            countQuery += ` AND status = $${countParamIndex}`;
+            countParams.push(status);
+        }
+
+        const countResult = await pool.query(countQuery, countParams);
+
+        res.json({
+            success: true,
+            data: result.rows,
+            total: parseInt(countResult.rows[0].count, 10),
+            limit: parseInt(limit, 10),
+            offset: parseInt(offset, 10)
+        });
+    } catch (err) {
+        console.error('Error fetching passenger trips:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // Login with email and password
 app.post('/api/auth/login', async (req, res) => {
     try {

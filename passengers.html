@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة الركاب - Akwadra</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 28px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #38a169;
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e53e3e;
+        }
+
+        .btn-warning {
+            background: #ed8936;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #dd6b20;
+        }
+
+        .search-box {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .stat-card h3 {
+            color: #718096;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            color: #667eea;
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        .passengers-table {
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #667eea;
+            color: white;
+        }
+
+        th {
+            padding: 15px;
+            text-align: right;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        tbody tr:hover {
+            background: #f7fafc;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            color: #667eea;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 30px;
+            cursor: pointer;
+            color: #718096;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+            font-size: 18px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #718096;
+        }
+
+        .empty-state i {
+            font-size: 60px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .badge-success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .badge-info {
+            background: #bee3f8;
+            color: #2c5282;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+            padding: 20px;
+        }
+
+        .pagination button {
+            padding: 10px 15px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #667eea;
+            color: white;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .detail-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 8px;
+        }
+
+        .detail-section h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .detail-value {
+            color: #2d3748;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧑‍🦱 إدارة الركاب</h1>
+            <button class="btn btn-primary" onclick="showAddModal()">
+                ➕ إضافة راكب جديد
+            </button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>إجمالي الركاب</h3>
+                <div class="value" id="totalPassengers">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>الركاب النشطون</h3>
+                <div class="value" id="activePassengers">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>إجمالي الرحلات</h3>
+                <div class="value" id="totalTrips">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>الإيرادات الكلية</h3>
+                <div class="value" id="totalRevenue">0 ر.س</div>
+            </div>
+        </div>
+
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="🔍 ابحث عن راكب بالاسم، رقم الهاتف أو البريد الإلكتروني..." oninput="searchPassengers()">
+        </div>
+
+        <div class="loading" id="loading">
+            ⌛ جاري تحميل البيانات...
+        </div>
+
+        <div class="passengers-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>الرقم</th>
+                        <th>الاسم</th>
+                        <th>رقم الهاتف</th>
+                        <th>البريد الإلكتروني</th>
+                        <th>تاريخ التسجيل</th>
+                        <th>الإجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="passengersBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pagination">
+            <button onclick="previousPage()" id="prevBtn">السابق</button>
+            <span id="pageInfo" style="padding: 10px; font-weight: bold;">صفحة 1</span>
+            <button onclick="nextPage()" id="nextBtn">التالي</button>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal" id="editModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">إضافة راكب جديد</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form id="passengerForm" onsubmit="savePassenger(event)">
+                <div class="form-group">
+                    <label>الاسم *</label>
+                    <input type="text" id="passengerName" required>
+                </div>
+                <div class="form-group">
+                    <label>رقم الهاتف *</label>
+                    <input type="tel" id="passengerPhone" required>
+                </div>
+                <div class="form-group">
+                    <label>البريد الإلكتروني</label>
+                    <input type="email" id="passengerEmail">
+                </div>
+                <div class="form-group">
+                    <label>كلمة المرور</label>
+                    <input type="password" id="passengerPassword" placeholder="اتركه فارغاً للاحتفاظ بالحالي (عند التحديث)">
+                </div>
+                <div class="actions">
+                    <button type="submit" class="btn btn-success">💾 حفظ</button>
+                    <button type="button" class="btn btn-danger" onclick="closeModal()">❌ إلغاء</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Details Modal -->
+    <div class="modal" id="detailsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>تفاصيل الراكب</h2>
+                <button class="close-btn" onclick="closeDetailsModal()">&times;</button>
+            </div>
+            <div id="passengerDetails">
+            </div>
+        </div>
+    </div>
+
+    <script src="api-service.js"></script>
+    <script>
+        let currentPassengers = [];
+        let currentPage = 1;
+        let totalPassengers = 0;
+        let editingPassengerId = null;
+        const pageSize = 20;
+
+        // Load passengers on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPassengers();
+        });
+
+        async function loadPassengers(search = '') {
+            const loading = document.getElementById('loading');
+            loading.classList.add('active');
+
+            try {
+                const params = {
+                    limit: pageSize,
+                    offset: (currentPage - 1) * pageSize
+                };
+
+                if (search) {
+                    params.search = search;
+                }
+
+                const response = await ApiService.passengers.getAll(params);
+                currentPassengers = response.data;
+                totalPassengers = response.total;
+
+                displayPassengers();
+                updatePagination();
+                await updateStats();
+            } catch (error) {
+                console.error('Error loading passengers:', error);
+                alert('خطأ في تحميل البيانات: ' + error.message);
+            } finally {
+                loading.classList.remove('active');
+            }
+        }
+
+        function displayPassengers() {
+            const tbody = document.getElementById('passengersBody');
+            
+            if (currentPassengers.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6">
+                            <div class="empty-state">
+                                <div style="font-size: 60px;">🧑‍🦱</div>
+                                <h3>لا يوجد ركاب حالياً</h3>
+                                <p>ابدأ بإضافة راكب جديد</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = currentPassengers.map(passenger => `
+                <tr>
+                    <td>${passenger.id}</td>
+                    <td>${passenger.name || 'غير محدد'}</td>
+                    <td>${passenger.phone}</td>
+                    <td>${passenger.email || 'غير محدد'}</td>
+                    <td>${new Date(passenger.created_at).toLocaleDateString('ar-EG')}</td>
+                    <td>
+                        <div class="actions">
+                            <button class="btn btn-primary" onclick="viewDetails(${passenger.id})">👁️ عرض</button>
+                            <button class="btn btn-warning" onclick="editPassenger(${passenger.id})">✏️ تعديل</button>
+                            <button class="btn btn-danger" onclick="deletePassenger(${passenger.id})">🗑️ حذف</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function updateStats() {
+            try {
+                const response = await ApiService.passengers.getAll({ limit: 1000 });
+                const passengers = response.data;
+                
+                document.getElementById('totalPassengers').textContent = response.total;
+                
+                // Calculate active passengers (those with trips in last 30 days)
+                let activeCount = 0;
+                let totalTripsCount = 0;
+                let totalRevenueAmount = 0;
+
+                for (const passenger of passengers) {
+                    try {
+                        const detailsResponse = await ApiService.passengers.getById(passenger.id);
+                        if (detailsResponse.data.stats) {
+                            const stats = detailsResponse.data.stats;
+                            totalTripsCount += parseInt(stats.total_trips) || 0;
+                            totalRevenueAmount += parseFloat(stats.total_spent) || 0;
+                            
+                            if (parseInt(stats.total_trips) > 0) {
+                                activeCount++;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error fetching passenger stats:', e);
+                    }
+                }
+
+                document.getElementById('activePassengers').textContent = activeCount;
+                document.getElementById('totalTrips').textContent = totalTripsCount;
+                document.getElementById('totalRevenue').textContent = totalRevenueAmount.toFixed(2) + ' ر.س';
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(totalPassengers / pageSize);
+            document.getElementById('pageInfo').textContent = `صفحة ${currentPage} من ${totalPages}`;
+            document.getElementById('prevBtn').disabled = currentPage === 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        }
+
+        function previousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                loadPassengers(document.getElementById('searchInput').value);
+            }
+        }
+
+        function nextPage() {
+            const totalPages = Math.ceil(totalPassengers / pageSize);
+            if (currentPage < totalPages) {
+                currentPage++;
+                loadPassengers(document.getElementById('searchInput').value);
+            }
+        }
+
+        function searchPassengers() {
+            currentPage = 1;
+            const searchValue = document.getElementById('searchInput').value;
+            loadPassengers(searchValue);
+        }
+
+        function showAddModal() {
+            editingPassengerId = null;
+            document.getElementById('modalTitle').textContent = 'إضافة راكب جديد';
+            document.getElementById('passengerForm').reset();
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        async function editPassenger(id) {
+            editingPassengerId = id;
+            document.getElementById('modalTitle').textContent = 'تعديل بيانات الراكب';
+            
+            try {
+                const response = await ApiService.passengers.getById(id);
+                const passenger = response.data;
+                
+                document.getElementById('passengerName').value = passenger.name || '';
+                document.getElementById('passengerPhone').value = passenger.phone || '';
+                document.getElementById('passengerEmail').value = passenger.email || '';
+                document.getElementById('passengerPassword').value = '';
+                document.getElementById('passengerPassword').placeholder = 'اتركه فارغاً للاحتفاظ بكلمة المرور الحالية';
+                
+                document.getElementById('editModal').classList.add('active');
+            } catch (error) {
+                alert('خطأ في تحميل بيانات الراكب: ' + error.message);
+            }
+        }
+
+        async function savePassenger(event) {
+            event.preventDefault();
+            
+            const data = {
+                name: document.getElementById('passengerName').value,
+                phone: document.getElementById('passengerPhone').value,
+                email: document.getElementById('passengerEmail').value,
+                password: document.getElementById('passengerPassword').value
+            };
+
+            try {
+                if (editingPassengerId) {
+                    // Update existing passenger
+                    if (!data.password) {
+                        delete data.password;
+                    }
+                    await ApiService.passengers.update(editingPassengerId, data);
+                    alert('✅ تم تحديث بيانات الراكب بنجاح');
+                } else {
+                    // Create new passenger
+                    if (!data.password) {
+                        data.password = '12345678';
+                    }
+                    await ApiService.passengers.create(data);
+                    alert('✅ تم إضافة الراكب بنجاح');
+                }
+                
+                closeModal();
+                loadPassengers(document.getElementById('searchInput').value);
+            } catch (error) {
+                alert('❌ خطأ: ' + error.message);
+            }
+        }
+
+        async function deletePassenger(id) {
+            if (!confirm('هل أنت متأكد من حذف هذا الراكب؟')) {
+                return;
+            }
+
+            try {
+                await ApiService.passengers.delete(id);
+                alert('✅ تم حذف الراكب بنجاح');
+                loadPassengers(document.getElementById('searchInput').value);
+            } catch (error) {
+                alert('❌ خطأ في الحذف: ' + error.message);
+            }
+        }
+
+        async function viewDetails(id) {
+            try {
+                const response = await ApiService.passengers.getById(id);
+                const passenger = response.data;
+                const stats = passenger.stats || {};
+
+                const detailsHtml = `
+                    <div class="detail-section">
+                        <h3>المعلومات الأساسية</h3>
+                        <div class="detail-row">
+                            <span class="detail-label">الرقم:</span>
+                            <span class="detail-value">${passenger.id}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">الاسم:</span>
+                            <span class="detail-value">${passenger.name || 'غير محدد'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">رقم الهاتف:</span>
+                            <span class="detail-value">${passenger.phone}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">البريد الإلكتروني:</span>
+                            <span class="detail-value">${passenger.email || 'غير محدد'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">تاريخ التسجيل:</span>
+                            <span class="detail-value">${new Date(passenger.created_at).toLocaleString('ar-EG')}</span>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h3>إحصائيات الرحلات</h3>
+                        <div class="detail-row">
+                            <span class="detail-label">إجمالي الرحلات:</span>
+                            <span class="detail-value">${stats.total_trips || 0}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">الرحلات المكتملة:</span>
+                            <span class="detail-value">${stats.completed_trips || 0}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">الرحلات الملغاة:</span>
+                            <span class="detail-value">${stats.cancelled_trips || 0}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">إجمالي المبلغ المدفوع:</span>
+                            <span class="detail-value">${parseFloat(stats.total_spent || 0).toFixed(2)} ر.س</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <button class="btn btn-primary" onclick="viewPassengerTrips(${id})">عرض رحلات الراكب</button>
+                    </div>
+                `;
+
+                document.getElementById('passengerDetails').innerHTML = detailsHtml;
+                document.getElementById('detailsModal').classList.add('active');
+            } catch (error) {
+                alert('خطأ في تحميل التفاصيل: ' + error.message);
+            }
+        }
+
+        async function viewPassengerTrips(id) {
+            try {
+                const response = await ApiService.passengers.getTrips(id);
+                const trips = response.data;
+
+                let tripsHtml = `
+                    <div class="detail-section">
+                        <h3>رحلات الراكب (${trips.length})</h3>
+                `;
+
+                if (trips.length === 0) {
+                    tripsHtml += `<p>لا توجد رحلات لهذا الراكب</p>`;
+                } else {
+                    trips.forEach(trip => {
+                        tripsHtml += `
+                            <div class="detail-row">
+                                <span class="detail-label">#${trip.id}</span>
+                                <span class="detail-value">
+                                    ${trip.pickup_location} → ${trip.dropoff_location}
+                                    <br>
+                                    <small>${trip.cost} ر.س - ${trip.status}</small>
+                                </span>
+                            </div>
+                        `;
+                    });
+                }
+
+                tripsHtml += `</div>`;
+                
+                document.getElementById('passengerDetails').innerHTML += tripsHtml;
+            } catch (error) {
+                alert('خطأ في تحميل الرحلات: ' + error.message);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('editModal').classList.remove('active');
+            editingPassengerId = null;
+        }
+
+        function closeDetailsModal() {
+            document.getElementById('detailsModal').classList.remove('active');
+        }
+    </script>
+</body>
+</html>
