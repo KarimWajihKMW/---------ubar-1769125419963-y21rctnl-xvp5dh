@@ -131,6 +131,19 @@ const ApiService = {
                 method: 'POST',
                 body: JSON.stringify({ phone, name, email })
             });
+        },
+        
+        // Get user by ID
+        async getById(id) {
+            return ApiService.request(`/users/${id}`);
+        },
+        
+        // Update user
+        async update(id, userData) {
+            return ApiService.request(`/users/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(userData)
+            });
         }
     },
     

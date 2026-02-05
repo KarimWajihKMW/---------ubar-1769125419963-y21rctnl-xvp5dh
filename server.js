@@ -1019,6 +1019,111 @@ app.get('/api/users', async (req, res) => {
     }
 });
 
+// Get single user by ID
+app.get('/api/users/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query(
+            'SELECT id, phone, name, email, role, created_at FROM users WHERE id = $1',
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'User not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error fetching user:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Update user by ID
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { phone, name, email, password } = req.body;
+
+        // Check if user exists
+        const existing = await pool.query(
+            'SELECT id FROM users WHERE id = $1',
+            [id]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'User not found'
+            });
+        }
+
+        const updates = [];
+        const params = [];
+        let paramCount = 0;
+
+        if (phone !== undefined && String(phone).trim()) {
+            paramCount++;
+            updates.push(`phone = $${paramCount}`);
+            params.push(String(phone).trim());
+        }
+
+        if (name !== undefined && String(name).trim()) {
+            paramCount++;
+            updates.push(`name = $${paramCount}`);
+            params.push(String(name).trim());
+        }
+
+        if (email !== undefined && String(email).trim()) {
+            paramCount++;
+            updates.push(`email = $${paramCount}`);
+            params.push(String(email).trim().toLowerCase());
+        }
+
+        if (password !== undefined && String(password).trim()) {
+            paramCount++;
+            updates.push(`password = $${paramCount}`);
+            params.push(String(password).trim());
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No valid fields to update'
+            });
+        }
+
+        paramCount++;
+        updates.push(`updated_at = CURRENT_TIMESTAMP`);
+        params.push(id);
+
+        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, phone, name, email, role, created_at, updated_at`;
+
+        const result = await pool.query(query, params);
+
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error updating user:', err);
+        if (err.code === '23505') {
+            return res.status(400).json({
+                success: false,
+                error: 'Phone or email already in use'
+            });
+        }
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ==================== PASSENGERS ENDPOINTS ====================
 
 // Get all passengers with filtering and search

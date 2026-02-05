@@ -202,18 +202,88 @@
 
     </div>
 
+    <script src="api-service.js"></script>
     <script>
+        let currentUser = null;
+        let originalValues = {};
+        const USER_KEY = 'akwadra_user';
+
+        // Load user data from database
+        async function loadUserData() {
+            try {
+                // Get user ID from localStorage
+                const userDataStr = localStorage.getItem(USER_KEY);
+                if (!userDataStr) {
+                    alert('لم يتم العثور على بيانات المستخدم. يرجى تسجيل الدخول مرة أخرى.');
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                const userData = JSON.parse(userDataStr);
+                const userId = userData.id;
+
+                if (!userId) {
+                    alert('معرف المستخدم غير صحيح');
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                // Fetch user data from database
+                const response = await ApiService.users.getById(userId);
+                currentUser = response.data;
+
+                // Update UI with user data
+                document.querySelector('h1').textContent = currentUser.name || 'مستخدم';
+                
+                // Update editable fields
+                const phoneField = document.querySelector('[data-field="phone"]');
+                const emailField = document.querySelector('[data-field="email"]');
+                
+                if (phoneField) phoneField.textContent = currentUser.phone || '';
+                if (emailField) emailField.textContent = currentUser.email || '';
+
+                // Store original values
+                storeOriginalValues();
+
+            } catch (error) {
+                console.error('Error loading user data:', error);
+                alert('خطأ في تحميل بيانات المستخدم: ' + error.message);
+            }
+        }
+
+        function storeOriginalValues() {
+            const values = document.querySelectorAll('.info-value');
+            values.forEach(val => {
+                const field = val.getAttribute('data-field');
+                if (field) {
+                    originalValues[field] = val.textContent;
+                }
+            });
+            // Store name separately
+            originalValues['name'] = document.querySelector('h1').textContent;
+        }
+
         function goToMenu() {
             window.location.href = 'menu.html';
         }
 
         function logout() {
             if(confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+                localStorage.removeItem(USER_KEY);
                 window.location.href = 'index.html';
             }
         }
 
         function editProfile() {
+            // Make name editable
+            const nameElement = document.querySelector('h1');
+            nameElement.contentEditable = "true";
+            nameElement.classList.add('editing');
+            nameElement.style.outline = 'none';
+            nameElement.style.borderBottom = '2px solid #4f46e5';
+            nameElement.style.padding = '5px';
+            nameElement.style.borderRadius = '4px';
+
             const values = document.querySelectorAll('.info-value');
             values.forEach(val => {
                 val.contentEditable = "true";
@@ -222,37 +292,104 @@
             
             document.getElementById('editBtnCard').classList.add('hidden');
             document.getElementById('saveBtnCard').classList.remove('hidden');
-            document.getElementById('saveBtnCard').classList.add('block'); // Ensure display
+            document.getElementById('saveBtnCard').classList.add('block');
             document.getElementById('cancelBtnCard').classList.remove('hidden');
             document.getElementById('cancelBtnCard').classList.add('block');
             
-            // Focus first field
-            if(values.length > 0) values[0].focus();
+            // Focus name field
+            nameElement.focus();
         }
 
-        function saveProfileEdits() {
-            const values = document.querySelectorAll('.info-value');
-            values.forEach(val => {
-                val.contentEditable = "false";
-                val.classList.remove('editing');
-            });
+        async function saveProfileEdits() {
+            try {
+                if (!currentUser || !currentUser.id) {
+                    alert('خطأ: لم يتم تحميل بيانات المستخدم');
+                    return;
+                }
 
-            document.getElementById('editBtnCard').classList.remove('hidden');
-            document.getElementById('saveBtnCard').classList.add('hidden');
-            document.getElementById('saveBtnCard').classList.remove('block');
-            document.getElementById('cancelBtnCard').classList.add('hidden');
-            document.getElementById('cancelBtnCard').classList.remove('block');
+                // Get updated values
+                const nameElement = document.querySelector('h1');
+                const phoneField = document.querySelector('[data-field="phone"]');
+                const emailField = document.querySelector('[data-field="email"]');
 
-            // Here you would typically send data to backend
-            alert('تم حفظ التغييرات بنجاح');
+                const updateData = {
+                    name: nameElement.textContent.trim(),
+                    phone: phoneField ? phoneField.textContent.trim() : currentUser.phone,
+                    email: emailField ? emailField.textContent.trim() : currentUser.email
+                };
+
+                // Validate
+                if (!updateData.name) {
+                    alert('الرجاء إدخال الاسم');
+                    return;
+                }
+
+                if (!updateData.phone) {
+                    alert('الرجاء إدخال رقم الهاتف');
+                    return;
+                }
+
+                // Save to database
+                const response = await ApiService.users.update(currentUser.id, updateData);
+                
+                if (response.success) {
+                    currentUser = response.data;
+                    
+                    // Update localStorage with new data
+                    const storedUser = JSON.parse(localStorage.getItem(USER_KEY) || '{}');
+                    const updatedStoredUser = {
+                        ...storedUser,
+                        ...currentUser
+                    };
+                    localStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
+
+                    // Update UI
+                    nameElement.contentEditable = "false";
+                    nameElement.classList.remove('editing');
+                    nameElement.style.borderBottom = 'none';
+
+                    const values = document.querySelectorAll('.info-value');
+                    values.forEach(val => {
+                        val.contentEditable = "false";
+                        val.classList.remove('editing');
+                    });
+
+                    document.getElementById('editBtnCard').classList.remove('hidden');
+                    document.getElementById('saveBtnCard').classList.add('hidden');
+                    document.getElementById('saveBtnCard').classList.remove('block');
+                    document.getElementById('cancelBtnCard').classList.add('hidden');
+                    document.getElementById('cancelBtnCard').classList.remove('block');
+
+                    // Store new original values
+                    storeOriginalValues();
+
+                    alert('✅ تم حفظ التغييرات بنجاح في قاعدة البيانات');
+                } else {
+                    alert('خطأ في الحفظ: ' + (response.error || 'خطأ غير معروف'));
+                }
+
+            } catch (error) {
+                console.error('Error saving profile:', error);
+                alert('❌ خطأ في حفظ التغييرات: ' + error.message);
+            }
         }
 
         function cancelProfileEdits() {
+            // Restore original values
+            const nameElement = document.querySelector('h1');
+            nameElement.textContent = originalValues['name'] || currentUser.name || 'مستخدم';
+            nameElement.contentEditable = "false";
+            nameElement.classList.remove('editing');
+            nameElement.style.borderBottom = 'none';
+
             const values = document.querySelectorAll('.info-value');
             values.forEach(val => {
+                const field = val.getAttribute('data-field');
+                if (field && originalValues[field]) {
+                    val.textContent = originalValues[field];
+                }
                 val.contentEditable = "false";
                 val.classList.remove('editing');
-                // Revert logic could be added here if we stored original values
             });
 
             document.getElementById('editBtnCard').classList.remove('hidden');
@@ -271,6 +408,11 @@
         function hideRatings() {
              document.getElementById('ratingsSection').classList.add('hidden');
         }
+
+        // Load user data when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            loadUserData();
+        });
 
     </script>
     <script>
