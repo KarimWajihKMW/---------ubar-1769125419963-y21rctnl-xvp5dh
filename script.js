@@ -3439,6 +3439,9 @@ function openPassengerSettingsLink(url) {
     return false;
 }
 
+window.togglePassengerSettings = togglePassengerSettings;
+window.openPassengerSettingsLink = openPassengerSettingsLink;
+
 function toggleDriverMenu() {
     const sideMenu = document.getElementById('driver-side-menu');
     const menuOverlay = document.getElementById('driver-menu-overlay');
