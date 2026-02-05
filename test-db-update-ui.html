@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار التحديث من قاعدة البيانات</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">🧪 اختبار التحديث المباشر من قاعدة البيانات</h1>
+        
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-bold text-gray-700 mb-4">خطوات الاختبار</h2>
+            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                <li>اختر راكب من القائمة</li>
+                <li>قم بتحديث بياناته مباشرة في قاعدة البيانات (عبر API)</li>
+                <li>حمّل البيانات من قاعدة البيانات</li>
+                <li>تحقق من ظهور البيانات المحدثة</li>
+            </ol>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-bold text-gray-700 mb-4">تحديث البيانات</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-gray-600 mb-2">معرف الراكب (ID)</label>
+                    <input id="passengerId" type="number" class="w-full px-4 py-2 border rounded-lg" value="25">
+                </div>
+                
+                <div>
+                    <label class="block text-gray-600 mb-2">التقييم (0-5)</label>
+                    <input id="newRating" type="number" step="0.1" min="0" max="5" class="w-full px-4 py-2 border rounded-lg" value="3.7">
+                </div>
+                
+                <div>
+                    <label class="block text-gray-600 mb-2">نقاط أكوادرا</label>
+                    <input id="newPoints" type="number" class="w-full px-4 py-2 border rounded-lg" value="999">
+                </div>
+                
+                <div>
+                    <label class="block text-gray-600 mb-2">رصيد المحفظة (ريال)</label>
+                    <input id="newBalance" type="number" step="0.01" class="w-full px-4 py-2 border rounded-lg" value="1500.25">
+                </div>
+                
+                <div class="md:col-span-2">
+                    <label class="block text-gray-600 mb-2">الحالة</label>
+                    <select id="newStatus" class="w-full px-4 py-2 border rounded-lg">
+                        <option value="عضو جديد">عضو جديد</option>
+                        <option value="👑 عضو ذهبي">👑 عضو ذهبي</option>
+                        <option value="💎 عضو بلاتيني" selected>💎 عضو بلاتيني</option>
+                        <option value="⭐ عضو VIP">⭐ عضو VIP</option>
+                    </select>
+                </div>
+            </div>
+            
+            <button onclick="updateInDatabase()" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition">
+                تحديث في قاعدة البيانات
+            </button>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-bold text-gray-700 mb-4">التحقق من البيانات</h2>
+            
+            <div class="flex gap-4 mb-6">
+                <button onclick="loadFromDatabase()" class="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700 transition">
+                    جلب من قاعدة البيانات
+                </button>
+                
+                <button onclick="simulateUILoad()" class="flex-1 bg-purple-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-purple-700 transition">
+                    محاكاة تحميل الواجهة
+                </button>
+            </div>
+
+            <div id="dataDisplay" class="space-y-3">
+                <div class="p-4 bg-gray-50 rounded">
+                    <div class="font-bold text-gray-700 mb-2">البيانات المحملة:</div>
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div>التقييم: <span id="displayRating" class="font-bold">-</span></div>
+                        <div>نقاط أكوادرا: <span id="displayPoints" class="font-bold">-</span></div>
+                        <div>رصيد المحفظة: <span id="displayBalance" class="font-bold">-</span></div>
+                        <div>الحالة: <span id="displayStatus" class="font-bold">-</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-bold text-gray-700 mb-4">سجل الاختبار</h2>
+            <div id="results" class="space-y-2 font-mono text-sm max-h-96 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <script src="api-service.js"></script>
+    <script>
+        let currentPassengerId = null;
+        
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `p-2 rounded ${
+                type === 'success' ? 'bg-green-100 text-green-800' :
+                type === 'error' ? 'bg-red-100 text-red-800' :
+                type === 'warning' ? 'bg-yellow-100 text-yellow-800' :
+                'bg-blue-100 text-blue-800'
+            }`;
+            div.textContent = `[${new Date().toLocaleTimeString('ar-EG')}] ${message}`;
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+        
+        async function updateInDatabase() {
+            try {
+                const passengerId = document.getElementById('passengerId').value;
+                const newRating = parseFloat(document.getElementById('newRating').value);
+                const newPoints = parseInt(document.getElementById('newPoints').value);
+                const newBalance = parseFloat(document.getElementById('newBalance').value);
+                const newStatus = document.getElementById('newStatus').value;
+                
+                log(`🔄 تحديث بيانات الراكب ${passengerId} في قاعدة البيانات...`, 'info');
+                
+                // First get current data
+                const currentResponse = await ApiService.passengers.getById(passengerId);
+                if (!currentResponse.success) {
+                    throw new Error('فشل جلب البيانات الحالية');
+                }
+                
+                const current = currentResponse.data;
+                
+                // Update with new values
+                const updateResponse = await ApiService.passengers.update(passengerId, {
+                    name: current.name,
+                    phone: current.phone,
+                    email: current.email,
+                    rating: newRating,
+                    points: newPoints,
+                    balance: newBalance,
+                    status: newStatus
+                });
+                
+                if (!updateResponse.success) {
+                    throw new Error('فشل التحديث');
+                }
+                
+                currentPassengerId = passengerId;
+                
+                log('✅ تم التحديث في قاعدة البيانات بنجاح', 'success');
+                log(`   التقييم: ${updateResponse.data.rating}`, 'info');
+                log(`   نقاط أكوادرا: ${updateResponse.data.points}`, 'info');
+                log(`   رصيد المحفظة: ${updateResponse.data.balance} ريال`, 'info');
+                log(`   الحالة: ${updateResponse.data.status}`, 'info');
+                
+                // Auto load to verify
+                await loadFromDatabase();
+                
+            } catch (error) {
+                log(`❌ خطأ: ${error.message}`, 'error');
+            }
+        }
+        
+        async function loadFromDatabase() {
+            try {
+                const passengerId = currentPassengerId || document.getElementById('passengerId').value;
+                
+                log(`📥 جلب البيانات من قاعدة البيانات للراكب ${passengerId}...`, 'info');
+                
+                const response = await ApiService.passengers.getById(passengerId);
+                
+                if (!response.success) {
+                    throw new Error('فشل جلب البيانات');
+                }
+                
+                const data = response.data;
+                
+                // Update display
+                document.getElementById('displayRating').textContent = data.rating || '5.0';
+                document.getElementById('displayPoints').textContent = data.points || '0';
+                document.getElementById('displayBalance').textContent = `${data.balance || '0.00'} ريال`;
+                document.getElementById('displayStatus').textContent = data.status || 'عضو جديد';
+                
+                log('✅ تم جلب البيانات بنجاح من قاعدة البيانات', 'success');
+                log(`   التقييم: ${data.rating}`, 'info');
+                log(`   نقاط أكوادرا: ${data.points}`, 'info');
+                log(`   رصيد المحفظة: ${data.balance} ريال`, 'info');
+                log(`   الحالة: ${data.status}`, 'info');
+                
+            } catch (error) {
+                log(`❌ خطأ: ${error.message}`, 'error');
+            }
+        }
+        
+        async function simulateUILoad() {
+            try {
+                const passengerId = currentPassengerId || document.getElementById('passengerId').value;
+                
+                log(`🖥️ محاكاة تحميل الواجهة للراكب ${passengerId}...`, 'info');
+                log('⚠️ في الواجهة الحقيقية، تأكد من:','warning');
+                log('   1. حذف localStorage أو فتح نافذة خفية', 'warning');
+                log('   2. تسجيل الدخول كراكب بنفس المعرف', 'warning');
+                log('   3. فتح صفحة الملف الشخصي', 'warning');
+                log('   4. التحقق من ظهور البيانات المحدثة', 'warning');
+                
+                // Simulate the same logic in profile.html
+                const response = await ApiService.passengers.getById(passengerId);
+                
+                if (!response.success) {
+                    throw new Error('فشل جلب البيانات');
+                }
+                
+                const data = response.data;
+                
+                // Simulate applying overrides (should NOT override database values now)
+                log('🔍 تطبيق منطق الواجهة...', 'info');
+                log('   ℹ️ التجاوزات (overrides) تم تعطيلها', 'info');
+                log('   ✅ قاعدة البيانات لها الأولوية', 'success');
+                
+                // Update display
+                document.getElementById('displayRating').textContent = data.rating || '5.0';
+                document.getElementById('displayPoints').textContent = data.points || '0';
+                document.getElementById('displayBalance').textContent = `${data.balance || '0.00'} ريال`;
+                document.getElementById('displayStatus').textContent = data.status || 'عضو جديد';
+                
+                log('✅ النتيجة النهائية (كما ستظهر في الواجهة):', 'success');
+                log(`   التقييم: ${data.rating}`, 'info');
+                log(`   نقاط أكوادرا: ${data.points}`, 'info');
+                log(`   رصيد المحفظة: ${data.balance} ريال`, 'info');
+                log(`   الحالة: ${data.status}`, 'info');
+                
+            } catch (error) {
+                log(`❌ خطأ: ${error.message}`, 'error');
+            }
+        }
+        
+        // Auto load on page load
+        window.addEventListener('load', () => {
+            log('🎬 جاهز للاختبار!', 'success');
+            log('اختر معرف راكب وقم بتحديث البيانات', 'info');
+        });
+    </script>
+</body>
+</html>

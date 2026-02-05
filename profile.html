@@ -339,18 +339,13 @@
         }
 
         function applyProfileOverrides(userId, phone) {
+            // Overrides are now only used for fields NOT stored in database
+            // Database fields (balance, points, rating, status, avatar) have priority
             const overrides = getProfileOverrides(userId, phone);
-            if (overrides.name) {
-                const nameEl = document.querySelector('h1');
-                if (nameEl) nameEl.textContent = overrides.name;
-            }
-            Object.keys(overrides).forEach((field) => {
-                if (['name', 'phone', 'email', 'carType', 'plate'].includes(field)) return;
-                const el = document.querySelector(`[data-field="${field}"]`);
-                if (el && overrides[field]) {
-                    el.textContent = overrides[field];
-                }
-            });
+            
+            // Skip applying overrides - database has priority for all fields
+            // This ensures changes made directly in the database are reflected
+            console.log('ℹ️ تم تعطيل التجاوزات - قاعدة البيانات لها الأولوية');
         }
 
         // Load user data from database
@@ -652,6 +647,9 @@
                     SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
                     console.log('✅ تم تحديث localStorage');
 
+                    // Clear any old overrides - database is now the source of truth
+                    SafeStorage.removeItem(PROFILE_OVERRIDES_KEY);
+
                     // Store new original values
                     storeOriginalValues();
 
@@ -741,13 +739,6 @@
                     updateData.password = allFields.password.trim();
                 }
 
-                const overridesToSave = {};
-                Object.keys(allFields).forEach((field) => {
-                    if (!['phone', 'email', 'carType', 'plate'].includes(field) && allFields[field]) {
-                        overridesToSave[field] = allFields[field];
-                    }
-                });
-
                 console.log('📝 البيانات الجديدة:', updateData);
                 console.log('📝 البيانات القديمة:', currentUser);
 
@@ -804,8 +795,8 @@
                     console.log('🗄️ localStorage بعد التحديث:', updatedStoredUser);
                     console.log('✅ تم تحديث localStorage');
 
-                    // Persist all fields locally as last-known edits
-                    setProfileOverrides(currentUser.id, normalizePhoneKey(currentUser.phone), overridesToSave);
+                    // Clear any old overrides - database is now the source of truth
+                    SafeStorage.removeItem(PROFILE_OVERRIDES_KEY);
 
                     // Update UI
                     nameElement.contentEditable = "false";
@@ -839,10 +830,13 @@
                         email: updateData.email,
                         car_type: updateData.car_type,
                         car_plate: updateData.car_plate,
+                        balance: updateData.balance,
+                        points: updateData.points,
+                        rating: updateData.rating,
+                        status: updateData.status,
                         updated_at: new Date().toISOString()
                     };
                     SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
-                    setProfileOverrides(currentUser.id, normalizePhoneKey(updateData.phone), overridesToSave);
                     alert('✅ تم حفظ التغييرات محلياً، وسيتم مزامنتها عند توفر الخادم');
                 }
 
