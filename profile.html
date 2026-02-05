@@ -273,7 +273,12 @@
 
         function applyProfileOverrides(userId) {
             const overrides = getProfileOverrides(userId);
+            if (overrides.name) {
+                const nameEl = document.querySelector('h1');
+                if (nameEl) nameEl.textContent = overrides.name;
+            }
             Object.keys(overrides).forEach((field) => {
+                if (field === 'name') return;
                 const el = document.querySelector(`[data-field="${field}"]`);
                 if (el && overrides[field]) {
                     el.textContent = overrides[field];
@@ -432,6 +437,13 @@
                     email: allFields.email || (currentUser ? currentUser.email : '')
                 };
 
+                const overridesToSave = {
+                    name: updateData.name,
+                    phone: updateData.phone,
+                    email: updateData.email,
+                    ...allFields
+                };
+
                 console.log('📝 البيانات الجديدة:', updateData);
                 console.log('📝 البيانات القديمة:', currentUser);
 
@@ -451,11 +463,16 @@
                 console.log('🌐 جاري إرسال التحديث إلى قاعدة البيانات...');
                 
                 // Save to database
-                const response = await ApiService.users.update(currentUser.id, updateData);
+                let response = null;
+                try {
+                    response = await ApiService.users.update(currentUser.id, updateData);
+                } catch (error) {
+                    console.warn('⚠️ فشل حفظ التحديث على الخادم، سيتم حفظه محلياً', error);
+                }
                 
                 console.log('📨 استجابة الخادم:', response);
                 
-                if (response.success) {
+                if (response && response.success) {
                     currentUser = response.data;
                     console.log('✅ تم التحديث في قاعدة البيانات');
                     console.log('📊 البيانات المحدثة:', currentUser);
@@ -476,14 +493,8 @@
                     console.log('🗄️ localStorage بعد التحديث:', updatedStoredUser);
                     console.log('✅ تم تحديث localStorage');
 
-                    // Persist extra fields locally (not stored in users table)
-                    const extraFields = {};
-                    Object.keys(allFields).forEach((field) => {
-                        if (!['phone', 'email'].includes(field) && allFields[field]) {
-                            extraFields[field] = allFields[field];
-                        }
-                    });
-                    setProfileOverrides(currentUser.id, extraFields);
+                    // Persist all fields locally as last-known edits
+                    setProfileOverrides(currentUser.id, overridesToSave);
 
                     // Update UI
                     nameElement.contentEditable = "false";
@@ -508,8 +519,18 @@
                     console.log('✅✅✅ تم حفظ التغييرات بنجاح!');
                     alert('✅ تم حفظ التغييرات بنجاح في قاعدة البيانات');
                 } else {
-                    console.error('❌ فشل التحديث:', response.error);
-                    alert('خطأ في الحفظ: ' + (response.error || 'خطأ غير معروف'));
+                    console.warn('⚠️ سيتم الاعتماد على الحفظ المحلي');
+                    const storedUser = JSON.parse(SafeStorage.getItem(USER_KEY) || '{}');
+                    const updatedStoredUser = {
+                        ...storedUser,
+                        name: updateData.name,
+                        phone: updateData.phone,
+                        email: updateData.email,
+                        updated_at: new Date().toISOString()
+                    };
+                    SafeStorage.setItem(USER_KEY, JSON.stringify(updatedStoredUser));
+                    setProfileOverrides(currentUser.id, overridesToSave);
+                    alert('✅ تم حفظ التغييرات محلياً، وسيتم مزامنتها عند توفر الخادم');
                 }
 
             } catch (error) {
