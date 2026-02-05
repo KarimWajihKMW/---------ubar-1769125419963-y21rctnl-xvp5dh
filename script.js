@@ -3047,12 +3047,17 @@ function updateUIWithUserData() {
     const pp = document.getElementById('profile-points');
     if(pp) pp.innerText = user.points;
 
+    const phoneLabel = document.getElementById('profile-phone');
+    if (phoneLabel) phoneLabel.innerText = user.phone || 'غير محدد';
+
     const emailLabel = document.getElementById('profile-email');
     if (emailLabel) emailLabel.innerText = user.email || 'غير محدد';
 
     if (!passengerProfileEdit.editing) {
         const nameInput = document.getElementById('profile-name-input');
         if (nameInput) nameInput.value = user.name || '';
+        const phoneInput = document.getElementById('profile-phone-input');
+        if (phoneInput) phoneInput.value = user.phone || '';
         const emailInput = document.getElementById('profile-email-input');
         if (emailInput) emailInput.value = user.email || '';
     }
@@ -3061,6 +3066,7 @@ function updateUIWithUserData() {
 const passengerProfileEdit = {
     editing: false,
     originalName: '',
+    originalPhone: '',
     originalEmail: '',
     originalAvatar: '',
     pendingAvatar: null
@@ -3070,6 +3076,8 @@ function setPassengerProfileEditMode(enabled) {
     passengerProfileEdit.editing = enabled;
     const nameLabel = document.getElementById('profile-name');
     const nameInput = document.getElementById('profile-name-input');
+    const phoneLabel = document.getElementById('profile-phone');
+    const phoneInput = document.getElementById('profile-phone-input');
     const emailLabel = document.getElementById('profile-email');
     const emailInput = document.getElementById('profile-email-input');
     const passwordMask = document.getElementById('profile-password-mask');
@@ -3080,6 +3088,8 @@ function setPassengerProfileEditMode(enabled) {
 
     if (nameLabel) nameLabel.classList.toggle('hidden', enabled);
     if (nameInput) nameInput.classList.toggle('hidden', !enabled);
+    if (phoneLabel) phoneLabel.classList.toggle('hidden', enabled);
+    if (phoneInput) phoneInput.classList.toggle('hidden', !enabled);
     if (emailLabel) emailLabel.classList.toggle('hidden', enabled);
     if (emailInput) emailInput.classList.toggle('hidden', !enabled);
     if (passwordMask) passwordMask.classList.toggle('hidden', enabled);
@@ -3093,12 +3103,15 @@ function loadPassengerProfileEditDefaults() {
     const user = DB.getUser();
     if (!user) return;
     passengerProfileEdit.originalName = user.name || '';
+    passengerProfileEdit.originalPhone = user.phone || '';
     passengerProfileEdit.originalEmail = user.email || '';
     passengerProfileEdit.originalAvatar = user.avatar || '';
     passengerProfileEdit.pendingAvatar = null;
 
     const nameInput = document.getElementById('profile-name-input');
     if (nameInput) nameInput.value = passengerProfileEdit.originalName;
+    const phoneInput = document.getElementById('profile-phone-input');
+    if (phoneInput) phoneInput.value = passengerProfileEdit.originalPhone;
     const emailInput = document.getElementById('profile-email-input');
     if (emailInput) emailInput.value = passengerProfileEdit.originalEmail;
     const passwordInput = document.getElementById('profile-password-input');
@@ -3124,6 +3137,8 @@ window.savePassengerProfile = async function() {
 
     const nameInput = document.getElementById('profile-name-input');
     const newName = nameInput ? nameInput.value.trim() : '';
+    const phoneInput = document.getElementById('profile-phone-input');
+    const newPhone = phoneInput ? phoneInput.value.trim() : '';
     const emailInput = document.getElementById('profile-email-input');
     const newEmail = emailInput ? emailInput.value.trim() : '';
     const passwordInput = document.getElementById('profile-password-input');
@@ -3131,6 +3146,11 @@ window.savePassengerProfile = async function() {
     if (!newName || newName.length < 2) {
         showToast('⚠️ أدخل اسم صحيح');
         if (nameInput) nameInput.focus();
+        return;
+    }
+    if (!newPhone) {
+        showToast('⚠️ أدخل رقم الهاتف');
+        if (phoneInput) phoneInput.focus();
         return;
     }
     if (!newEmail) {
@@ -3151,6 +3171,7 @@ window.savePassengerProfile = async function() {
 
     const updates = {
         name: newName,
+        phone: newPhone,
         email: newEmail
     };
     if (newPassword) {
@@ -3186,6 +3207,7 @@ window.savePassengerProfile = async function() {
         console.error('Passenger profile save error:', error);
         const fallbackUpdates = {
             name: newName,
+            phone: newPhone,
             email: newEmail
         };
         if (passengerProfileEdit.pendingAvatar) {
@@ -3202,6 +3224,8 @@ window.savePassengerProfile = async function() {
 window.cancelPassengerProfile = function() {
     const nameInput = document.getElementById('profile-name-input');
     if (nameInput) nameInput.value = passengerProfileEdit.originalName || '';
+    const phoneInput = document.getElementById('profile-phone-input');
+    if (phoneInput) phoneInput.value = passengerProfileEdit.originalPhone || '';
     const emailInput = document.getElementById('profile-email-input');
     if (emailInput) emailInput.value = passengerProfileEdit.originalEmail || '';
     const passwordInput = document.getElementById('profile-password-input');
