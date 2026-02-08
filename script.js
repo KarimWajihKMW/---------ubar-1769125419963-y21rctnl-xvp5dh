@@ -164,6 +164,7 @@ let driverDemoRequestAt = 0;
 let driverForceRequestAt = 0;
 let driverTripStarted = false;
 let driverStartReady = false;
+let driverAwaitingPayment = false;
 
 function isMapWorldActive() {
     const mapWorld = document.getElementById('map-world');
@@ -956,7 +957,8 @@ function animateDriverToDestination(start, target) {
             driverToDestinationAnim = requestAnimationFrame(moveStep);
         } else {
             driverToDestinationAnim = null;
-            showToast('✅ وصلت إلى الوجهة');
+            showToast('✅ وصلت إلى الوجهة - في انتظار الدفع');
+            setDriverAwaitingPayment(true);
         }
     }
 
@@ -1901,6 +1903,7 @@ window.driverRejectRequest = async function() {
     document.getElementById('driver-status-waiting').classList.remove('hidden');
     setDriverPanelVisible(true);
     clearDriverPassengerRoute();
+    setDriverAwaitingPayment(false);
     setDriverStartReady(false);
     setDriverTripStarted(false);
     showToast('تم رفض الطلب');
@@ -1975,6 +1978,7 @@ window.driverAcceptRequest = async function() {
         if (incoming) incoming.classList.add('hidden');
         document.getElementById('driver-active-trip').classList.remove('hidden');
         setDriverPanelVisible(true);
+        setDriverAwaitingPayment(false);
         setDriverStartReady(false);
         setDriverTripStarted(false);
 
@@ -2007,9 +2011,9 @@ function setDriverTripStarted(started) {
         startBtn.classList.toggle('hidden', !driverStartReady || started);
     }
     if (endBtn) {
-        endBtn.disabled = !started;
-        endBtn.classList.toggle('opacity-60', !started);
-        endBtn.classList.toggle('cursor-not-allowed', !started);
+        endBtn.disabled = !driverAwaitingPayment;
+        endBtn.classList.toggle('opacity-60', !driverAwaitingPayment);
+        endBtn.classList.toggle('cursor-not-allowed', !driverAwaitingPayment);
     }
 
     updateDriverActiveStatusBadge();
@@ -2020,9 +2024,24 @@ function setDriverStartReady(ready) {
     setDriverTripStarted(driverTripStarted);
 }
 
+function setDriverAwaitingPayment(ready) {
+    driverAwaitingPayment = ready;
+    const endBtn = document.getElementById('driver-end-btn');
+    if (endBtn) {
+        endBtn.textContent = ready ? 'تم الدفع وإنهاء الرحلة' : 'إنهاء الرحلة';
+    }
+    setDriverTripStarted(driverTripStarted);
+}
+
 function updateDriverActiveStatusBadge() {
     const statusEl = document.getElementById('driver-active-status');
     if (!statusEl) return;
+
+    if (driverAwaitingPayment) {
+        statusEl.textContent = 'في انتظار الدفع';
+        statusEl.className = 'text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full';
+        return;
+    }
 
     if (driverTripStarted) {
         statusEl.textContent = 'الرحلة جارية';
@@ -2060,6 +2079,7 @@ window.driverStartTrip = async function() {
     }
 
     setDriverStartReady(false);
+    setDriverAwaitingPayment(false);
     setDriverTripStarted(true);
     startDriverToDestinationRoute();
     showToast('🚗 تم بدء الرحلة');
@@ -2135,6 +2155,7 @@ window.driverEndTrip = function() {
     document.getElementById('driver-active-trip').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
     clearDriverPassengerRoute();
+    setDriverAwaitingPayment(false);
     setDriverStartReady(false);
     setDriverTripStarted(false);
     showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
@@ -2360,6 +2381,7 @@ function initDriverMode() {
     setDriverPanelVisible(true);
     currentIncomingTrip = null;
     activeDriverTripId = null;
+    setDriverAwaitingPayment(false);
     setDriverStartReady(false);
     setDriverTripStarted(false);
     const passengerUi = document.getElementById('passenger-ui-container');
@@ -2702,6 +2724,7 @@ function showDriverWaitingState() {
     if (incoming) incoming.classList.add('hidden');
     if (waiting) waiting.classList.remove('hidden');
     setDriverPanelVisible(true);
+    setDriverAwaitingPayment(false);
     setDriverStartReady(false);
     setDriverTripStarted(false);
 }
