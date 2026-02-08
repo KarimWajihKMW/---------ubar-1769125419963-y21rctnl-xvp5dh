@@ -160,6 +160,9 @@ let driverPollingInterval = null;
 let currentDriverProfile = null;
 let currentIncomingTrip = null;
 let activeDriverTripId = null;
+let activePassengerTripId = null;
+let lastTripEstimate = null;
+let lastCompletedTrip = null;
 let driverDemoRequestAt = 0;
 let driverForceRequestAt = 0;
 let driverTripStarted = false;
@@ -1200,6 +1203,8 @@ const DB = {
             pickup: apiTrip.pickup_location,
             dropoff: apiTrip.dropoff_location,
             cost: Number(apiTrip.cost || 0),
+            distance: Number(apiTrip.distance || 0),
+            duration: Number(apiTrip.duration || 0),
             status: apiTrip.status,
             car: apiTrip.car_type || 'economy',
             driver: apiTrip.driver_name || 'غير محدد',
@@ -2162,7 +2167,14 @@ window.driverEndTrip = function() {
     triggerConfetti();
 
     if (activeDriverTripId) {
-        ApiService.trips.updateStatus(activeDriverTripId, 'completed').catch(err => {
+        const driverSummary = currentIncomingTrip ? {
+            cost: currentIncomingTrip.cost,
+            distance: currentIncomingTrip.distance,
+            duration: currentIncomingTrip.duration,
+            payment_method: currentIncomingTrip.payment_method || 'cash'
+        } : null;
+
+        ApiService.trips.updateStatus(activeDriverTripId, 'completed', driverSummary || {}).catch(err => {
             console.error('Failed to update trip status:', err);
         });
     }
@@ -2238,6 +2250,7 @@ window.requestRide = async function() {
     }
     
     const est = computeTripEstimates();
+    lastTripEstimate = { distanceKm: est.distanceKm, etaMin: est.etaMin };
     currentTripPrice = computePrice(currentCarType, est.distanceKm);
     
     if (scheduledTime) {
@@ -2264,7 +2277,8 @@ window.requestRide = async function() {
             status: 'pending'
         };
 
-        await ApiService.trips.create(tripPayload);
+        const created = await ApiService.trips.create(tripPayload);
+        activePassengerTripId = created?.data?.id || null;
     } catch (error) {
         console.error('Failed to create trip:', error);
         showToast('❌ تعذر إرسال الطلب، حاول مرة أخرى');
@@ -3143,6 +3157,10 @@ window.showTripDetails = function(tripId) {
     document.getElementById('trip-detail-dropoff').innerText = trip.dropoff;
     document.getElementById('trip-detail-driver-name').innerText = trip.driver;
     document.getElementById('trip-detail-cost').innerText = `${trip.cost} ر.س`;
+    const distanceEl = document.getElementById('trip-detail-distance');
+    const durationEl = document.getElementById('trip-detail-duration');
+    if (distanceEl) distanceEl.innerText = `${Number(trip.distance || 0)} كم`;
+    if (durationEl) durationEl.innerText = `${Number(trip.duration || 0)} دقيقة`;
     
     const carTypes = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر', 'delivery': 'توصيل' };
     document.getElementById('trip-detail-car-info').innerText = `تويوتا كامري • ${carTypes[trip.car] || trip.car}`;
@@ -3918,12 +3936,15 @@ function startRide(startX, startY) {
 
 function finishTrip() {
     const rideDestText = document.getElementById('ride-dest-text');
+    const fallbackEstimate = computeTripEstimates();
     const newTrip = {
         id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
         date: new Date().toISOString(),
         pickup: "حدد موقعك",
         dropoff: rideDestText ? rideDestText.innerText : "وجهة محددة",
         cost: currentTripPrice || 25,
+        distance: Number(fallbackEstimate.distanceKm || 0),
+        duration: Number(fallbackEstimate.etaMin || 0),
         status: "completed",
         car: currentCarType || "economy",
         driver: "أحمد محمد",
@@ -4435,15 +4456,19 @@ window.goToPaymentPromo = function() {
 };
 
 window.updatePaymentSummary = function() {
-    const distance = Math.floor(Math.random() * 8) + 2; // 2-10 km for demo
-    const carType = currentCarType || 'economy';
+    const fallbackEstimate = computeTripEstimates();
+    const rawDistance = currentIncomingTrip?.distance ?? lastTripEstimate?.distanceKm ?? fallbackEstimate.distanceKm ?? 0;
+    const rawDuration = currentIncomingTrip?.duration ?? lastTripEstimate?.etaMin ?? fallbackEstimate.etaMin ?? 0;
+    const distance = Math.max(0, Math.round(Number(rawDistance) * 10) / 10);
+    const duration = Math.max(0, Math.round(Number(rawDuration)));
+    const carType = currentCarType || currentIncomingTrip?.car_type || 'economy';
     const carTypes = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
     
     tripDetails = {
         distance: distance,
         carType: carType,
-        duration: Math.ceil(distance / 0.5), // rough estimate
-        basePrice: currentTripPrice || 25
+        duration: duration,
+        basePrice: Number(currentTripPrice || currentIncomingTrip?.cost || 25)
     };
     
     const finalPrice = tripDetails.basePrice - promoDiscount;
@@ -4459,6 +4484,25 @@ window.updatePaymentSummary = function() {
     if (user) {
         document.getElementById('wallet-balance').innerText = user.balance;
     }
+};
+
+function updatePaymentSuccessTripSummary(trip) {
+    if (!trip) return;
+    const distanceEl = document.getElementById('payment-success-distance');
+    const durationEl = document.getElementById('payment-success-duration');
+    const tripIdEl = document.getElementById('payment-success-trip-id');
+
+    if (tripIdEl) tripIdEl.innerText = trip.id || '--';
+    if (distanceEl) distanceEl.innerText = `${Number(trip.distance || 0)} كم`;
+    if (durationEl) durationEl.innerText = `${Number(trip.duration || 0)} دقيقة`;
+}
+
+window.showLastTripDetails = function() {
+    if (!lastCompletedTrip?.id) {
+        showToast('لا توجد رحلة لعرضها');
+        return;
+    }
+    window.showTripDetails(lastCompletedTrip.id);
 };
 
 window.confirmPayment = function() {
@@ -4519,13 +4563,16 @@ window.proceedToPayment = function() {
         // Mark trip as paid
         const rideDestText = document.getElementById('ride-dest-text');
         const user = DB.getUser();
+        const tripId = activePassengerTripId || `TR-${Math.floor(Math.random() * 9000) + 1000}`;
         
         const newTrip = {
-            id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
+            id: tripId,
             date: new Date().toISOString(),
             pickup: document.getElementById('current-loc-input').value || 'حدد موقعك',
             dropoff: rideDestText ? rideDestText.innerText : 'وجهة محددة',
             cost: amount,
+            distance: Number(tripDetails.distance || 0),
+            duration: Number(tripDetails.duration || 0),
             status: 'completed',
             car: currentCarType || 'economy',
             driver: 'أحمد محمد',
@@ -4535,6 +4582,7 @@ window.proceedToPayment = function() {
         };
         
         DB.addTrip(newTrip);
+        lastCompletedTrip = newTrip;
         
         if (user) {
             const newBalance = paymentMethod === 'wallet' 
@@ -4547,6 +4595,24 @@ window.proceedToPayment = function() {
             DB.updateUser({
                 balance: newBalance,
                 points: user.points + pointsEarned
+            });
+        }
+
+        if (activePassengerTripId) {
+            ApiService.trips.updateStatus(activePassengerTripId, 'completed', {
+                cost: amount,
+                distance: tripDetails.distance,
+                duration: tripDetails.duration,
+                payment_method: paymentMethod
+            }).then((response) => {
+                if (response?.data) {
+                    lastCompletedTrip = DB.normalizeTrip(response.data, user?.name);
+                    updatePaymentSuccessTripSummary(lastCompletedTrip);
+                }
+            }).catch(err => {
+                console.error('Failed to finalize trip:', err);
+            }).finally(() => {
+                activePassengerTripId = null;
             });
         }
         
@@ -4566,6 +4632,7 @@ window.proceedToPayment = function() {
         if (amountEl) amountEl.innerText = `${amount} ر.س`;
         if (methodEl) methodEl.innerText = paymentLabels[paymentMethod] || 'دفع كاش';
         if (timeEl) timeEl.innerText = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+        updatePaymentSuccessTripSummary(newTrip);
 
         window.switchSection('payment-success');
         if (typeof window.driverEndTrip === 'function') {
@@ -4897,6 +4964,10 @@ window.showTripDetails = function(tripId) {
     document.getElementById('trip-detail-car-info').innerText = `تويوتا كامري • ${carTypeLabels[trip.car] || 'اقتصادي'}`;
     document.getElementById('trip-detail-payment-method').innerText = paymentLabels[trip.paymentMethod] || 'كاش';
     document.getElementById('trip-detail-cost').innerText = trip.cost + ' ر.س';
+    const distanceEl = document.getElementById('trip-detail-distance');
+    const durationEl = document.getElementById('trip-detail-duration');
+    if (distanceEl) distanceEl.innerText = `${Number(trip.distance || 0)} كم`;
+    if (durationEl) durationEl.innerText = `${Number(trip.duration || 0)} دقيقة`;
     
     // Show rating
     const rating = trip.rating || 5;

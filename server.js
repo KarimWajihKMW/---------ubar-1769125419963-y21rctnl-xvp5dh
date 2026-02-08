@@ -471,7 +471,7 @@ app.post('/api/trips', async (req, res) => {
 app.patch('/api/trips/:id/status', async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, rating, review } = req.body;
+        const { status, rating, review, cost, distance, duration, payment_method } = req.body;
         
         let query = 'UPDATE trips SET status = $1, updated_at = CURRENT_TIMESTAMP';
         const params = [status];
@@ -481,6 +481,30 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             query += ', completed_at = CURRENT_TIMESTAMP';
         } else if (status === 'cancelled') {
             query += ', cancelled_at = CURRENT_TIMESTAMP';
+        }
+
+        if (cost !== undefined) {
+            paramCount++;
+            query += `, cost = $${paramCount}`;
+            params.push(cost);
+        }
+
+        if (distance !== undefined) {
+            paramCount++;
+            query += `, distance = $${paramCount}`;
+            params.push(distance);
+        }
+
+        if (duration !== undefined) {
+            paramCount++;
+            query += `, duration = $${paramCount}`;
+            params.push(duration);
+        }
+
+        if (payment_method !== undefined) {
+            paramCount++;
+            query += `, payment_method = $${paramCount}`;
+            params.push(payment_method);
         }
         
         if (rating !== undefined) {

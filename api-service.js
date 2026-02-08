@@ -62,10 +62,22 @@ const ApiService = {
         },
         
         // Update trip status
-        async updateStatus(id, status, rating = null, review = null) {
+        async updateStatus(id, status, ratingOrDetails = null, review = null) {
+            const payload = { status };
+            if (ratingOrDetails && typeof ratingOrDetails === 'object') {
+                Object.assign(payload, ratingOrDetails);
+            } else {
+                if (ratingOrDetails !== null && ratingOrDetails !== undefined) {
+                    payload.rating = ratingOrDetails;
+                }
+                if (review !== null && review !== undefined) {
+                    payload.review = review;
+                }
+            }
+
             return ApiService.request(`/trips/${id}/status`, {
                 method: 'PATCH',
-                body: JSON.stringify({ status, rating, review })
+                body: JSON.stringify(payload)
             });
         },
         

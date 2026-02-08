@@ -284,6 +284,10 @@ const TripsManager = {
             document.getElementById('trip-detail-date').innerText = new Date(trip.created_at || trip.date).toLocaleDateString('ar-EG');
             document.getElementById('trip-detail-pickup').innerText = trip.pickup_location || trip.pickup;
             document.getElementById('trip-detail-dropoff').innerText = trip.dropoff_location || trip.dropoff;
+            const distanceEl = document.getElementById('trip-detail-distance');
+            const durationEl = document.getElementById('trip-detail-duration');
+            if (distanceEl) distanceEl.innerText = `${Number(trip.distance || 0)} كم`;
+            if (durationEl) durationEl.innerText = `${Number(trip.duration || 0)} دقيقة`;
             
             // Switch to trip details section
             if (typeof switchSection === 'function') {
