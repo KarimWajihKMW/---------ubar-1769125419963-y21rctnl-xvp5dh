@@ -577,6 +577,23 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Trip not found' });
         }
         
+        // Update driver earnings if trip completed
+        if (status === 'completed' && result.rows[0].driver_id && cost) {
+            try {
+                await pool.query(`
+                    UPDATE drivers 
+                    SET total_earnings = COALESCE(total_earnings, 0) + $1,
+                        balance = COALESCE(balance, 0) + $1,
+                        today_earnings = COALESCE(today_earnings, 0) + $1,
+                        today_trips_count = COALESCE(today_trips_count, 0) + 1,
+                        total_trips = COALESCE(total_trips, 0) + 1
+                    WHERE id = $2
+                `, [cost, result.rows[0].driver_id]);
+            } catch (driverErr) {
+                console.error('Error updating driver earnings:', driverErr);
+            }
+        }
+        
         res.json({
             success: true,
             data: result.rows[0]
@@ -1110,6 +1127,88 @@ app.patch('/api/drivers/:id/approval', async (req, res) => {
         });
     } catch (err) {
         console.error('Error updating driver approval:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get driver statistics (earnings, trips, etc.)
+app.get('/api/drivers/:id/stats', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Get driver info
+        const driverResult = await pool.query(`
+            SELECT 
+                id, name, phone, email, rating,
+                COALESCE(total_earnings, 0) as total_earnings,
+                COALESCE(balance, 0) as balance,
+                COALESCE(today_earnings, 0) as today_earnings,
+                COALESCE(today_trips_count, 0) as today_trips_count,
+                COALESCE(total_trips, 0) as total_trips
+            FROM drivers
+            WHERE id = $1
+        `, [id]);
+        
+        if (driverResult.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Driver not found' });
+        }
+        
+        const driver = driverResult.rows[0];
+        
+        // Get today's trips
+        const todayTripsResult = await pool.query(`
+            SELECT COUNT(*) as count, COALESCE(SUM(cost), 0) as total_cost
+            FROM trips
+            WHERE driver_id = $1 
+            AND status = 'completed'
+            AND DATE(completed_at) = CURRENT_DATE
+        `, [id]);
+        
+        // Get all completed trips count
+        const completedTripsResult = await pool.query(`
+            SELECT COUNT(*) as count, COALESCE(SUM(cost), 0) as total_cost
+            FROM trips
+            WHERE driver_id = $1 AND status = 'completed'
+        `, [id]);
+        
+        // Get recent trips (last 7 days)
+        const recentTripsResult = await pool.query(`
+            SELECT 
+                t.*,
+                u.name as passenger_name,
+                u.phone as passenger_phone
+            FROM trips t
+            LEFT JOIN users u ON t.user_id = u.id
+            WHERE t.driver_id = $1 AND t.status = 'completed'
+            ORDER BY t.completed_at DESC
+            LIMIT 10
+        `, [id]);
+        
+        res.json({
+            success: true,
+            data: {
+                driver: {
+                    id: driver.id,
+                    name: driver.name,
+                    phone: driver.phone,
+                    email: driver.email,
+                    rating: parseFloat(driver.rating || 0)
+                },
+                earnings: {
+                    total: parseFloat(driver.total_earnings),
+                    balance: parseFloat(driver.balance),
+                    today: parseFloat(driver.today_earnings)
+                },
+                trips: {
+                    total: parseInt(driver.total_trips),
+                    today: parseInt(todayTripsResult.rows[0].count),
+                    completed: parseInt(completedTripsResult.rows[0].count)
+                },
+                recent_trips: recentTripsResult.rows
+            }
+        });
+    } catch (err) {
+        console.error('Error fetching driver stats:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
