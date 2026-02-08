@@ -2156,7 +2156,85 @@ window.driverCallPassenger = function() {
     window.location.href = `tel:${phone}`;
 };
 
-window.driverEndTrip = function() {
+function formatTripDateTime(value) {
+    if (!value) return '--';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '--';
+    return date.toLocaleString('ar-EG', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function buildDriverSummaryTrip(rawTrip) {
+    if (!rawTrip) return null;
+
+    const isApiTrip = rawTrip.pickup_location !== undefined || rawTrip.dropoff_location !== undefined;
+    const normalized = isApiTrip
+        ? DB.normalizeTrip(rawTrip, rawTrip.passenger_name)
+        : { ...rawTrip };
+
+    return {
+        ...normalized,
+        pickup: normalized.pickup || rawTrip.pickup_location || rawTrip.pickup || '--',
+        dropoff: normalized.dropoff || rawTrip.dropoff_location || rawTrip.dropoff || '--',
+        paymentMethod: normalized.paymentMethod || rawTrip.payment_method || rawTrip.paymentMethod || 'cash',
+        cost: Number(normalized.cost ?? rawTrip.cost ?? 0),
+        distance: Number(normalized.distance ?? rawTrip.distance ?? 0),
+        duration: Number(normalized.duration ?? rawTrip.duration ?? 0),
+        createdAt: rawTrip.created_at || normalized.createdAt || rawTrip.date || null,
+        completedAt: rawTrip.completed_at || normalized.completedAt || null,
+        cancelledAt: rawTrip.cancelled_at || normalized.cancelledAt || null
+    };
+}
+
+function openDriverTripSummary(rawTrip) {
+    const trip = buildDriverSummaryTrip(rawTrip);
+    if (!trip) return;
+
+    const paymentLabels = {
+        cash: 'كاش',
+        card: 'بطاقة بنكية',
+        wallet: 'محفظة إلكترونية'
+    };
+
+    const modal = document.getElementById('driver-trip-summary-modal');
+    const tripIdEl = document.getElementById('driver-summary-trip-id');
+    const startEl = document.getElementById('driver-summary-start');
+    const endEl = document.getElementById('driver-summary-end');
+    const pickupEl = document.getElementById('driver-summary-pickup');
+    const dropoffEl = document.getElementById('driver-summary-dropoff');
+    const distanceEl = document.getElementById('driver-summary-distance');
+    const durationEl = document.getElementById('driver-summary-duration');
+    const paymentEl = document.getElementById('driver-summary-payment');
+    const amountEl = document.getElementById('driver-summary-amount');
+    const totalEl = document.getElementById('driver-summary-total');
+
+    if (tripIdEl) tripIdEl.textContent = trip.id || '--';
+    if (startEl) startEl.textContent = formatTripDateTime(trip.createdAt || trip.date);
+    if (endEl) endEl.textContent = formatTripDateTime(trip.completedAt || trip.cancelledAt);
+    if (pickupEl) pickupEl.textContent = trip.pickup || '--';
+    if (dropoffEl) dropoffEl.textContent = trip.dropoff || '--';
+    if (distanceEl) distanceEl.textContent = `${Number(trip.distance || 0)} كم`;
+    if (durationEl) durationEl.textContent = `${Number(trip.duration || 0)} دقيقة`;
+    if (paymentEl) paymentEl.textContent = paymentLabels[trip.paymentMethod] || trip.paymentMethod || '--';
+    if (amountEl) amountEl.textContent = `${Number(trip.cost || 0)} ر.س`;
+    if (totalEl) totalEl.textContent = `${Number(trip.cost || 0)} ر.س`;
+
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeDriverTripSummary() {
+    const modal = document.getElementById('driver-trip-summary-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+window.closeDriverTripSummary = closeDriverTripSummary;
+
+window.driverEndTrip = async function() {
     document.getElementById('driver-active-trip').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
     clearDriverPassengerRoute();
@@ -2166,18 +2244,55 @@ window.driverEndTrip = function() {
     showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
     triggerConfetti();
 
-    if (activeDriverTripId) {
-        const driverSummary = currentIncomingTrip ? {
-            cost: currentIncomingTrip.cost,
-            distance: currentIncomingTrip.distance,
-            duration: currentIncomingTrip.duration,
-            payment_method: currentIncomingTrip.payment_method || 'cash'
+    const tripId = activeDriverTripId;
+    const incomingSnapshot = currentIncomingTrip ? { ...currentIncomingTrip } : null;
+
+    if (tripId) {
+        const driverSummary = incomingSnapshot ? {
+            cost: incomingSnapshot.cost,
+            distance: incomingSnapshot.distance,
+            duration: incomingSnapshot.duration,
+            payment_method: incomingSnapshot.payment_method || 'cash'
         } : null;
 
-        ApiService.trips.updateStatus(activeDriverTripId, 'completed', driverSummary || {}).catch(err => {
+        let summaryTrip = null;
+
+        try {
+            const response = await ApiService.trips.updateStatus(tripId, 'completed', driverSummary || {});
+            if (response?.data) {
+                summaryTrip = buildDriverSummaryTrip(response.data);
+            }
+        } catch (err) {
             console.error('Failed to update trip status:', err);
-        });
+        }
+
+        if (!summaryTrip) {
+            try {
+                const response = await ApiService.trips.getById(tripId);
+                if (response?.data) {
+                    summaryTrip = buildDriverSummaryTrip(response.data);
+                }
+            } catch (err) {
+                console.error('Failed to fetch trip summary:', err);
+            }
+        }
+
+        if (!summaryTrip && incomingSnapshot) {
+            summaryTrip = buildDriverSummaryTrip({
+                ...incomingSnapshot,
+                id: tripId,
+                status: 'completed'
+            });
+        }
+
+        if (summaryTrip) {
+            lastCompletedTrip = summaryTrip;
+            if (currentUserRole === 'driver') {
+                openDriverTripSummary(summaryTrip);
+            }
+        }
     }
+
     activeDriverTripId = null;
     currentIncomingTrip = null;
     triggerDriverRequestPolling();

@@ -2002,6 +2002,72 @@
         <span>رفع اللوحة</span>
     </button>
 
+    <!-- Driver Trip Summary Modal -->
+    <div id="driver-trip-summary-modal" class="fixed inset-0 z-[120] hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeDriverTripSummary()"></div>
+        <div class="relative max-w-md w-[92%] mx-auto mt-20 bg-white rounded-3xl shadow-2xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-extrabold text-gray-800">ملخص الرحلة</h3>
+                <button type="button" onclick="closeDriverTripSummary()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-3">
+                <div class="flex items-center justify-between text-sm font-bold text-gray-700">
+                    <span>رقم الرحلة</span>
+                    <span id="driver-summary-trip-id">--</span>
+                </div>
+                <div class="flex items-center justify-between text-sm font-bold text-gray-700">
+                    <span>وقت البداية</span>
+                    <span id="driver-summary-start">--</span>
+                </div>
+                <div class="flex items-center justify-between text-sm font-bold text-gray-700">
+                    <span>وقت النهاية</span>
+                    <span id="driver-summary-end">--</span>
+                </div>
+                <div class="border-t border-dashed border-gray-200 pt-3 space-y-2 text-sm font-bold text-gray-700">
+                    <div class="flex items-start justify-between gap-3">
+                        <span>من</span>
+                        <span id="driver-summary-pickup" class="text-gray-800">--</span>
+                    </div>
+                    <div class="flex items-start justify-between gap-3">
+                        <span>إلى</span>
+                        <span id="driver-summary-dropoff" class="text-gray-800">--</span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3 pt-3">
+                    <div class="bg-white rounded-xl p-3 border border-gray-200 text-center">
+                        <p class="text-xs text-gray-500 font-bold mb-1">المسافة</p>
+                        <p class="text-lg font-extrabold text-gray-800" id="driver-summary-distance">-- كم</p>
+                    </div>
+                    <div class="bg-white rounded-xl p-3 border border-gray-200 text-center">
+                        <p class="text-xs text-gray-500 font-bold mb-1">المدة</p>
+                        <p class="text-lg font-extrabold text-gray-800" id="driver-summary-duration">-- دقيقة</p>
+                    </div>
+                </div>
+                <div class="border-t border-dashed border-gray-200 pt-3 space-y-2 text-sm font-bold text-gray-700">
+                    <div class="flex items-center justify-between">
+                        <span>طريقة الدفع</span>
+                        <span id="driver-summary-payment">--</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span>المبلغ المدفوع</span>
+                        <span id="driver-summary-amount" class="text-indigo-600 text-lg">-- ر.س</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span>إجمالي الرحلة</span>
+                        <span id="driver-summary-total" class="text-gray-800 text-lg">-- ر.س</span>
+                    </div>
+                </div>
+            </div>
+
+            <button type="button" onclick="closeDriverTripSummary()" class="mt-5 w-full py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700">
+                تم
+            </button>
+        </div>
+    </div>
+
     <!-- City Tour Offer Modal -->
     <div id="city-tour-modal" class="fixed inset-0 z-[120] hidden">
         <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeCityTourOffer()"></div>
