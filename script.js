@@ -238,6 +238,7 @@ let passengerPickup = null; // {lat, lng, label}
 let etaCountdown = null;
 let etaSeconds = 0;
 let driverToPassengerAnim = null;
+let driverToDestinationAnim = null;
 let mapSelectionMode = 'destination';
 let isDriverInfoCollapsed = false;
 let isDriverPanelCollapsed = false;
@@ -751,6 +752,10 @@ function clearDriverPassengerRoute() {
         cancelAnimationFrame(driverToPassengerAnim);
         driverToPassengerAnim = null;
     }
+    if (driverToDestinationAnim) {
+        cancelAnimationFrame(driverToDestinationAnim);
+        driverToDestinationAnim = null;
+    }
     if (passengerMarkerL) {
         passengerMarkerL.remove();
         passengerMarkerL = null;
@@ -896,16 +901,66 @@ function startDriverToDestinationRoute() {
     const start = driverLocation || getDriverBaseLocation();
     ensureDriverMarker(start);
 
+    const target = { lat: Number(dropoffLat), lng: Number(dropoffLng) };
     routePolyline = L.polyline([
         [start.lat, start.lng],
-        [Number(dropoffLat), Number(dropoffLng)]
+        [target.lat, target.lng]
     ], { color: '#2563eb', weight: 4, opacity: 0.8, dashArray: '8, 6' }).addTo(leafletMap);
 
     const bounds = L.latLngBounds([
         [start.lat, start.lng],
-        [Number(dropoffLat), Number(dropoffLng)]
+        [target.lat, target.lng]
     ]);
     leafletMap.fitBounds(bounds, { padding: [50, 50] });
+
+    animateDriverToDestination(start, target);
+}
+
+function animateDriverToDestination(start, target) {
+    if (!driverMarkerL) return;
+    if (driverToDestinationAnim) {
+        cancelAnimationFrame(driverToDestinationAnim);
+        driverToDestinationAnim = null;
+    }
+
+    const distanceMeters = calculateDistance(start.lat, start.lng, target.lat, target.lng);
+    const speedMps = 11; // ~40 km/h
+    const duration = Math.max(25000, Math.min(220000, Math.round(distanceMeters / speedMps) * 1000));
+    const startTime = Date.now();
+
+    function moveStep() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+
+        const currentLat = start.lat + (target.lat - start.lat) * eased;
+        const currentLng = start.lng + (target.lng - start.lng) * eased;
+        driverLocation = { lat: currentLat, lng: currentLng };
+
+        driverMarkerL.setLatLng([currentLat, currentLng]);
+        if (routePolyline) {
+            routePolyline.setLatLngs([
+                [currentLat, currentLng],
+                [target.lat, target.lng]
+            ]);
+        }
+
+        const bearing = calculateBearing(currentLat, currentLng, target.lat, target.lng);
+        const carEl = driverMarkerL.getElement();
+        if (carEl) {
+            const iconDiv = carEl.querySelector('div');
+            if (iconDiv) iconDiv.style.transform = `rotate(${bearing}deg)`;
+        }
+
+        if (progress < 1) {
+            driverToDestinationAnim = requestAnimationFrame(moveStep);
+        } else {
+            driverToDestinationAnim = null;
+            showToast('✅ وصلت إلى الوجهة');
+        }
+    }
+
+    driverToDestinationAnim = requestAnimationFrame(moveStep);
 }
 
 function animateDriverToPassenger(start, target) {
