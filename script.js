@@ -4568,6 +4568,9 @@ window.proceedToPayment = function() {
         if (timeEl) timeEl.innerText = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
 
         window.switchSection('payment-success');
+        if (typeof window.driverEndTrip === 'function') {
+            window.driverEndTrip();
+        }
         
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';
