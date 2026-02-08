@@ -1210,7 +1210,9 @@ const DB = {
             driver: apiTrip.driver_name || 'غير محدد',
             passenger: passengerName || 'غير محدد',
             paymentMethod: apiTrip.payment_method || 'cash',
-            rating: apiTrip.rating || 0
+            rating: apiTrip.passenger_rating || apiTrip.rating || 0,
+            passengerRating: apiTrip.passenger_rating || apiTrip.rating || 0,
+            driverRating: apiTrip.driver_rating || 0
         };
     },
 
@@ -2187,7 +2189,9 @@ function buildDriverSummaryTrip(rawTrip) {
         duration: Number(normalized.duration ?? rawTrip.duration ?? 0),
         createdAt: rawTrip.created_at || normalized.createdAt || rawTrip.date || null,
         completedAt: rawTrip.completed_at || normalized.completedAt || null,
-        cancelledAt: rawTrip.cancelled_at || normalized.cancelledAt || null
+        cancelledAt: rawTrip.cancelled_at || normalized.cancelledAt || null,
+        passengerRating: rawTrip.passenger_rating || normalized.passengerRating || normalized.rating || 0,
+        driverRating: rawTrip.driver_rating || normalized.driverRating || 0
     };
 }
 
@@ -2223,6 +2227,12 @@ function openDriverTripSummary(rawTrip) {
     if (paymentEl) paymentEl.textContent = paymentLabels[trip.paymentMethod] || trip.paymentMethod || '--';
     if (amountEl) amountEl.textContent = `${Number(trip.cost || 0)} ر.س`;
     if (totalEl) totalEl.textContent = `${Number(trip.cost || 0)} ر.س`;
+
+    driverRatingValue = 0;
+    document.querySelectorAll('.driver-star-btn').forEach(b => {
+        b.classList.remove('text-yellow-400');
+        b.classList.add('text-gray-300');
+    });
 
     if (modal) modal.classList.remove('hidden');
 }
@@ -4397,9 +4407,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.querySelectorAll('.star-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.addEventListener('click', () => {
             const rating = parseInt(btn.dataset.rating);
+            passengerRatingValue = rating;
             document.querySelectorAll('.star-btn').forEach(b => {
+                if (parseInt(b.dataset.rating) <= rating) {
+                    b.classList.add('text-yellow-400');
+                    b.classList.remove('text-gray-300');
+                } else {
+                    b.classList.remove('text-yellow-400');
+                    b.classList.add('text-gray-300');
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('.driver-star-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const rating = parseInt(btn.dataset.rating);
+            driverRatingValue = rating;
+            document.querySelectorAll('.driver-star-btn').forEach(b => {
                 if (parseInt(b.dataset.rating) <= rating) {
                     b.classList.add('text-yellow-400');
                     b.classList.remove('text-gray-300');
@@ -4412,6 +4439,67 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+window.submitPassengerRating = async function() {
+    if (!passengerRatingValue) {
+        showToast('يرجى اختيار تقييم أولاً');
+        return;
+    }
+
+    const tripId = lastCompletedTrip?.id || activePassengerTripId;
+    if (!tripId) {
+        showToast('تعذر تحديد الرحلة للتقييم');
+        resetApp();
+        return;
+    }
+
+    try {
+        await ApiService.trips.updateStatus(tripId, 'completed', {
+            passenger_rating: passengerRatingValue
+        });
+        if (lastCompletedTrip) {
+            lastCompletedTrip.rating = passengerRatingValue;
+            lastCompletedTrip.passengerRating = passengerRatingValue;
+        }
+        showToast('شكراً لتقييمك!');
+    } catch (error) {
+        console.error('Failed to submit passenger rating:', error);
+        showToast('تعذر إرسال التقييم حالياً');
+    } finally {
+        passengerRatingValue = 0;
+        resetApp();
+    }
+};
+
+window.submitDriverPassengerRating = async function() {
+    if (!driverRatingValue) {
+        showToast('يرجى اختيار تقييم أولاً');
+        return;
+    }
+
+    const tripId = lastCompletedTrip?.id || activeDriverTripId;
+    if (!tripId) {
+        showToast('تعذر تحديد الرحلة للتقييم');
+        closeDriverTripSummary();
+        return;
+    }
+
+    try {
+        await ApiService.trips.updateStatus(tripId, 'completed', {
+            driver_rating: driverRatingValue
+        });
+        if (lastCompletedTrip) {
+            lastCompletedTrip.driverRating = driverRatingValue;
+        }
+        showToast('تم إرسال تقييم الراكب');
+        closeDriverTripSummary();
+    } catch (error) {
+        console.error('Failed to submit driver rating:', error);
+        showToast('تعذر إرسال التقييم حالياً');
+    } finally {
+        driverRatingValue = 0;
+    }
+};
+
 // ========================================
 // PAYMENT SYSTEM
 // ========================================
@@ -4420,6 +4508,8 @@ let selectedPaymentMethod = null;
 let tripDetails = {};
 let appliedPromo = null;
 let promoDiscount = 0;
+let passengerRatingValue = 0;
+let driverRatingValue = 0;
 
 window.selectPaymentMethod = function(method) {
     selectedPaymentMethod = method;

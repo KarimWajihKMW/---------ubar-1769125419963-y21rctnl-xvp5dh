@@ -206,6 +206,19 @@ async function ensureUserProfileColumns() {
     }
 }
 
+async function ensureTripRatingColumns() {
+    try {
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS passenger_rating INTEGER;`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS driver_rating INTEGER;`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS passenger_review TEXT;`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS driver_review TEXT;`);
+
+        console.log('✅ Trip rating columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure trip rating columns:', err.message);
+    }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
@@ -471,16 +484,31 @@ app.post('/api/trips', async (req, res) => {
 app.patch('/api/trips/:id/status', async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, rating, review, cost, distance, duration, payment_method } = req.body;
+        const {
+            status,
+            rating,
+            review,
+            passenger_rating,
+            driver_rating,
+            passenger_review,
+            driver_review,
+            cost,
+            distance,
+            duration,
+            payment_method
+        } = req.body;
+
+        const effectivePassengerRating = passenger_rating !== undefined ? passenger_rating : rating;
+        const effectivePassengerReview = passenger_review !== undefined ? passenger_review : review;
         
         let query = 'UPDATE trips SET status = $1, updated_at = CURRENT_TIMESTAMP';
         const params = [status];
         let paramCount = 1;
         
         if (status === 'completed') {
-            query += ', completed_at = CURRENT_TIMESTAMP';
+            query += ', completed_at = CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END';
         } else if (status === 'cancelled') {
-            query += ', cancelled_at = CURRENT_TIMESTAMP';
+            query += ', cancelled_at = CASE WHEN cancelled_at IS NULL THEN CURRENT_TIMESTAMP ELSE cancelled_at END';
         }
 
         if (cost !== undefined) {
@@ -507,16 +535,36 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             params.push(payment_method);
         }
         
-        if (rating !== undefined) {
+        if (effectivePassengerRating !== undefined) {
+            paramCount++;
+            query += `, passenger_rating = $${paramCount}`;
+            params.push(effectivePassengerRating);
+
             paramCount++;
             query += `, rating = $${paramCount}`;
-            params.push(rating);
+            params.push(effectivePassengerRating);
         }
-        
-        if (review) {
+
+        if (driver_rating !== undefined) {
+            paramCount++;
+            query += `, driver_rating = $${paramCount}`;
+            params.push(driver_rating);
+        }
+
+        if (effectivePassengerReview) {
+            paramCount++;
+            query += `, passenger_review = $${paramCount}`;
+            params.push(effectivePassengerReview);
+
             paramCount++;
             query += `, review = $${paramCount}`;
-            params.push(review);
+            params.push(effectivePassengerReview);
+        }
+
+        if (driver_review) {
+            paramCount++;
+            query += `, driver_review = $${paramCount}`;
+            params.push(driver_review);
         }
         
         paramCount++;
@@ -720,7 +768,7 @@ app.get('/api/trips/stats/summary', async (req, res) => {
                 COUNT(*) FILTER (WHERE status = 'completed') as completed_trips,
                 COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled_trips,
                 COALESCE(SUM(cost) FILTER (WHERE status = 'completed'), 0) as total_spent,
-                COALESCE(AVG(rating) FILTER (WHERE status = 'completed' AND rating IS NOT NULL), 0) as avg_rating,
+                COALESCE(AVG(COALESCE(passenger_rating, rating)) FILTER (WHERE status = 'completed' AND COALESCE(passenger_rating, rating) IS NOT NULL), 0) as avg_rating,
                 COALESCE(SUM(distance) FILTER (WHERE status = 'completed'), 0) as total_distance
             FROM trips
             ${whereClause}
@@ -773,9 +821,9 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
         
         // Get average rating
         const ratingResult = await pool.query(`
-            SELECT COALESCE(AVG(rating), 0) as avg_rating
+            SELECT COALESCE(AVG(COALESCE(passenger_rating, rating)), 0) as avg_rating
             FROM trips
-            WHERE status = 'completed' AND rating IS NOT NULL
+            WHERE status = 'completed' AND COALESCE(passenger_rating, rating) IS NOT NULL
         `);
         
         res.json({
@@ -1795,6 +1843,7 @@ app.post('/api/users/login', async (req, res) => {
 ensureDefaultAdmins()
     .then(() => ensureDefaultOffers())
     .then(() => ensureUserProfileColumns())
+    .then(() => ensureTripRatingColumns())
     .finally(() => {
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);

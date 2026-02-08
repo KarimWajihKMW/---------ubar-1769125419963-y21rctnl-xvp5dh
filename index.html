@@ -1535,7 +1535,7 @@
 
                 <div class="flex gap-4">
                     <button onclick="resetApp()" class="flex-1 bg-gray-100 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">تخطي</button>
-                    <button onclick="resetApp(); showToast('شكراً لتقييمك!');" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">إرسال</button>
+                    <button onclick="submitPassengerRating()" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">إرسال</button>
                 </div>
             </div>
 
@@ -2059,6 +2059,19 @@
                         <span>إجمالي الرحلة</span>
                         <span id="driver-summary-total" class="text-gray-800 text-lg">-- ر.س</span>
                     </div>
+                </div>
+                <div class="border-t border-dashed border-gray-200 pt-3">
+                    <p class="text-sm font-bold text-gray-700 mb-3">تقييم الراكب</p>
+                    <div class="flex justify-center gap-2 dir-ltr">
+                        <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="1"><i class="fas fa-star"></i></button>
+                        <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="2"><i class="fas fa-star"></i></button>
+                        <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="3"><i class="fas fa-star"></i></button>
+                        <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="4"><i class="fas fa-star"></i></button>
+                        <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="5"><i class="fas fa-star"></i></button>
+                    </div>
+                    <button type="button" onclick="submitDriverPassengerRating()" class="mt-4 w-full py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700">
+                        إرسال تقييم الراكب
+                    </button>
                 </div>
             </div>
 
