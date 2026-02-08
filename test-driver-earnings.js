@@ -3,7 +3,7 @@ const axios = require('axios');
 const BASE_URL = 'http://localhost:3000';
 
 async function testDriverEarnings() {
-    console.log('🧪 اختبار نظام أرباح السائقين\n');
+    console.log('🧪 اختبار نظام أرباح السائقين المحدّث\n');
     
     try {
         // 1. Get driver stats
@@ -22,8 +22,26 @@ async function testDriverEarnings() {
             return;
         }
         
-        // 2. Create a test trip
-        console.log('\n2️⃣ إنشاء رحلة اختبارية...');
+        // 2. Check driver_earnings table
+        console.log('\n2️⃣ فحص جدول driver_earnings...');
+        const earningsResponse = await axios.get(`${BASE_URL}/api/drivers/2/earnings?days=30`);
+        
+        if (earningsResponse.data.success) {
+            console.log(`✅ عدد السجلات في جدول الأرباح: ${earningsResponse.data.data.length}`);
+            if (earningsResponse.data.data.length > 0) {
+                console.log('\n   آخر 3 سجلات:');
+                earningsResponse.data.data.slice(0, 3).forEach((record, index) => {
+                    console.log(`   ${index + 1}. التاريخ: ${record.date}`);
+                    console.log(`      رحلات اليوم: ${record.today_trips}`);
+                    console.log(`      أرباح اليوم: ${record.today_earnings}`);
+                    console.log(`      إجمالي الرحلات: ${record.total_trips}`);
+                    console.log(`      إجمالي الأرباح: ${record.total_earnings}`);
+                });
+            }
+        }
+        
+        // 3. Create a test trip
+        console.log('\n3️⃣ إنشاء رحلة اختبارية...');
         const tripData = {
             user_id: 6,
             driver_id: 2,
@@ -34,9 +52,9 @@ async function testDriverEarnings() {
             dropoff_lat: 30.0626,
             dropoff_lng: 31.2497,
             car_type: 'economy',
-            cost: 75.50,
-            distance: 12.5,
-            duration: 20,
+            cost: 95.25,
+            distance: 15.3,
+            duration: 24,
             payment_method: 'cash',
             status: 'pending'
         };
@@ -47,21 +65,22 @@ async function testDriverEarnings() {
             const tripId = createResponse.data.data.id;
             console.log(`✅ تم إنشاء رحلة جديدة: ${tripId}`);
             
-            // 3. Complete the trip
-            console.log('\n3️⃣ إكمال الرحلة...');
+            // 4. Complete the trip
+            console.log('\n4️⃣ إكمال الرحلة...');
             const completeResponse = await axios.patch(`${BASE_URL}/api/trips/${tripId}/status`, {
                 status: 'completed',
-                cost: 75.50
+                cost: 95.25
             });
             
             if (completeResponse.data.success) {
                 console.log('✅ تم إكمال الرحلة بنجاح');
                 
-                // 4. Check updated stats
-                console.log('\n4️⃣ التحقق من تحديث الإحصائيات...');
+                // 5. Check updated stats and earnings table
+                console.log('\n5️⃣ التحقق من تحديث الإحصائيات...');
                 await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
                 
                 const updatedStatsResponse = await axios.get(`${BASE_URL}/api/drivers/2/stats`);
+                const updatedEarningsResponse = await axios.get(`${BASE_URL}/api/drivers/2/earnings?days=1`);
                 
                 if (updatedStatsResponse.data.success) {
                     const newEarnings = updatedStatsResponse.data.data.earnings;
@@ -71,9 +90,20 @@ async function testDriverEarnings() {
                     console.log(`   الرصيد السابق: ${oldEarnings.balance} SAR`);
                     console.log(`   الرصيد الجديد: ${newEarnings.balance} SAR`);
                     console.log(`   الفرق: +${(newEarnings.balance - oldEarnings.balance).toFixed(2)} SAR`);
+                    console.log(`   أرباح اليوم: ${newEarnings.today} SAR`);
+                    
+                    if (updatedEarningsResponse.data.success && updatedEarningsResponse.data.data.length > 0) {
+                        const todayRecord = updatedEarningsResponse.data.data[0];
+                        console.log('\n✅ سجل اليوم في جدول driver_earnings:');
+                        console.log(`   رحلات اليوم: ${todayRecord.today_trips}`);
+                        console.log(`   أرباح اليوم: ${todayRecord.today_earnings}`);
+                        console.log(`   إجمالي الرحلات: ${todayRecord.total_trips}`);
+                        console.log(`   إجمالي الأرباح: ${todayRecord.total_earnings}`);
+                    }
                     
                     if (newEarnings.balance > oldEarnings.balance) {
                         console.log('\n✅ ✅ ✅ جميع الاختبارات نجحت! ✅ ✅ ✅');
+                        console.log('📊 جدول driver_earnings يعمل بشكل صحيح!');
                     } else {
                         console.log('\n❌ لم يتم تحديث الأرباح بشكل صحيح');
                     }

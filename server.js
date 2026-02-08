@@ -580,6 +580,10 @@ app.patch('/api/trips/:id/status', async (req, res) => {
         // Update driver earnings if trip completed
         if (status === 'completed' && result.rows[0].driver_id && cost) {
             try {
+                const driverId = result.rows[0].driver_id;
+                const tripCost = parseFloat(cost);
+                
+                // Update drivers table
                 await pool.query(`
                     UPDATE drivers 
                     SET total_earnings = COALESCE(total_earnings, 0) + $1,
@@ -588,7 +592,37 @@ app.patch('/api/trips/:id/status', async (req, res) => {
                         today_trips_count = COALESCE(today_trips_count, 0) + 1,
                         total_trips = COALESCE(total_trips, 0) + 1
                     WHERE id = $2
-                `, [cost, result.rows[0].driver_id]);
+                `, [tripCost, driverId]);
+                
+                // Update or insert into driver_earnings table
+                await pool.query(`
+                    INSERT INTO driver_earnings (driver_id, date, today_trips, today_earnings, total_trips, total_earnings)
+                    VALUES ($1, CURRENT_DATE, 1, $2, 1, $2)
+                    ON CONFLICT (driver_id, date) 
+                    DO UPDATE SET 
+                        today_trips = driver_earnings.today_trips + 1,
+                        today_earnings = driver_earnings.today_earnings + $2,
+                        updated_at = CURRENT_TIMESTAMP
+                `, [driverId, tripCost]);
+                
+                // Update total_trips and total_earnings for the driver in driver_earnings
+                const totalResult = await pool.query(`
+                    SELECT COUNT(*) as total_trips, COALESCE(SUM(cost), 0) as total_earnings
+                    FROM trips
+                    WHERE driver_id = $1 AND status = 'completed'
+                `, [driverId]);
+                
+                if (totalResult.rows.length > 0) {
+                    await pool.query(`
+                        UPDATE driver_earnings 
+                        SET total_trips = $1, total_earnings = $2
+                        WHERE driver_id = $3 AND date = CURRENT_DATE
+                    `, [
+                        parseInt(totalResult.rows[0].total_trips),
+                        parseFloat(totalResult.rows[0].total_earnings),
+                        driverId
+                    ]);
+                }
             } catch (driverErr) {
                 console.error('Error updating driver earnings:', driverErr);
             }
@@ -1136,7 +1170,7 @@ app.get('/api/drivers/:id/stats', async (req, res) => {
     try {
         const { id } = req.params;
         
-        // Get driver info
+        // Get driver info from drivers table
         const driverResult = await pool.query(`
             SELECT 
                 id, name, phone, email, rating,
@@ -1155,23 +1189,35 @@ app.get('/api/drivers/:id/stats', async (req, res) => {
         
         const driver = driverResult.rows[0];
         
-        // Get today's trips
-        const todayTripsResult = await pool.query(`
-            SELECT COUNT(*) as count, COALESCE(SUM(cost), 0) as total_cost
-            FROM trips
-            WHERE driver_id = $1 
-            AND status = 'completed'
-            AND DATE(completed_at) = CURRENT_DATE
+        // Get today's earnings from driver_earnings table
+        const todayEarningsResult = await pool.query(`
+            SELECT 
+                today_trips,
+                today_earnings,
+                total_trips,
+                total_earnings
+            FROM driver_earnings
+            WHERE driver_id = $1 AND date = CURRENT_DATE
         `, [id]);
         
-        // Get all completed trips count
-        const completedTripsResult = await pool.query(`
-            SELECT COUNT(*) as count, COALESCE(SUM(cost), 0) as total_cost
-            FROM trips
-            WHERE driver_id = $1 AND status = 'completed'
-        `, [id]);
+        let todayData = {
+            today_trips: 0,
+            today_earnings: 0
+        };
         
-        // Get recent trips (last 7 days)
+        let totalData = {
+            total_trips: driver.total_trips,
+            total_earnings: driver.total_earnings
+        };
+        
+        if (todayEarningsResult.rows.length > 0) {
+            todayData.today_trips = parseInt(todayEarningsResult.rows[0].today_trips);
+            todayData.today_earnings = parseFloat(todayEarningsResult.rows[0].today_earnings);
+            totalData.total_trips = parseInt(todayEarningsResult.rows[0].total_trips);
+            totalData.total_earnings = parseFloat(todayEarningsResult.rows[0].total_earnings);
+        }
+        
+        // Get recent trips (last 10)
         const recentTripsResult = await pool.query(`
             SELECT 
                 t.*,
@@ -1195,20 +1241,52 @@ app.get('/api/drivers/:id/stats', async (req, res) => {
                     rating: parseFloat(driver.rating || 0)
                 },
                 earnings: {
-                    total: parseFloat(driver.total_earnings),
+                    total: totalData.total_earnings,
                     balance: parseFloat(driver.balance),
-                    today: parseFloat(driver.today_earnings)
+                    today: todayData.today_earnings
                 },
                 trips: {
-                    total: parseInt(driver.total_trips),
-                    today: parseInt(todayTripsResult.rows[0].count),
-                    completed: parseInt(completedTripsResult.rows[0].count)
+                    total: totalData.total_trips,
+                    today: todayData.today_trips,
+                    completed: totalData.total_trips
                 },
                 recent_trips: recentTripsResult.rows
             }
         });
     } catch (err) {
         console.error('Error fetching driver stats:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get driver earnings history from driver_earnings table
+app.get('/api/drivers/:id/earnings', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { days = 30 } = req.query;
+        
+        // Get earnings history
+        const earningsResult = await pool.query(`
+            SELECT 
+                date,
+                today_trips,
+                today_earnings,
+                total_trips,
+                total_earnings,
+                created_at,
+                updated_at
+            FROM driver_earnings
+            WHERE driver_id = $1
+            AND date >= CURRENT_DATE - INTERVAL '1 day' * $2
+            ORDER BY date DESC
+        `, [id, parseInt(days)]);
+        
+        res.json({
+            success: true,
+            data: earningsResult.rows
+        });
+    } catch (err) {
+        console.error('Error fetching driver earnings:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
