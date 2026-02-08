@@ -1212,7 +1212,9 @@ const DB = {
             paymentMethod: apiTrip.payment_method || 'cash',
             rating: apiTrip.passenger_rating || apiTrip.rating || 0,
             passengerRating: apiTrip.passenger_rating || apiTrip.rating || 0,
-            driverRating: apiTrip.driver_rating || 0
+            driverRating: apiTrip.driver_rating || 0,
+            passengerReview: apiTrip.passenger_review || apiTrip.review || '',
+            driverReview: apiTrip.driver_review || ''
         };
     },
 
@@ -2233,6 +2235,9 @@ function openDriverTripSummary(rawTrip) {
         b.classList.remove('text-yellow-400');
         b.classList.add('text-gray-300');
     });
+
+    const commentInput = document.getElementById('driver-rating-comment');
+    if (commentInput) commentInput.value = '';
 
     if (modal) modal.classList.remove('hidden');
 }
@@ -4452,13 +4457,20 @@ window.submitPassengerRating = async function() {
         return;
     }
 
+    const commentInput = document.getElementById('passenger-rating-comment');
+    const comment = commentInput ? commentInput.value.trim() : '';
+
     try {
         await ApiService.trips.updateStatus(tripId, 'completed', {
-            passenger_rating: passengerRatingValue
+            passenger_rating: passengerRatingValue,
+            passenger_review: comment || undefined
         });
         if (lastCompletedTrip) {
             lastCompletedTrip.rating = passengerRatingValue;
             lastCompletedTrip.passengerRating = passengerRatingValue;
+            if (comment) {
+                lastCompletedTrip.passengerReview = comment;
+            }
         }
         showToast('شكراً لتقييمك!');
     } catch (error) {
@@ -4466,6 +4478,7 @@ window.submitPassengerRating = async function() {
         showToast('تعذر إرسال التقييم حالياً');
     } finally {
         passengerRatingValue = 0;
+        if (commentInput) commentInput.value = '';
         resetApp();
     }
 };
@@ -4483,12 +4496,19 @@ window.submitDriverPassengerRating = async function() {
         return;
     }
 
+    const commentInput = document.getElementById('driver-rating-comment');
+    const comment = commentInput ? commentInput.value.trim() : '';
+
     try {
         await ApiService.trips.updateStatus(tripId, 'completed', {
-            driver_rating: driverRatingValue
+            driver_rating: driverRatingValue,
+            driver_review: comment || undefined
         });
         if (lastCompletedTrip) {
             lastCompletedTrip.driverRating = driverRatingValue;
+            if (comment) {
+                lastCompletedTrip.driverReview = comment;
+            }
         }
         showToast('تم إرسال تقييم الراكب');
         closeDriverTripSummary();
@@ -4497,6 +4517,7 @@ window.submitDriverPassengerRating = async function() {
         showToast('تعذر إرسال التقييم حالياً');
     } finally {
         driverRatingValue = 0;
+        if (commentInput) commentInput.value = '';
     }
 };
 

@@ -1533,6 +1533,11 @@
                     <button class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="5"><i class="fas fa-star"></i></button>
                 </div>
 
+                <div class="mb-6">
+                    <label for="passenger-rating-comment" class="block text-sm font-bold text-gray-600 mb-2">تعليقك (اختياري)</label>
+                    <textarea id="passenger-rating-comment" rows="3" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300" placeholder="اكتب ملاحظاتك عن الرحلة..."></textarea>
+                </div>
+
                 <div class="flex gap-4">
                     <button onclick="resetApp()" class="flex-1 bg-gray-100 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">تخطي</button>
                     <button onclick="submitPassengerRating()" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">إرسال</button>
@@ -2068,6 +2073,10 @@
                         <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="3"><i class="fas fa-star"></i></button>
                         <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="4"><i class="fas fa-star"></i></button>
                         <button class="driver-star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-3xl" data-rating="5"><i class="fas fa-star"></i></button>
+                    </div>
+                    <div class="mt-4">
+                        <label for="driver-rating-comment" class="block text-sm font-bold text-gray-600 mb-2">تعليقك (اختياري)</label>
+                        <textarea id="driver-rating-comment" rows="2" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300" placeholder="ملاحظاتك عن الراكب..."></textarea>
                     </div>
                     <button type="button" onclick="submitDriverPassengerRating()" class="mt-4 w-full py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700">
                         إرسال تقييم الراكب
