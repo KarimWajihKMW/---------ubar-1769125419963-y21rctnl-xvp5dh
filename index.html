@@ -1948,12 +1948,16 @@
 
             <!-- Driver Status: Active Trip -->
             <div id="driver-active-trip" class="hidden p-6 bg-white">
-                 <h3 class="text-xl font-bold mb-4">رحلة جارية</h3>
+                 <div class="flex items-center justify-between mb-4">
+                     <h3 class="text-xl font-bold">رحلة جارية</h3>
+                     <span id="driver-active-status" class="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">في انتظار بدء الرحلة</span>
+                 </div>
                  <div class="flex gap-4 mb-6">
                      <button onclick="driverOpenNavigation()" class="flex-1 py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold">الملاحة</button>
                      <button onclick="driverCallPassenger()" class="flex-1 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold">اتصال</button>
                  </div>
-                 <button onclick="driverEndTrip()" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700">إنهاء الرحلة</button>
+                 <button id="driver-end-btn" onclick="driverEndTrip()" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700" disabled>إنهاء الرحلة</button>
+                 <button id="driver-start-btn" onclick="driverStartTrip()" class="hidden w-full mt-3 bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-emerald-700">بدء الرحلة</button>
             </div>
         </div>
     </div>

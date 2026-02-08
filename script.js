@@ -162,6 +162,8 @@ let currentIncomingTrip = null;
 let activeDriverTripId = null;
 let driverDemoRequestAt = 0;
 let driverForceRequestAt = 0;
+let driverTripStarted = false;
+let driverStartReady = false;
 
 function isMapWorldActive() {
     const mapWorld = document.getElementById('map-world');
@@ -877,6 +879,35 @@ function startDriverToPassengerRoute() {
     animateDriverToPassenger(driverStart, passenger);
 }
 
+function startDriverToDestinationRoute() {
+    if (!leafletMap || !currentIncomingTrip) return;
+    const dropoffLat = currentIncomingTrip.dropoff_lat;
+    const dropoffLng = currentIncomingTrip.dropoff_lng;
+    if (dropoffLat === undefined || dropoffLat === null || dropoffLng === undefined || dropoffLng === null) {
+        return;
+    }
+
+    moveLeafletMapToContainer('map-container');
+    if (routePolyline) {
+        routePolyline.remove();
+        routePolyline = null;
+    }
+
+    const start = driverLocation || getDriverBaseLocation();
+    ensureDriverMarker(start);
+
+    routePolyline = L.polyline([
+        [start.lat, start.lng],
+        [Number(dropoffLat), Number(dropoffLng)]
+    ], { color: '#2563eb', weight: 4, opacity: 0.8, dashArray: '8, 6' }).addTo(leafletMap);
+
+    const bounds = L.latLngBounds([
+        [start.lat, start.lng],
+        [Number(dropoffLat), Number(dropoffLng)]
+    ]);
+    leafletMap.fitBounds(bounds, { padding: [50, 50] });
+}
+
 function animateDriverToPassenger(start, target) {
     const distanceMeters = calculateDistance(start.lat, start.lng, target.lat, target.lng);
     const speedMps = 9; // ~32 km/h
@@ -912,6 +943,9 @@ function animateDriverToPassenger(start, target) {
         } else {
             driverToPassengerAnim = null;
             showToast('✅ وصلت إلى موقع الراكب');
+            setDriverStartReady(true);
+            setDriverPanelVisible(true);
+            setDriverPanelCollapsed(false);
         }
     }
 
@@ -1812,6 +1846,8 @@ window.driverRejectRequest = async function() {
     document.getElementById('driver-status-waiting').classList.remove('hidden');
     setDriverPanelVisible(true);
     clearDriverPassengerRoute();
+    setDriverStartReady(false);
+    setDriverTripStarted(false);
     showToast('تم رفض الطلب');
     triggerDriverRequestPolling();
 };
@@ -1884,6 +1920,8 @@ window.driverAcceptRequest = async function() {
         if (incoming) incoming.classList.add('hidden');
         document.getElementById('driver-active-trip').classList.remove('hidden');
         setDriverPanelVisible(true);
+        setDriverStartReady(false);
+        setDriverTripStarted(false);
 
         const pickupLat = currentIncomingTrip.pickup_lat;
         const pickupLng = currentIncomingTrip.pickup_lng;
@@ -1900,6 +1938,76 @@ window.driverAcceptRequest = async function() {
     } finally {
         if (acceptBtn) acceptBtn.disabled = false;
     }
+};
+
+function setDriverTripStarted(started) {
+    driverTripStarted = started;
+    const startBtn = document.getElementById('driver-start-btn');
+    const endBtn = document.getElementById('driver-end-btn');
+
+    if (startBtn) {
+        startBtn.disabled = started || !driverStartReady;
+        startBtn.classList.toggle('opacity-60', started || !driverStartReady);
+        startBtn.classList.toggle('cursor-not-allowed', started || !driverStartReady);
+        startBtn.classList.toggle('hidden', !driverStartReady || started);
+    }
+    if (endBtn) {
+        endBtn.disabled = !started;
+        endBtn.classList.toggle('opacity-60', !started);
+        endBtn.classList.toggle('cursor-not-allowed', !started);
+    }
+
+    updateDriverActiveStatusBadge();
+}
+
+function setDriverStartReady(ready) {
+    driverStartReady = ready;
+    setDriverTripStarted(driverTripStarted);
+}
+
+function updateDriverActiveStatusBadge() {
+    const statusEl = document.getElementById('driver-active-status');
+    if (!statusEl) return;
+
+    if (driverTripStarted) {
+        statusEl.textContent = 'الرحلة جارية';
+        statusEl.className = 'text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full';
+        return;
+    }
+
+    if (driverStartReady) {
+        statusEl.textContent = 'وصلت للراكب - ابدأ الرحلة';
+        statusEl.className = 'text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full';
+        return;
+    }
+
+    statusEl.textContent = 'في الطريق للراكب';
+    statusEl.className = 'text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full';
+}
+
+window.driverStartTrip = async function() {
+    if (driverTripStarted) return;
+    if (!driverStartReady) {
+        showToast('لسه ما وصلتش لموقع الراكب');
+        return;
+    }
+    if (!activeDriverTripId) {
+        showToast('لا توجد رحلة نشطة لبدئها');
+        return;
+    }
+
+    try {
+        await ApiService.trips.updateStatus(activeDriverTripId, 'ongoing');
+    } catch (error) {
+        console.error('Failed to start trip:', error);
+        showToast('تعذر بدء الرحلة حالياً');
+        return;
+    }
+
+    setDriverStartReady(false);
+    setDriverTripStarted(true);
+    startDriverToDestinationRoute();
+    showToast('🚗 تم بدء الرحلة');
 };
 
 function setDriverPanelVisible(visible) {
@@ -1972,6 +2080,8 @@ window.driverEndTrip = function() {
     document.getElementById('driver-active-trip').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
     clearDriverPassengerRoute();
+    setDriverStartReady(false);
+    setDriverTripStarted(false);
     showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
     triggerConfetti();
 
@@ -2195,6 +2305,8 @@ function initDriverMode() {
     setDriverPanelVisible(true);
     currentIncomingTrip = null;
     activeDriverTripId = null;
+    setDriverStartReady(false);
+    setDriverTripStarted(false);
     const passengerUi = document.getElementById('passenger-ui-container');
     if (passengerUi) passengerUi.classList.add('hidden');
     const passengerTopBar = document.getElementById('passenger-top-bar');
@@ -2535,6 +2647,8 @@ function showDriverWaitingState() {
     if (incoming) incoming.classList.add('hidden');
     if (waiting) waiting.classList.remove('hidden');
     setDriverPanelVisible(true);
+    setDriverStartReady(false);
+    setDriverTripStarted(false);
 }
 
 function renderDriverIncomingTrip(trip) {
