@@ -351,12 +351,14 @@ function initLeafletMap() {
     
     console.log('Initializing Leaflet map...');
     
-    // Egypt center fallback
+    const alexandriaCenter = [31.2001, 29.9187];
     const egyptCenter = [26.8206, 30.8025];
+    const isDriver = currentUserRole === 'driver';
+    const initialCenter = isDriver ? alexandriaCenter : egyptCenter;
     leafletMap = L.map('leaflet-map', { 
         zoomControl: false,
         attributionControl: true
-    }).setView(egyptCenter, 6);
+    }).setView(initialCenter, isDriver ? 12 : 6);
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
@@ -375,8 +377,11 @@ function initLeafletMap() {
         if (currentPickup) leafletMap.setView([currentPickup.lat, currentPickup.lng], Math.max(leafletMap.getZoom(), 14));
     };
 
-    // Geolocate user
-    if (navigator.geolocation) {
+    // Geolocate user (passenger) or keep Alexandria for driver
+    if (isDriver) {
+        setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
+        leafletMap.setView(alexandriaCenter, 12);
+    } else if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(pos => {
             const { latitude, longitude } = pos.coords;
             // Reverse geocode to get readable address
@@ -385,13 +390,13 @@ function initLeafletMap() {
                 leafletMap.setView([latitude, longitude], 14);
             });
         }, () => {
-            // Fallback to Cairo
-            setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة، مصر');
-            leafletMap.setView([30.0444, 31.2357], 12);
+            // Fallback to Alexandria
+            setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
+            leafletMap.setView(alexandriaCenter, 12);
         }, { enableHighAccuracy: true, timeout: 6000 });
     } else {
-        setPickup({ lat: 30.0444, lng: 31.2357 }, 'القاهرة، مصر');
-        leafletMap.setView([30.0444, 31.2357], 12);
+        setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
+        leafletMap.setView(alexandriaCenter, 12);
     }
 
     // Destination/Pickup select by click
