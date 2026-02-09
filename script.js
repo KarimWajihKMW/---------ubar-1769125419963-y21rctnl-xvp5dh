@@ -354,11 +354,11 @@ function initLeafletMap() {
     const alexandriaCenter = [31.2001, 29.9187];
     const egyptCenter = [26.8206, 30.8025];
     const isDriver = currentUserRole === 'driver';
-    const initialCenter = isDriver ? alexandriaCenter : egyptCenter;
+    const initialCenter = alexandriaCenter;
     leafletMap = L.map('leaflet-map', { 
         zoomControl: false,
         attributionControl: true
-    }).setView(initialCenter, isDriver ? 12 : 6);
+    }).setView(initialCenter, 12);
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
