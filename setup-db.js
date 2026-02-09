@@ -121,6 +121,7 @@ async function setupDatabase() {
                 driver_name VARCHAR(100),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
                 completed_at TIMESTAMP,
                 cancelled_at TIMESTAMP
             );

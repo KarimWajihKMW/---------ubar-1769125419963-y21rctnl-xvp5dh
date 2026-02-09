@@ -222,6 +222,15 @@ async function ensureTripRatingColumns() {
     }
 }
 
+async function ensureTripTimeColumns() {
+    try {
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS started_at TIMESTAMP;`);
+        console.log('✅ Trip time columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure trip time columns:', err.message);
+    }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
@@ -512,6 +521,8 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             query += ', completed_at = CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END';
         } else if (status === 'cancelled') {
             query += ', cancelled_at = CASE WHEN cancelled_at IS NULL THEN CURRENT_TIMESTAMP ELSE cancelled_at END';
+        } else if (status === 'ongoing') {
+            query += ', started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END';
         }
 
         if (cost !== undefined) {
@@ -530,6 +541,8 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             paramCount++;
             query += `, duration = $${paramCount}`;
             params.push(duration);
+        } else if (status === 'completed') {
+            query += `, duration = COALESCE(duration, GREATEST(1, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(started_at, created_at))) / 60)))`;
         }
 
         if (payment_method !== undefined) {
@@ -2242,6 +2255,7 @@ ensureDefaultAdmins()
     .then(() => ensureDefaultOffers())
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
+    .then(() => ensureTripTimeColumns())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');
         return driverSync.initializeSyncSystem();
