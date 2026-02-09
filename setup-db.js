@@ -46,12 +46,34 @@ async function setupDatabase() {
                 rejection_reason TEXT,
                 rating DECIMAL(3, 2) DEFAULT 5.00,
                 total_trips INTEGER DEFAULT 0,
+                total_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                balance DECIMAL(10, 2) DEFAULT 0.00,
+                today_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                today_trips_count INTEGER DEFAULT 0,
+                last_earnings_update DATE DEFAULT CURRENT_DATE,
                 status VARCHAR(20) DEFAULT 'offline',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
         console.log('✅ Drivers table created');
+        
+        // Create driver_earnings table for daily earnings tracking
+        await client.query(`
+            CREATE TABLE driver_earnings (
+                id SERIAL PRIMARY KEY,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE CASCADE,
+                date DATE NOT NULL DEFAULT CURRENT_DATE,
+                today_trips INTEGER DEFAULT 0,
+                today_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                total_trips INTEGER DEFAULT 0,
+                total_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(driver_id, date)
+            );
+        `);
+        console.log('✅ Driver earnings table created');
         
         // Create offers table
         await client.query(`
@@ -110,6 +132,7 @@ async function setupDatabase() {
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_user_id ON trips(user_id);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_created_at ON trips(created_at DESC);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_driver_earnings_driver_date ON driver_earnings(driver_id, date DESC);`);
             console.log('✅ Indexes created');
         } catch (err) {
             console.log('⚠️ Some indexes may already exist');
