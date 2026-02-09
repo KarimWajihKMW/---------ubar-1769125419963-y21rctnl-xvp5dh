@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة أرباح السائقين - Admin Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+        }
+        .driver-card:hover {
+            transform: translateY(-2px);
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen p-6">
+        <div class="max-w-7xl mx-auto">
+            <!-- Header -->
+            <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-8 mb-8 text-white">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h1 class="text-3xl font-bold mb-2">
+                            <i class="fas fa-chart-line ml-2"></i>
+                            إدارة أرباح السائقين
+                        </h1>
+                        <p class="text-indigo-100">تحكم كامل في أرباح ورحلات السائقين</p>
+                    </div>
+                    <button onclick="refreshDrivers()" class="bg-white text-indigo-600 px-6 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow-lg">
+                        <i class="fas fa-sync-alt ml-2" id="refresh-icon"></i>
+                        تحديث
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white rounded-xl shadow-md p-6 border-r-4 border-green-500">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">إجمالي السائقين</p>
+                            <p class="text-3xl font-bold text-gray-800" id="total-drivers">0</p>
+                        </div>
+                        <div class="bg-green-100 p-4 rounded-full">
+                            <i class="fas fa-users text-green-600 text-2xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-md p-6 border-r-4 border-blue-500">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">إجمالي الأرباح</p>
+                            <p class="text-3xl font-bold text-gray-800" id="total-earnings" dir="ltr">0 SAR</p>
+                        </div>
+                        <div class="bg-blue-100 p-4 rounded-full">
+                            <i class="fas fa-money-bill-wave text-blue-600 text-2xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-md p-6 border-r-4 border-yellow-500">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">إجمالي الرحلات</p>
+                            <p class="text-3xl font-bold text-gray-800" id="total-trips">0</p>
+                        </div>
+                        <div class="bg-yellow-100 p-4 rounded-full">
+                            <i class="fas fa-car text-yellow-600 text-2xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-md p-6 border-r-4 border-purple-500">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">أرباح اليوم</p>
+                            <p class="text-3xl font-bold text-gray-800" id="today-earnings" dir="ltr">0 SAR</p>
+                        </div>
+                        <div class="bg-purple-100 p-4 rounded-full">
+                            <i class="fas fa-calendar-day text-purple-600 text-2xl"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Drivers List -->
+            <div class="bg-white rounded-2xl shadow-lg">
+                <div class="p-6 border-b border-gray-200">
+                    <h2 class="text-xl font-bold text-gray-800">
+                        <i class="fas fa-list ml-2 text-indigo-600"></i>
+                        قائمة السائقين
+                    </h2>
+                </div>
+                
+                <div id="drivers-container" class="p-6">
+                    <div class="text-center py-12">
+                        <i class="fas fa-spinner fa-spin text-4xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-500">جاري تحميل البيانات...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white rounded-t-2xl">
+                <h3 class="text-2xl font-bold">
+                    <i class="fas fa-edit ml-2"></i>
+                    تعديل بيانات السائق
+                </h3>
+                <p class="text-indigo-100 mt-1" id="modal-driver-name">اسم السائق</p>
+            </div>
+            
+            <div class="p-6">
+                <form id="edit-form" class="space-y-6">
+                    <input type="hidden" id="edit-driver-id">
+                    
+                    <!-- Today's Trips -->
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">
+                            <i class="fas fa-car text-blue-500 ml-2"></i>
+                            رحلات اليوم
+                        </label>
+                        <input type="number" id="edit-today-trips" 
+                               class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-indigo-500 focus:outline-none text-lg"
+                               min="0" required>
+                    </div>
+
+                    <!-- Today's Earnings -->
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">
+                            <i class="fas fa-money-bill text-green-500 ml-2"></i>
+                            أرباح اليوم (ر.س)
+                        </label>
+                        <input type="number" id="edit-today-earnings" step="0.01"
+                               class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-indigo-500 focus:outline-none text-lg"
+                               min="0" required>
+                    </div>
+
+                    <!-- Total Trips -->
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">
+                            <i class="fas fa-list-ol text-purple-500 ml-2"></i>
+                            إجمالي الرحلات
+                        </label>
+                        <input type="number" id="edit-total-trips"
+                               class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-indigo-500 focus:outline-none text-lg"
+                               min="0" required>
+                    </div>
+
+                    <!-- Total Earnings -->
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">
+                            <i class="fas fa-coins text-yellow-500 ml-2"></i>
+                            إجمالي الأرباح (ر.س)
+                        </label>
+                        <input type="number" id="edit-total-earnings" step="0.01"
+                               class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-indigo-500 focus:outline-none text-lg"
+                               min="0" required>
+                    </div>
+
+                    <!-- Balance -->
+                    <div>
+                        <label class="block text-gray-700 font-bold mb-2">
+                            <i class="fas fa-wallet text-indigo-500 ml-2"></i>
+                            الرصيد (ر.س)
+                        </label>
+                        <input type="number" id="edit-balance" step="0.01"
+                               class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:border-indigo-500 focus:outline-none text-lg"
+                               min="0" required>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="flex gap-4 pt-4">
+                        <button type="submit" 
+                                class="flex-1 bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4 rounded-xl font-bold hover:from-green-600 hover:to-green-700 transition-all shadow-lg">
+                            <i class="fas fa-save ml-2"></i>
+                            حفظ التغييرات
+                        </button>
+                        <button type="button" onclick="closeModal()"
+                                class="flex-1 bg-gray-200 text-gray-700 px-6 py-4 rounded-xl font-bold hover:bg-gray-300 transition-all">
+                            <i class="fas fa-times ml-2"></i>
+                            إلغاء
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let driversData = [];
+
+        // Load all drivers
+        async function loadDrivers() {
+            try {
+                const response = await fetch('/api/drivers');
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error('Failed to load drivers');
+                }
+
+                driversData = data.data;
+                displayDrivers(driversData);
+                updateStats(driversData);
+                
+            } catch (error) {
+                console.error('Error loading drivers:', error);
+                document.getElementById('drivers-container').innerHTML = `
+                    <div class="text-center py-12 text-red-600">
+                        <i class="fas fa-exclamation-circle text-4xl mb-4"></i>
+                        <p class="text-lg">خطأ في تحميل البيانات</p>
+                        <p class="text-sm">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Display drivers
+        function displayDrivers(drivers) {
+            const container = document.getElementById('drivers-container');
+            
+            if (!drivers || drivers.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 text-gray-400">
+                        <i class="fas fa-inbox text-4xl mb-4"></i>
+                        <p class="text-lg">لا يوجد سائقين</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const html = drivers.map(driver => {
+                const todayEarnings = parseFloat(driver.today_earnings || 0);
+                const totalEarnings = parseFloat(driver.total_earnings || 0);
+                const balance = parseFloat(driver.balance || 0);
+                const todayTrips = parseInt(driver.today_trips_count || 0);
+                const totalTrips = parseInt(driver.total_trips || 0);
+
+                return `
+                    <div class="driver-card bg-gray-50 rounded-xl p-6 mb-4 border-2 border-gray-200 hover:border-indigo-500 hover:shadow-lg transition-all">
+                        <div class="flex items-start justify-between mb-4">
+                            <div class="flex items-center gap-4">
+                                <div class="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg">
+                                    ${driver.name ? driver.name.charAt(0) : '؟'}
+                                </div>
+                                <div>
+                                    <h3 class="text-xl font-bold text-gray-800">${driver.name || 'غير معروف'}</h3>
+                                    <p class="text-gray-500">
+                                        <i class="fas fa-phone text-xs ml-1"></i>
+                                        ${driver.phone || 'لا يوجد'}
+                                    </p>
+                                    <p class="text-gray-500">
+                                        <i class="fas fa-star text-yellow-500 text-xs ml-1"></i>
+                                        التقييم: ${driver.rating || '5.00'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button onclick="openEditModal(${driver.id})" 
+                                    class="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-md">
+                                <i class="fas fa-edit ml-2"></i>
+                                تعديل
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                            <div class="bg-white p-4 rounded-lg text-center border-2 border-blue-100">
+                                <div class="text-blue-600 text-2xl mb-1">📅</div>
+                                <div class="font-bold text-gray-800 text-lg">${todayTrips}</div>
+                                <div class="text-gray-500 text-xs">رحلات اليوم</div>
+                            </div>
+                            
+                            <div class="bg-white p-4 rounded-lg text-center border-2 border-green-100">
+                                <div class="text-green-600 text-2xl mb-1">💰</div>
+                                <div class="font-bold text-gray-800 text-lg" dir="ltr">${todayEarnings.toFixed(2)}</div>
+                                <div class="text-gray-500 text-xs">أرباح اليوم</div>
+                            </div>
+                            
+                            <div class="bg-white p-4 rounded-lg text-center border-2 border-purple-100">
+                                <div class="text-purple-600 text-2xl mb-1">🚖</div>
+                                <div class="font-bold text-gray-800 text-lg">${totalTrips}</div>
+                                <div class="text-gray-500 text-xs">إجمالي الرحلات</div>
+                            </div>
+                            
+                            <div class="bg-white p-4 rounded-lg text-center border-2 border-yellow-100">
+                                <div class="text-yellow-600 text-2xl mb-1">💵</div>
+                                <div class="font-bold text-gray-800 text-lg" dir="ltr">${totalEarnings.toFixed(2)}</div>
+                                <div class="text-gray-500 text-xs">إجمالي الأرباح</div>
+                            </div>
+                            
+                            <div class="bg-white p-4 rounded-lg text-center border-2 border-indigo-100">
+                                <div class="text-indigo-600 text-2xl mb-1">💳</div>
+                                <div class="font-bold text-gray-800 text-lg" dir="ltr">${balance.toFixed(2)}</div>
+                                <div class="text-gray-500 text-xs">الرصيد</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        // Update stats
+        function updateStats(drivers) {
+            const totalDrivers = drivers.length;
+            const totalEarnings = drivers.reduce((sum, d) => sum + parseFloat(d.total_earnings || 0), 0);
+            const totalTrips = drivers.reduce((sum, d) => sum + parseInt(d.total_trips || 0), 0);
+            const todayEarnings = drivers.reduce((sum, d) => sum + parseFloat(d.today_earnings || 0), 0);
+
+            document.getElementById('total-drivers').textContent = totalDrivers;
+            document.getElementById('total-earnings').textContent = totalEarnings.toFixed(2) + ' SAR';
+            document.getElementById('total-trips').textContent = totalTrips;
+            document.getElementById('today-earnings').textContent = todayEarnings.toFixed(2) + ' SAR';
+        }
+
+        // Open edit modal
+        function openEditModal(driverId) {
+            const driver = driversData.find(d => d.id === driverId);
+            if (!driver) return;
+
+            document.getElementById('edit-driver-id').value = driver.id;
+            document.getElementById('modal-driver-name').textContent = driver.name || 'غير معروف';
+            document.getElementById('edit-today-trips').value = driver.today_trips_count || 0;
+            document.getElementById('edit-today-earnings').value = parseFloat(driver.today_earnings || 0).toFixed(2);
+            document.getElementById('edit-total-trips').value = driver.total_trips || 0;
+            document.getElementById('edit-total-earnings').value = parseFloat(driver.total_earnings || 0).toFixed(2);
+            document.getElementById('edit-balance').value = parseFloat(driver.balance || 0).toFixed(2);
+
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+
+        // Handle form submit
+        document.getElementById('edit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const driverId = document.getElementById('edit-driver-id').value;
+            const data = {
+                today_trips_count: parseInt(document.getElementById('edit-today-trips').value),
+                today_earnings: parseFloat(document.getElementById('edit-today-earnings').value),
+                total_trips: parseInt(document.getElementById('edit-total-trips').value),
+                total_earnings: parseFloat(document.getElementById('edit-total-earnings').value),
+                balance: parseFloat(document.getElementById('edit-balance').value)
+            };
+
+            try {
+                const response = await fetch(`/api/drivers/${driverId}/earnings/update`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to update');
+                }
+
+                alert('✅ تم التحديث بنجاح!');
+                closeModal();
+                await refreshDrivers();
+
+            } catch (error) {
+                console.error('Error updating driver:', error);
+                alert('❌ خطأ في التحديث: ' + error.message);
+            }
+        });
+
+        // Refresh drivers
+        async function refreshDrivers() {
+            const icon = document.getElementById('refresh-icon');
+            icon.classList.add('fa-spin');
+            
+            await loadDrivers();
+            
+            setTimeout(() => {
+                icon.classList.remove('fa-spin');
+            }, 500);
+        }
+
+        // Load on page load
+        document.addEventListener('DOMContentLoaded', loadDrivers);
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        // Close modal on background click
+        document.getElementById('edit-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'edit-modal') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1283,6 +1283,94 @@ app.get('/api/drivers/:id/earnings', async (req, res) => {
     }
 });
 
+// Update driver earnings (Admin)
+app.put('/api/drivers/:id/earnings/update', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { today_trips_count, today_earnings, total_trips, total_earnings, balance } = req.body;
+        
+        // Validate input
+        if (today_trips_count === undefined || today_earnings === undefined || 
+            total_trips === undefined || total_earnings === undefined || balance === undefined) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing required fields' 
+            });
+        }
+        
+        // Update drivers table
+        const updateQuery = `
+            UPDATE drivers 
+            SET 
+                today_trips_count = $1,
+                today_earnings = $2,
+                total_trips = $3,
+                total_earnings = $4,
+                balance = $5,
+                last_earnings_update = CURRENT_DATE,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $6
+            RETURNING id, name, today_trips_count, today_earnings, total_trips, total_earnings, balance
+        `;
+        
+        const result = await pool.query(updateQuery, [
+            today_trips_count,
+            today_earnings,
+            total_trips,
+            total_earnings,
+            balance,
+            id
+        ]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Driver not found' 
+            });
+        }
+        
+        // Update or create today's record in driver_earnings table
+        const earningsUpdateQuery = `
+            INSERT INTO driver_earnings (
+                driver_id, 
+                date, 
+                today_trips, 
+                today_earnings, 
+                total_trips, 
+                total_earnings
+            )
+            VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
+            ON CONFLICT (driver_id, date) 
+            DO UPDATE SET
+                today_trips = $2,
+                today_earnings = $3,
+                total_trips = $4,
+                total_earnings = $5,
+                updated_at = CURRENT_TIMESTAMP
+        `;
+        
+        await pool.query(earningsUpdateQuery, [
+            id,
+            today_trips_count,
+            today_earnings,
+            total_trips,
+            total_earnings
+        ]);
+        
+        res.json({
+            success: true,
+            data: result.rows[0],
+            message: 'Driver earnings updated successfully'
+        });
+        
+        console.log(`✅ Updated earnings for driver ${id}:`, result.rows[0]);
+        
+    } catch (err) {
+        console.error('Error updating driver earnings:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ==================== USERS ENDPOINTS ====================
 
 // Get users with optional filtering
