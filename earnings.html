@@ -298,6 +298,16 @@
             const icon = document.getElementById('refresh-icon');
             icon.classList.add('fa-spin');
             
+            // Force sync from database first
+            const driverProfile = JSON.parse(localStorage.getItem('akwadra_driver_profile') || '{}');
+            if (driverProfile.id) {
+                try {
+                    await fetch(`/api/drivers/${driverProfile.id}/sync`, { method: 'POST' });
+                } catch (err) {
+                    console.error('Sync failed:', err);
+                }
+            }
+            
             await loadDriverStats(true);
             
             setTimeout(() => {
@@ -305,7 +315,7 @@
             }, 500);
         }
         
-        // Auto-refresh every 10 seconds
+        // Auto-refresh every 5 seconds (faster for real-time updates)
         let autoRefreshInterval = null;
         
         function startAutoRefresh() {
@@ -314,11 +324,11 @@
                 clearInterval(autoRefreshInterval);
             }
             
-            // Refresh every 10 seconds
+            // Refresh every 5 seconds for near real-time updates
             autoRefreshInterval = setInterval(() => {
                 loadDriverStats(false);
-                console.log('إحصائيات تم تحديثها تلقائياً');
-            }, 10000);
+                console.log('🔄 إحصائيات تم تحديثها تلقائياً من قاعدة البيانات');
+            }, 5000);
         }
         
         // Stop auto-refresh when page is hidden

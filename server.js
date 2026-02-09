@@ -6,6 +6,9 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+// Import driver sync system
+const driverSync = require('./driver-sync-system');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -1386,6 +1389,80 @@ app.put('/api/drivers/:id/earnings/update', async (req, res) => {
     }
 });
 
+// Update driver profile (comprehensive update with sync)
+app.put('/api/drivers/:id/update', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+        
+        // Use sync system to update driver
+        const updatedDriver = await driverSync.updateDriverInDatabase(id, updates);
+        
+        // Sync earnings if earnings-related fields were updated
+        if (updates.today_trips_count !== undefined || 
+            updates.today_earnings !== undefined || 
+            updates.total_trips !== undefined || 
+            updates.total_earnings !== undefined) {
+            await driverSync.syncDriverEarnings(id);
+        }
+        
+        res.json({
+            success: true,
+            data: updatedDriver,
+            message: 'Driver updated and synced successfully'
+        });
+        
+        console.log(`✅ Driver ${id} updated and synced`);
+        
+    } catch (err) {
+        console.error('Error updating driver:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Force sync driver data from database
+app.post('/api/drivers/:id/sync', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Sync from database
+        const driver = await driverSync.syncDriverFromDatabase(id);
+        
+        // Sync earnings
+        await driverSync.syncDriverEarnings(id);
+        
+        res.json({
+            success: true,
+            data: driver,
+            message: 'Driver synced successfully'
+        });
+        
+        console.log(`✅ Driver ${id} synced from database`);
+        
+    } catch (err) {
+        console.error('Error syncing driver:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Sync all drivers
+app.post('/api/drivers/sync-all', async (req, res) => {
+    try {
+        await driverSync.syncAllDriversEarnings();
+        
+        res.json({
+            success: true,
+            message: 'All drivers synced successfully'
+        });
+        
+        console.log(`✅ All drivers synced`);
+        
+    } catch (err) {
+        console.error('Error syncing all drivers:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ==================== USERS ENDPOINTS ====================
 
 // Get users with optional filtering
@@ -2116,6 +2193,17 @@ ensureDefaultAdmins()
     .then(() => ensureDefaultOffers())
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
+    .then(() => {
+        console.log('🔄 Initializing Driver Sync System...');
+        return driverSync.initializeSyncSystem();
+    })
+    .then(() => {
+        console.log('✅ Driver Sync System initialized');
+    })
+    .catch(err => {
+        console.error('⚠️  Warning: Driver Sync System initialization failed:', err.message);
+        console.log('⏭️  Server will continue without sync system');
+    })
     .finally(() => {
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
