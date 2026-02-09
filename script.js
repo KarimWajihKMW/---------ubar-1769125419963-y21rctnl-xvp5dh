@@ -3629,7 +3629,7 @@ function handlePassengerAvatarSelection(file) {
     reader.readAsDataURL(file);
 }
 
-function updateDriverMenuData() {
+async function updateDriverMenuData() {
     const user = DB.getUser() || {
         name: 'الكابتن',
         rating: '4.8',
@@ -3674,14 +3674,39 @@ function updateDriverMenuData() {
     if (homeNameEl) homeNameEl.innerText = `أهلاً، ${firstName}`;
     const homeRatingEl = document.getElementById('driver-home-rating');
     if (homeRatingEl) homeRatingEl.innerText = user.rating || '4.8';
-    const homeTodayEl = document.getElementById('driver-home-today');
-    if (homeTodayEl) homeTodayEl.innerText = todayTrips.length;
-    const homeTotalEl = document.getElementById('driver-home-total');
-    if (homeTotalEl) homeTotalEl.innerText = trips.length;
-    const homeEarningsEl = document.getElementById('driver-home-earnings');
-    if (homeEarningsEl) homeEarningsEl.innerText = `${earnings} ر.س`;
     const homeCarTypeEl = document.getElementById('driver-home-car-type');
     if (homeCarTypeEl) homeCarTypeEl.innerText = driverCarLabel;
+
+    // Fetch real-time driver earnings from API (same as profile.html)
+    if (user.id) {
+        try {
+            const response = await ApiService.users.getById(user.id);
+            if (response?.success && response?.data) {
+                const userData = response.data;
+                // Update today's trips and earnings from database
+                const homeTodayTripsEl = document.getElementById('driver-home-today-trips');
+                if (homeTodayTripsEl) homeTodayTripsEl.innerText = userData.today_trips || 0;
+                
+                const homeTodayEarningsEl = document.getElementById('driver-home-today-earnings');
+                if (homeTodayEarningsEl) {
+                    const todayEarnings = parseFloat(userData.today_earnings || 0).toFixed(2);
+                    homeTodayEarningsEl.innerText = todayEarnings;
+                }
+                
+                console.log('✅ Driver panel updated with database data:', {
+                    today_trips: userData.today_trips,
+                    today_earnings: userData.today_earnings
+                });
+            }
+        } catch (error) {
+            console.error('⚠️ Failed to fetch driver earnings:', error);
+            // Fallback to 0 values
+            const homeTodayTripsEl = document.getElementById('driver-home-today-trips');
+            if (homeTodayTripsEl) homeTodayTripsEl.innerText = 0;
+            const homeTodayEarningsEl = document.getElementById('driver-home-today-earnings');
+            if (homeTodayEarningsEl) homeTodayEarningsEl.innerText = '0.00';
+        }
+    }
 
     const avatarIds = ['driver-sidebar-avatar', 'driver-nav-avatar'];
     avatarIds.forEach(id => {
