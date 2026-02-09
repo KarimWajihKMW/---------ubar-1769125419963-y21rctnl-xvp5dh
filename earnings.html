@@ -62,10 +62,16 @@
 </head>
 <body class="bg-gray-50 p-5">
     <div class="max-w-6xl mx-auto">
-        <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 mb-6 hover:bg-gray-50 transition-colors" onclick="history.back()">
-            <i class="fas fa-arrow-right"></i>
-            رجوع
-        </button>
+        <div class="flex items-center justify-between mb-6">
+            <button class="flex items-center gap-2 bg-white text-gray-600 px-4 py-2 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors" onclick="history.back()">
+                <i class="fas fa-arrow-right"></i>
+                رجوع
+            </button>
+            <button class="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-green-600 transition-colors" onclick="refreshStats()">
+                <i class="fas fa-sync-alt" id="refresh-icon"></i>
+                تحديث
+            </button>
+        </div>
 
         <div class="mb-8 text-center">
             <div class="w-24 h-24 rounded-full bg-white border border-gray-100 shadow-sm flex items-center justify-center text-5xl mx-auto mb-4 text-gray-700 relative">
@@ -156,7 +162,7 @@
 </html>
     
         // Load driver stats and earnings
-        async function loadDriverStats() {
+        async function loadDriverStats(showLoading = false) {
             try {
                 // Get driver ID from localStorage
                 const driverProfile = JSON.parse(localStorage.getItem('akwadra_driver_profile') || '{}');
@@ -174,8 +180,24 @@
                     return;
                 }
                 
-                // Fetch driver stats
-                const response = await fetch(`/api/drivers/${driverId}/stats`);
+                if (showLoading) {
+                    document.getElementById('trips-container').innerHTML = `
+                        <div class="py-8 text-center text-gray-400">
+                            <i class="fas fa-spinner fa-spin text-3xl mb-2"></i>
+                            <p>جاري تحديث البيانات...</p>
+                        </div>
+                    `;
+                }
+                
+                // Fetch driver stats with cache busting
+                const timestamp = new Date().getTime();
+                const response = await fetch(`/api/drivers/${driverId}/stats?t=${timestamp}`, {
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                });
                 const data = await response.json();
                 
                 if (!data.success) {
@@ -271,6 +293,50 @@
             }
         }
         
+        // Refresh function with animation
+        async function refreshStats() {
+            const icon = document.getElementById('refresh-icon');
+            icon.classList.add('fa-spin');
+            
+            await loadDriverStats(true);
+            
+            setTimeout(() => {
+                icon.classList.remove('fa-spin');
+            }, 500);
+        }
+        
+        // Auto-refresh every 10 seconds
+        let autoRefreshInterval = null;
+        
+        function startAutoRefresh() {
+            // Clear any existing interval
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            // Refresh every 10 seconds
+            autoRefreshInterval = setInterval(() => {
+                loadDriverStats(false);
+                console.log('إحصائيات تم تحديثها تلقائياً');
+            }, 10000);
+        }
+        
+        // Stop auto-refresh when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            } else {
+                startAutoRefresh();
+                loadDriverStats(false);
+            }
+        });
+        
         // Load stats on page load
-        document.addEventListener('DOMContentLoaded', loadDriverStats);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDriverStats(true);
+            startAutoRefresh();
+        });
     
