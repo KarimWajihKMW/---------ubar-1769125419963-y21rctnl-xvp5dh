@@ -108,6 +108,7 @@
         "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node migrate-driver-earnings\\.js$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "lsof": true
     }
 }

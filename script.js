@@ -248,6 +248,13 @@ let driverToDestinationAnim = null;
 let mapSelectionMode = 'destination';
 let isDriverInfoCollapsed = false;
 let isDriverPanelCollapsed = false;
+let locationWatchId = null;
+let lastGeoCoords = null;
+let lastGeoLabel = null;
+let lastReverseGeocodeAt = 0;
+let lastGeoToastAt = 0;
+let hasCenteredOnGeo = false;
+let geoPermissionDenied = false;
 
 function formatStreetLabel(label) {
     if (!label) return 'موقع محدد';
@@ -549,11 +556,152 @@ function startMapSelection(mode) {
     }
 }
 
+function canUseGeolocation() {
+    return typeof navigator !== 'undefined' && !!navigator.geolocation;
+}
+
+function shouldShowGeoToast() {
+    const now = Date.now();
+    if (now - lastGeoToastAt < 8000) return false;
+    lastGeoToastAt = now;
+    return true;
+}
+
+function applyPassengerLocation(coords, shouldCenter) {
+    const label = lastGeoLabel || 'موقعك الحالي';
+    setPickup(coords, label);
+    if (leafletMap && shouldCenter) {
+        leafletMap.setView([coords.lat, coords.lng], Math.max(leafletMap.getZoom(), 14));
+    }
+}
+
+function applyDriverLocation(coords, shouldCenter) {
+    driverLocation = { ...coords };
+    ensureDriverMarker(driverLocation);
+    if (leafletMap && shouldCenter) {
+        leafletMap.setView([coords.lat, coords.lng], Math.max(leafletMap.getZoom(), 14));
+    }
+}
+
+function maybeReverseGeocodePickup(coords) {
+    const now = Date.now();
+    if (now - lastReverseGeocodeAt < 60000 && lastGeoLabel) return;
+    lastReverseGeocodeAt = now;
+    reverseGeocode(coords.lat, coords.lng, (address) => {
+        lastGeoLabel = address;
+        if (currentUserRole === 'passenger') {
+            if (currentPickup) {
+                currentPickup.label = address;
+            }
+            if (pickupMarkerL) {
+                pickupMarkerL.setPopupContent(address).openPopup();
+                bindStreetLabel(pickupMarkerL, address);
+            }
+            updateCurrentLocationInput(address);
+        }
+    });
+}
+
+function handleGeoSuccess(position) {
+    const coords = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+    };
+    lastGeoCoords = coords;
+    geoPermissionDenied = false;
+
+    if (currentUserRole === 'passenger') {
+        applyPassengerLocation(coords, !hasCenteredOnGeo);
+        maybeReverseGeocodePickup(coords);
+    } else if (currentUserRole === 'driver') {
+        applyDriverLocation(coords, !hasCenteredOnGeo);
+    }
+
+    if (!hasCenteredOnGeo) {
+        hasCenteredOnGeo = true;
+    }
+}
+
+function handleGeoError(error) {
+    if (error && error.code === 1) {
+        geoPermissionDenied = true;
+    }
+
+    if (shouldShowGeoToast()) {
+        showToast('⚠️ يرجى تفعيل الموقع لاستخدام الخريطة بدقة');
+    }
+
+    if (!lastGeoCoords) {
+        const alexandriaCenter = { lat: 31.2001, lng: 29.9187 };
+        if (currentUserRole === 'passenger') {
+            applyPassengerLocation(alexandriaCenter, true);
+        } else if (currentUserRole === 'driver') {
+            applyDriverLocation(alexandriaCenter, true);
+        }
+    }
+}
+
+function startLocationTracking() {
+    if (!canUseGeolocation()) {
+        handleGeoError();
+        return;
+    }
+
+    if (locationWatchId !== null) {
+        navigator.geolocation.clearWatch(locationWatchId);
+        locationWatchId = null;
+    }
+
+    hasCenteredOnGeo = false;
+
+    locationWatchId = navigator.geolocation.watchPosition(
+        handleGeoSuccess,
+        handleGeoError,
+        {
+            enableHighAccuracy: true,
+            maximumAge: 5000,
+            timeout: 15000
+        }
+    );
+}
+
+function stopLocationTracking() {
+    if (locationWatchId !== null && canUseGeolocation()) {
+        navigator.geolocation.clearWatch(locationWatchId);
+    }
+    locationWatchId = null;
+}
+
+function requestSingleLocationFix() {
+    if (lastGeoCoords) {
+        if (currentUserRole === 'passenger') {
+            applyPassengerLocation(lastGeoCoords, true);
+        } else if (currentUserRole === 'driver') {
+            applyDriverLocation(lastGeoCoords, true);
+        }
+        return;
+    }
+    if (!canUseGeolocation()) {
+        handleGeoError();
+        return;
+    }
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            hasCenteredOnGeo = false;
+            handleGeoSuccess(position);
+        },
+        handleGeoError,
+        {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 15000
+        }
+    );
+}
+
 function useCurrentLocation() {
-    const alexandriaCenter = [31.2001, 29.9187];
-    setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
-    if (leafletMap) leafletMap.setView(alexandriaCenter, Math.max(leafletMap.getZoom(), 12));
-    showToast('تم ضبط موقعك على الإسكندرية');
+    startLocationTracking();
+    requestSingleLocationFix();
 }
 
 window.startMapSelection = startMapSelection;
@@ -757,7 +905,7 @@ function getDriverBaseLocation() {
         const center = leafletMap.getCenter();
         return { lat: center.lat, lng: center.lng };
     }
-    return { lat: 30.0444, lng: 31.2357 };
+    return { lat: 31.2001, lng: 29.9187 };
 }
 
 function ensureDriverMarker(location) {
@@ -2292,6 +2440,7 @@ window.driverEndTrip = async function() {
 
 window.logoutUser = function() {
     stopDriverRequestPolling();
+    stopLocationTracking();
     DB.clearSession();
     window.location.reload();
 };
@@ -2482,6 +2631,8 @@ function initPassengerMode() {
             }
         });
     }
+
+    startLocationTracking();
 }
 
 window.switchToPassengerMode = function() {
@@ -2523,6 +2674,7 @@ function initDriverMode() {
     moveLeafletMapToContainer('map-container');
     showDriverWaitingState();
     updateDriverMenuData();
+    startLocationTracking();
     resolveDriverProfile().then(() => {
         showDriverWaitingState();
         startDriverRequestPolling();
