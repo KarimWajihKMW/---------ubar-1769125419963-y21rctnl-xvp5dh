@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار التحديث التلقائي - Live Update Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+        }
+        .pulse-green {
+            animation: pulse-green 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-green {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .5;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
+    <div class="container mx-auto p-8 max-w-4xl">
+        <!-- Header -->
+        <div class="bg-white rounded-2xl shadow-xl p-8 mb-8 border-t-4 border-green-500">
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h1 class="text-4xl font-bold text-gray-800 mb-2">
+                        <i class="fas fa-broadcast-tower text-green-500 ml-2"></i>
+                        اختبار التحديث التلقائي
+                    </h1>
+                    <p class="text-gray-600">تابع التغييرات في قاعدة البيانات مباشرة</p>
+                </div>
+                <div class="text-center">
+                    <div class="bg-green-100 text-green-800 px-6 py-3 rounded-xl font-bold inline-flex items-center">
+                        <span class="w-3 h-3 bg-green-500 rounded-full ml-2 pulse-green"></span>
+                        تحديث تلقائي نشط
+                    </div>
+                    <div class="text-sm text-gray-500 mt-2">كل <span id="refresh-interval">5</span> ثواني</div>
+                </div>
+            </div>
+
+            <!-- Last Update Info -->
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-clock text-blue-600 text-xl"></i>
+                    <div>
+                        <div class="text-sm text-blue-600 font-bold">آخر تحديث</div>
+                        <div class="text-lg text-gray-800" id="last-update">جاري التحميل...</div>
+                    </div>
+                </div>
+                <button onclick="manualRefresh()" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-bold transition-all">
+                    <i class="fas fa-sync-alt ml-2" id="manual-refresh-icon"></i>
+                    تحديث يدوي
+                </button>
+            </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded-lg mb-8">
+            <h2 class="text-xl font-bold text-yellow-800 mb-3">
+                <i class="fas fa-info-circle ml-2"></i>
+                كيفية الاختبار:
+            </h2>
+            <ol class="list-decimal list-inside space-y-2 text-yellow-900">
+                <li>شاهد بيانات السائق الأول أدناه</li>
+                <li>افتح قاعدة البيانات وعدّل أرباحه</li>
+                <li>انتظر 5 ثواني أو اضغط "تحديث يدوي"</li>
+                <li>شاهد التحديثات تظهر تلقائياً! 🎉</li>
+            </ol>
+            <div class="mt-4 p-3 bg-yellow-100 rounded-lg">
+                <code class="text-sm">
+                    UPDATE drivers SET today_earnings = 999.99 WHERE id = <span id="test-driver-id">1</span>;
+                </code>
+            </div>
+        </div>
+
+        <!-- Driver Data Display -->
+        <div id="driver-data-container">
+            <div class="text-center py-12">
+                <i class="fas fa-spinner fa-spin text-4xl text-gray-400 mb-4"></i>
+                <p class="text-gray-600">جاري تحميل بيانات السائق...</p>
+            </div>
+        </div>
+
+        <!-- Update Log -->
+        <div class="bg-white rounded-2xl shadow-xl p-8 mt-8">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">
+                <i class="fas fa-history text-indigo-500 ml-2"></i>
+                سجل التحديثات
+            </h2>
+            <div id="update-log" class="space-y-2 max-h-96 overflow-y-auto">
+                <!-- Log entries will appear here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let updateCount = 0;
+        let previousData = null;
+        let autoRefreshInterval = null;
+
+        // Add log entry
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('update-log');
+            const time = new Date().toLocaleTimeString('ar-SA');
+            const colors = {
+                'info': 'bg-blue-50 border-blue-200 text-blue-800',
+                'success': 'bg-green-50 border-green-200 text-green-800',
+                'warning': 'bg-yellow-50 border-yellow-200 text-yellow-800',
+                'error': 'bg-red-50 border-red-200 text-red-800'
+            };
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = `p-3 rounded-lg border ${colors[type]} flex items-center gap-3 animate-fade-in`;
+            logEntry.innerHTML = `
+                <i class="fas fa-circle text-xs"></i>
+                <span class="font-mono text-sm">${time}</span>
+                <span class="flex-1">${message}</span>
+            `;
+            
+            logContainer.insertBefore(logEntry, logContainer.firstChild);
+            
+            // Keep only last 20 entries
+            while (logContainer.children.length > 20) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        // Load driver data
+        async function loadDriverData() {
+            try {
+                const timestamp = new Date().getTime();
+                const response = await fetch(`/api/drivers?t=${timestamp}`, {
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (!data.success || data.data.length === 0) {
+                    throw new Error('لا يوجد سائقين في النظام');
+                }
+
+                const driver = data.data[0]; // Get first driver
+                updateCount++;
+                
+                // Update last update time
+                document.getElementById('last-update').textContent = new Date().toLocaleString('ar-SA');
+                
+                // Check for changes
+                if (previousData) {
+                    const changes = [];
+                    if (driver.today_earnings !== previousData.today_earnings) {
+                        changes.push(`أرباح اليوم: ${previousData.today_earnings} ← ${driver.today_earnings}`);
+                    }
+                    if (driver.today_trips_count !== previousData.today_trips_count) {
+                        changes.push(`رحلات اليوم: ${previousData.today_trips_count} ← ${driver.today_trips_count}`);
+                    }
+                    if (driver.total_earnings !== previousData.total_earnings) {
+                        changes.push(`إجمالي الأرباح: ${previousData.total_earnings} ← ${driver.total_earnings}`);
+                    }
+                    if (driver.total_trips !== previousData.total_trips) {
+                        changes.push(`إجمالي الرحلات: ${previousData.total_trips} ← ${driver.total_trips}`);
+                    }
+                    
+                    if (changes.length > 0) {
+                        addLog(`🔄 تم اكتشاف تغييرات: ${changes.join(' | ')}`, 'success');
+                    }
+                }
+                
+                previousData = driver;
+                document.getElementById('test-driver-id').textContent = driver.id;
+                
+                // Display driver data
+                displayDriverData(driver);
+                
+                if (updateCount === 1) {
+                    addLog('✅ تم تحميل البيانات الأولية', 'info');
+                } else {
+                    addLog(`🔄 تحديث #${updateCount} - البيانات محدثة`, 'info');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('driver-data-container').innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-8 text-center">
+                        <i class="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
+                        <p class="text-red-800 text-lg font-bold">خطأ في التحميل</p>
+                        <p class="text-red-600">${error.message}</p>
+                    </div>
+                `;
+                addLog(`❌ خطأ: ${error.message}`, 'error');
+            }
+        }
+
+        // Display driver data
+        function displayDriverData(driver) {
+            const container = document.getElementById('driver-data-container');
+            const todayEarnings = parseFloat(driver.today_earnings || 0);
+            const totalEarnings = parseFloat(driver.total_earnings || 0);
+            const balance = parseFloat(driver.balance || 0);
+            const todayTrips = parseInt(driver.today_trips_count || 0);
+            const totalTrips = parseInt(driver.total_trips || 0);
+            
+            container.innerHTML = `
+                <div class="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-2xl p-8 text-white">
+                    <div class="flex items-center gap-4 mb-6">
+                        <div class="w-20 h-20 bg-white rounded-full flex items-center justify-center text-4xl">
+                            ${driver.name ? driver.name.charAt(0) : '؟'}
+                        </div>
+                        <div class="flex-1">
+                            <h2 class="text-3xl font-bold">${driver.name || 'غير معروف'}</h2>
+                            <p class="text-indigo-100">
+                                <i class="fas fa-phone ml-1"></i>
+                                ${driver.phone || 'لا يوجد'}
+                            </p>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-5xl mb-2">⭐</div>
+                            <div class="text-2xl font-bold">${driver.rating || '5.00'}</div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-xl text-center">
+                            <div class="text-3xl mb-2">📅</div>
+                            <div class="text-3xl font-bold mb-1">${todayTrips}</div>
+                            <div class="text-sm text-indigo-100">رحلات اليوم</div>
+                        </div>
+                        
+                        <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-xl text-center">
+                            <div class="text-3xl mb-2">💰</div>
+                            <div class="text-3xl font-bold mb-1" dir="ltr">${todayEarnings.toFixed(2)}</div>
+                            <div class="text-sm text-indigo-100">أرباح اليوم</div>
+                        </div>
+                        
+                        <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-xl text-center">
+                            <div class="text-3xl mb-2">🚖</div>
+                            <div class="text-3xl font-bold mb-1">${totalTrips}</div>
+                            <div class="text-sm text-indigo-100">إجمالي الرحلات</div>
+                        </div>
+                        
+                        <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-xl text-center">
+                            <div class="text-3xl mb-2">💵</div>
+                            <div class="text-3xl font-bold mb-1" dir="ltr">${totalEarnings.toFixed(2)}</div>
+                            <div class="text-sm text-indigo-100">إجمالي الأرباح</div>
+                        </div>
+                        
+                        <div class="bg-white bg-opacity-20 backdrop-blur-sm p-4 rounded-xl text-center">
+                            <div class="text-3xl mb-2">💳</div>
+                            <div class="text-3xl font-bold mb-1" dir="ltr">${balance.toFixed(2)}</div>
+                            <div class="text-sm text-indigo-100">الرصيد</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Manual refresh
+        async function manualRefresh() {
+            const icon = document.getElementById('manual-refresh-icon');
+            icon.classList.add('fa-spin');
+            addLog('🔄 تحديث يدوي...', 'info');
+            
+            await loadDriverData();
+            
+            setTimeout(() => {
+                icon.classList.remove('fa-spin');
+            }, 500);
+        }
+
+        // Start auto-refresh
+        function startAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            const interval = 5000; // 5 seconds
+            autoRefreshInterval = setInterval(() => {
+                loadDriverData();
+            }, interval);
+            
+            document.getElementById('refresh-interval').textContent = (interval / 1000);
+        }
+
+        // Stop auto-refresh when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    addLog('⏸️ تم إيقاف التحديث التلقائي (الصفحة مخفية)', 'warning');
+                }
+            } else {
+                startAutoRefresh();
+                loadDriverData();
+                addLog('▶️ تم استئناف التحديث التلقائي', 'success');
+            }
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDriverData();
+            startAutoRefresh();
+            addLog('🚀 تم بدء نظام التحديث التلقائي', 'success');
+        });
+    </script>
+</body>
+</html>

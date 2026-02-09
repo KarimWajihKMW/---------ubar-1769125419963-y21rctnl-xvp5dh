@@ -898,12 +898,27 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
 // Get all available drivers
 app.get('/api/drivers', async (req, res) => {
     try {
-        const { status = 'online' } = req.query;
+        // Add no-cache headers to always get fresh data
+        res.set({
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Surrogate-Control': 'no-store'
+        });
         
-        const result = await pool.query(
-            'SELECT * FROM drivers WHERE status = $1 ORDER BY rating DESC',
-            [status]
-        );
+        const { status } = req.query;
+        
+        let query = 'SELECT * FROM drivers';
+        let params = [];
+        
+        if (status && status !== 'all') {
+            query += ' WHERE status = $1';
+            params.push(status);
+        }
+        
+        query += ' ORDER BY id DESC';
+        
+        const result = await pool.query(query, params);
         
         res.json({
             success: true,

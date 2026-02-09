@@ -28,11 +28,17 @@
                             <i class="fas fa-chart-line ml-2"></i>
                             إدارة أرباح السائقين
                         </h1>
-                        <p class="text-indigo-100">تحكم كامل في أرباح ورحلات السائقين</p>
+                        <p class="text-indigo-100 flex items-center gap-2">
+                            تحكم كامل في أرباح ورحلات السائقين
+                            <span class="bg-green-500 text-white text-xs px-3 py-1 rounded-full animate-pulse">
+                                <i class="fas fa-circle text-xs ml-1"></i>
+                                تحديث تلقائي كل 5 ثواني
+                            </span>
+                        </p>
                     </div>
                     <button onclick="refreshDrivers()" class="bg-white text-indigo-600 px-6 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow-lg">
                         <i class="fas fa-sync-alt ml-2" id="refresh-icon"></i>
-                        تحديث
+                        تحديث يدوي
                     </button>
                 </div>
             </div>
@@ -201,7 +207,15 @@
         // Load all drivers
         async function loadDrivers() {
             try {
-                const response = await fetch('/api/drivers');
+                // Add timestamp to prevent caching
+                const timestamp = new Date().getTime();
+                const response = await fetch(`/api/drivers?t=${timestamp}`, {
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                });
                 const data = await response.json();
                 
                 if (!data.success) {
@@ -393,8 +407,50 @@
             }, 500);
         }
 
+        // Auto-refresh functionality
+        let autoRefreshInterval = null;
+        let autoRefreshEnabled = true;
+
+        function startAutoRefresh() {
+            // Clear any existing interval
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            // Auto-refresh every 5 seconds
+            autoRefreshInterval = setInterval(() => {
+                if (autoRefreshEnabled && !document.getElementById('edit-modal').classList.contains('hidden')) {
+                    // Don't refresh if modal is open
+                    return;
+                }
+                loadDrivers();
+                console.log('🔄 Auto-refresh: تم تحديث البيانات تلقائياً');
+            }, 5000); // Refresh every 5 seconds
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+
+        // Stop auto-refresh when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopAutoRefresh();
+            } else {
+                startAutoRefresh();
+                loadDrivers(); // Immediate refresh when page becomes visible
+            }
+        });
+
         // Load on page load
-        document.addEventListener('DOMContentLoaded', loadDrivers);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDrivers();
+            startAutoRefresh();
+            console.log('✅ Auto-refresh enabled: البيانات تتحدث كل 5 ثواني');
+        });
 
         // Close modal on Escape key
         document.addEventListener('keydown', (e) => {
