@@ -1523,7 +1523,7 @@ app.get('/api/users/:id', async (req, res) => {
         const { id } = req.params;
 
         const result = await pool.query(
-            'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at FROM users WHERE id = $1',
+            'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, driver_id FROM users WHERE id = $1',
             [id]
         );
 
@@ -1534,9 +1534,55 @@ app.get('/api/users/:id', async (req, res) => {
             });
         }
 
+        let userData = result.rows[0];
+
+        // If user is a driver, also fetch driver earnings data
+        if (userData.role === 'driver' && userData.driver_id) {
+            try {
+                const earningsResult = await pool.query(
+                    `SELECT today_trips, today_earnings, total_trips, total_earnings, date 
+                     FROM driver_earnings 
+                     WHERE driver_id = $1 AND date = CURRENT_DATE 
+                     ORDER BY date DESC 
+                     LIMIT 1`,
+                    [userData.driver_id]
+                );
+
+                if (earningsResult.rows.length > 0) {
+                    // Add driver earnings data to user data
+                    userData = {
+                        ...userData,
+                        today_trips: earningsResult.rows[0].today_trips || 0,
+                        today_earnings: earningsResult.rows[0].today_earnings || 0,
+                        total_trips: earningsResult.rows[0].total_trips || 0,
+                        total_earnings: earningsResult.rows[0].total_earnings || 0
+                    };
+                } else {
+                    // No earnings data yet, set defaults
+                    userData = {
+                        ...userData,
+                        today_trips: 0,
+                        today_earnings: 0,
+                        total_trips: 0,
+                        total_earnings: 0
+                    };
+                }
+            } catch (earningsErr) {
+                console.error('Error fetching driver earnings:', earningsErr);
+                // Continue without earnings data
+                userData = {
+                    ...userData,
+                    today_trips: 0,
+                    today_earnings: 0,
+                    total_trips: 0,
+                    total_earnings: 0
+                };
+            }
+        }
+
         res.json({
             success: true,
-            data: result.rows[0]
+            data: userData
         });
     } catch (err) {
         console.error('Error fetching user:', err);

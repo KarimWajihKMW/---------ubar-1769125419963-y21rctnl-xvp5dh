@@ -70,14 +70,22 @@
         .info-value[data-field="balance"],
         .info-value[data-field="points"],
         .info-value[data-field="rating"],
-        .info-value[data-field="status"] {
+        .info-value[data-field="status"],
+        .info-value[data-field="today_trips"],
+        .info-value[data-field="today_earnings"],
+        .info-value[data-field="total_trips"],
+        .info-value[data-field="total_earnings"] {
             position: relative;
         }
 
         .info-value[data-field="balance"]::after,
         .info-value[data-field="points"]::after,
         .info-value[data-field="rating"]::after,
-        .info-value[data-field="status"]::after {
+        .info-value[data-field="status"]::after,
+        .info-value[data-field="today_trips"]::after,
+        .info-value[data-field="today_earnings"]::after,
+        .info-value[data-field="total_trips"]::after,
+        .info-value[data-field="total_earnings"]::after {
             content: '🔒';
             font-size: 10px;
             position: absolute;
@@ -157,6 +165,32 @@
                 <div class="font-bold text-gray-800 text-base info-value" data-field="status">عضو جديد</div>
                 <div class="text-gray-500 text-sm">حالة العضوية</div>
             </div>
+
+            <!-- Driver-specific earnings stats -->
+            <div class="driver-only-field bg-gradient-to-br from-blue-50 to-indigo-50 p-5 rounded-2xl shadow-sm border border-blue-100 text-center hover:bg-gradient-to-br hover:from-blue-100 hover:to-indigo-100 transition-colors" style="display: none;">
+                <div class="text-3xl mb-3">🚕</div>
+                <div class="font-bold text-gray-800 text-xl info-value" data-field="today_trips">0</div>
+                <div class="text-gray-500 text-sm">رحلات اليوم</div>
+            </div>
+
+            <div class="driver-only-field bg-gradient-to-br from-green-50 to-emerald-50 p-5 rounded-2xl shadow-sm border border-green-100 text-center hover:bg-gradient-to-br hover:from-green-100 hover:to-emerald-100 transition-colors" style="display: none;">
+                <div class="text-3xl mb-3">💵</div>
+                <div class="font-bold text-gray-800 text-xl info-value" data-field="today_earnings">0.00</div>
+                <div class="text-gray-500 text-sm">أرباح اليوم (ر.س)</div>
+            </div>
+
+            <div class="driver-only-field bg-gradient-to-br from-purple-50 to-pink-50 p-5 rounded-2xl shadow-sm border border-purple-100 text-center hover:bg-gradient-to-br hover:from-purple-100 hover:to-pink-100 transition-colors" style="display: none;">
+                <div class="text-3xl mb-3">📊</div>
+                <div class="font-bold text-gray-800 text-xl info-value" data-field="total_trips">0</div>
+                <div class="text-gray-500 text-sm">إجمالي الرحلات</div>
+            </div>
+
+            <div class="driver-only-field bg-gradient-to-br from-yellow-50 to-orange-50 p-5 rounded-2xl shadow-sm border border-yellow-100 text-center hover:bg-gradient-to-br hover:from-yellow-100 hover:to-orange-100 transition-colors" style="display: none;">
+                <div class="text-3xl mb-3">💰</div>
+                <div class="font-bold text-gray-800 text-xl info-value" data-field="total_earnings">0.00</div>
+                <div class="text-gray-500 text-sm">إجمالي الأرباح (ر.س)</div>
+            </div>
+
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
                 <div class="text-3xl mb-3">📱</div>
                 <div class="font-bold text-gray-800 info-value text-base" data-field="phone">0501234567</div>
@@ -490,6 +524,53 @@
                     statusField.textContent = currentUser.status || 'عضو جديد';
                 }
 
+                // Display driver earnings if user is a driver
+                if (currentUser.role === 'driver') {
+                    console.log('🚗 المستخدم هو سائق - عرض بيانات الأرباح');
+                    
+                    // Show driver-only fields
+                    const driverFields = document.querySelectorAll('.driver-only-field');
+                    driverFields.forEach(field => {
+                        field.style.display = 'block';
+                    });
+
+                    // Update driver earnings fields
+                    const todayTripsField = document.querySelector('[data-field="today_trips"]');
+                    const todayEarningsField = document.querySelector('[data-field="today_earnings"]');
+                    const totalTripsField = document.querySelector('[data-field="total_trips"]');
+                    const totalEarningsField = document.querySelector('[data-field="total_earnings"]');
+
+                    if (todayTripsField) {
+                        const todayTripsValue = currentUser.today_trips !== null && currentUser.today_trips !== undefined 
+                            ? parseInt(currentUser.today_trips, 10) 
+                            : 0;
+                        todayTripsField.textContent = todayTripsValue;
+                        console.log('🚕 رحلات اليوم:', todayTripsValue);
+                    }
+
+                    if (todayEarningsField) {
+                        const todayEarningsValue = parseFloat(currentUser.today_earnings || 0).toFixed(2);
+                        todayEarningsField.textContent = todayEarningsValue;
+                        console.log('💵 أرباح اليوم:', todayEarningsValue);
+                    }
+
+                    if (totalTripsField) {
+                        const totalTripsValue = currentUser.total_trips !== null && currentUser.total_trips !== undefined 
+                            ? parseInt(currentUser.total_trips, 10) 
+                            : 0;
+                        totalTripsField.textContent = totalTripsValue;
+                        console.log('📊 إجمالي الرحلات:', totalTripsValue);
+                    }
+
+                    if (totalEarningsField) {
+                        const totalEarningsValue = parseFloat(currentUser.total_earnings || 0).toFixed(2);
+                        totalEarningsField.textContent = totalEarningsValue;
+                        console.log('💰 إجمالي الأرباح:', totalEarningsValue);
+                    }
+                } else {
+                    console.log('👤 المستخدم ليس سائقاً - إخفاء بيانات الأرباح');
+                }
+
                 // Apply local overrides (fields not stored in users table)
                 const phoneKey = normalizePhoneKey(currentUser.phone || userData.phone);
                 applyProfileOverrides(userId, phoneKey);
@@ -542,8 +623,9 @@
             values.forEach(val => {
                 const field = val.getAttribute('data-field');
                 
-                // Make balance, points, and rating read-only (not editable)
-                if (field === 'balance' || field === 'points' || field === 'rating' || field === 'status') {
+                // Make balance, points, rating, status, and driver earnings read-only (not editable)
+                if (field === 'balance' || field === 'points' || field === 'rating' || field === 'status' ||
+                    field === 'today_trips' || field === 'today_earnings' || field === 'total_trips' || field === 'total_earnings') {
                     console.log('🔒 حقل للقراءة فقط:', field);
                     return; // Skip making these fields editable
                 }
