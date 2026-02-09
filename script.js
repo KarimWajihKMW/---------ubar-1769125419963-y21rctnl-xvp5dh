@@ -3661,15 +3661,6 @@ async function updateDriverMenuData() {
     const balanceEl = document.getElementById('driver-stats-balance');
     if (balanceEl) balanceEl.innerText = `${user.balance || 0} ر.س`;
 
-    const earningsEl = document.getElementById('driver-stats-earnings');
-    if (earningsEl) earningsEl.innerText = `${earnings} ر.س`;
-
-    const totalEl = document.getElementById('driver-stats-total');
-    if (totalEl) totalEl.innerText = trips.length;
-
-    const todayEl = document.getElementById('driver-stats-today');
-    if (todayEl) todayEl.innerText = todayTrips.length;
-
     const homeNameEl = document.getElementById('driver-home-name');
     if (homeNameEl) homeNameEl.innerText = `أهلاً، ${firstName}`;
     const homeRatingEl = document.getElementById('driver-home-rating');
