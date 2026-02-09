@@ -1539,34 +1539,37 @@ app.get('/api/users/:id', async (req, res) => {
         // If user is a driver, also fetch driver earnings data
         if (userData.role === 'driver' && userData.driver_id) {
             try {
-                const earningsResult = await pool.query(
+                // Fetch the most recent earnings record (for cumulative totals)
+                const latestEarningsResult = await pool.query(
                     `SELECT today_trips, today_earnings, total_trips, total_earnings, date 
                      FROM driver_earnings 
-                     WHERE driver_id = $1 AND date = CURRENT_DATE 
+                     WHERE driver_id = $1 
                      ORDER BY date DESC 
                      LIMIT 1`,
                     [userData.driver_id]
                 );
 
-                if (earningsResult.rows.length > 0) {
-                    // Add driver earnings data to user data
-                    userData = {
-                        ...userData,
-                        today_trips: earningsResult.rows[0].today_trips || 0,
-                        today_earnings: earningsResult.rows[0].today_earnings || 0,
-                        total_trips: earningsResult.rows[0].total_trips || 0,
-                        total_earnings: earningsResult.rows[0].total_earnings || 0
-                    };
-                } else {
-                    // No earnings data yet, set defaults
-                    userData = {
-                        ...userData,
-                        today_trips: 0,
-                        today_earnings: 0,
-                        total_trips: 0,
-                        total_earnings: 0
-                    };
-                }
+                // Fetch today's specific data
+                const todayEarningsResult = await pool.query(
+                    `SELECT today_trips, today_earnings 
+                     FROM driver_earnings 
+                     WHERE driver_id = $1 AND date = CURRENT_DATE 
+                     LIMIT 1`,
+                    [userData.driver_id]
+                );
+
+                // Use latest record for total_trips and total_earnings (cumulative)
+                // Use today's record for today_trips and today_earnings
+                const latestData = latestEarningsResult.rows[0] || {};
+                const todayData = todayEarningsResult.rows[0] || {};
+
+                userData = {
+                    ...userData,
+                    today_trips: todayData.today_trips || 0,
+                    today_earnings: todayData.today_earnings || 0,
+                    total_trips: latestData.total_trips || 0,
+                    total_earnings: latestData.total_earnings || 0
+                };
             } catch (earningsErr) {
                 console.error('Error fetching driver earnings:', earningsErr);
                 // Continue without earnings data
