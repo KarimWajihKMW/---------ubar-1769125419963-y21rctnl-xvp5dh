@@ -377,27 +377,9 @@ function initLeafletMap() {
         if (currentPickup) leafletMap.setView([currentPickup.lat, currentPickup.lng], Math.max(leafletMap.getZoom(), 14));
     };
 
-    // Geolocate user (passenger) or keep Alexandria for driver
-    if (isDriver) {
-        setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
-        leafletMap.setView(alexandriaCenter, 12);
-    } else if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(pos => {
-            const { latitude, longitude } = pos.coords;
-            // Reverse geocode to get readable address
-            reverseGeocode(latitude, longitude, (address) => {
-                setPickup({ lat: latitude, lng: longitude }, address);
-                leafletMap.setView([latitude, longitude], 14);
-            });
-        }, () => {
-            // Fallback to Alexandria
-            setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
-            leafletMap.setView(alexandriaCenter, 12);
-        }, { enableHighAccuracy: true, timeout: 6000 });
-    } else {
-        setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
-        leafletMap.setView(alexandriaCenter, 12);
-    }
+    // Keep Alexandria as the default location for all roles
+    setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
+    leafletMap.setView(alexandriaCenter, 12);
 
     // Destination/Pickup select by click
     leafletMap.on('click', e => {
@@ -568,20 +550,10 @@ function startMapSelection(mode) {
 }
 
 function useCurrentLocation() {
-    if (!navigator.geolocation) {
-        showToast('المتصفح لا يدعم تحديد الموقع');
-        return;
-    }
-    navigator.geolocation.getCurrentPosition(pos => {
-        const { latitude, longitude } = pos.coords;
-        reverseGeocode(latitude, longitude, (address) => {
-            setPickup({ lat: latitude, lng: longitude }, address);
-            if (leafletMap) leafletMap.setView([latitude, longitude], Math.max(leafletMap.getZoom(), 14));
-            showToast('تم تحديث موقعك الحالي');
-        });
-    }, () => {
-        showToast('تعذر تحديد موقعك');
-    }, { enableHighAccuracy: true, timeout: 6000 });
+    const alexandriaCenter = [31.2001, 29.9187];
+    setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
+    if (leafletMap) leafletMap.setView(alexandriaCenter, Math.max(leafletMap.getZoom(), 12));
+    showToast('تم ضبط موقعك على الإسكندرية');
 }
 
 window.startMapSelection = startMapSelection;
