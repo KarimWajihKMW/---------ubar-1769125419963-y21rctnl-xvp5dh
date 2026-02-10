@@ -253,6 +253,7 @@ let passengerToDestinationAnim = null;
 let mapSelectionMode = 'destination';
 let isDriverInfoCollapsed = false;
 let isDriverPanelCollapsed = false;
+let isPassengerPanelHidden = false;
 let locationWatchId = null;
 let lastGeoCoords = null;
 let lastGeoLabel = null;
@@ -395,6 +396,7 @@ function initLeafletMap() {
 
     // Destination/Pickup select by click
     leafletMap.on('click', e => {
+        if (!isPassengerMapSelectionEnabled()) return;
         if (mapSelectionMode === 'pickup') {
             reverseGeocode(e.latlng.lat, e.latlng.lng, (address) => {
                 setPickup({ lat: e.latlng.lat, lng: e.latlng.lng }, address);
@@ -480,6 +482,7 @@ function setPickup(coords, label) {
 }
 
 function setDestination(coords, label) {
+    if (currentUserRole !== 'passenger') return;
     currentDestination = { ...coords, label: label || 'الوجهة' };
     if (!leafletMap) return;
     if (destMarkerL) destMarkerL.remove();
@@ -551,7 +554,21 @@ function updateMapSelectionButtons() {
     }
 }
 
+function isPassengerMapSelectionEnabled() {
+    if (currentUserRole !== 'passenger') return false;
+    const passengerUI = document.getElementById('passenger-ui-container');
+    const driverUI = document.getElementById('driver-ui-container');
+    if (!passengerUI || passengerUI.classList.contains('hidden')) return false;
+    if (driverUI && !driverUI.classList.contains('hidden')) return false;
+    const destinationState = document.getElementById('state-destination');
+    const rideSelectState = document.getElementById('state-ride-select');
+    const isDestinationVisible = destinationState && !destinationState.classList.contains('hidden');
+    const isRideSelectVisible = rideSelectState && !rideSelectState.classList.contains('hidden');
+    return isDestinationVisible || isRideSelectVisible;
+}
+
 function startMapSelection(mode) {
+    if (!isPassengerMapSelectionEnabled()) return;
     mapSelectionMode = mode === 'pickup' ? 'pickup' : 'destination';
     updateMapSelectionButtons();
     if (mapSelectionMode === 'pickup') {
@@ -1976,6 +1993,32 @@ window.toggleCarOptions = function() {
     toggleBtn.setAttribute('aria-expanded', (!isNowHidden).toString());
 };
 
+function setPassengerPanelHidden(hidden) {
+    const panel = document.getElementById('main-panel');
+    const toggleBtn = document.getElementById('passenger-panel-toggle');
+    const toggleText = document.getElementById('passenger-panel-toggle-text');
+    const toggleIcon = document.getElementById('passenger-panel-toggle-icon');
+
+    if (!panel || !toggleBtn) return;
+
+    isPassengerPanelHidden = hidden;
+    panel.classList.toggle('hidden', hidden);
+    panel.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+    toggleBtn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+
+    if (toggleText) {
+        toggleText.innerText = hidden ? 'إظهار خيارات الرحلة' : 'إخفاء خيارات الرحلة';
+    }
+    if (toggleIcon) {
+        toggleIcon.classList.toggle('fa-chevron-down', hidden);
+        toggleIcon.classList.toggle('fa-chevron-up', !hidden);
+    }
+}
+
+window.togglePassengerPanel = function() {
+    setPassengerPanelHidden(!isPassengerPanelHidden);
+};
+
 window.resetApp = function() {
     if (currentUserRole !== 'passenger') return;
 
@@ -2023,6 +2066,7 @@ window.resetApp = function() {
 };
 
 window.confirmDestination = function(destination) {
+    if (currentUserRole !== 'passenger') return;
     const userMarker = document.getElementById('user-marker');
     const backBtn = document.getElementById('back-btn');
     const reqBtn = document.getElementById('request-btn');
@@ -2784,6 +2828,9 @@ function initPassengerMode() {
     document.body.classList.remove('role-driver');
     document.getElementById('passenger-ui-container').classList.remove('hidden');
     document.getElementById('passenger-top-bar').classList.remove('hidden');
+    const passengerPanelToggle = document.getElementById('passenger-panel-toggle');
+    if (passengerPanelToggle) passengerPanelToggle.classList.remove('hidden');
+    setPassengerPanelHidden(false);
     const driverUi = document.getElementById('driver-ui-container');
     if (driverUi) driverUi.classList.add('hidden');
     const driverPanelToggle = document.getElementById('driver-panel-toggle');
@@ -2862,12 +2909,21 @@ function initDriverMode() {
     if (passengerUi) passengerUi.classList.add('hidden');
     const passengerTopBar = document.getElementById('passenger-top-bar');
     if (passengerTopBar) passengerTopBar.classList.add('hidden');
+    setPassengerPanelHidden(true);
+    const rideSelectState = document.getElementById('state-ride-select');
+    if (rideSelectState) rideSelectState.classList.add('hidden');
+    const carOptionsToggle = document.getElementById('car-options-toggle');
+    if (carOptionsToggle) carOptionsToggle.classList.add('hidden');
+    const carOptionsList = document.getElementById('car-options-list');
+    if (carOptionsList) carOptionsList.classList.add('hidden');
     const passengerMenu = document.getElementById('side-menu');
     const passengerOverlay = document.getElementById('menu-overlay');
     if (passengerMenu) passengerMenu.classList.remove('sidebar-open');
     if (passengerOverlay) passengerOverlay.classList.remove('overlay-open');
     const driverTopBar = document.getElementById('driver-top-bar');
     if (driverTopBar) driverTopBar.classList.remove('hidden');
+    const passengerPanelToggle = document.getElementById('passenger-panel-toggle');
+    if (passengerPanelToggle) passengerPanelToggle.classList.add('hidden');
     const um = document.getElementById('user-marker');
     if(um) um.classList.remove('hidden');
     const world = document.getElementById('map-world');
