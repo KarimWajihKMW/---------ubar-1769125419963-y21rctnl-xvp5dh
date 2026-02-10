@@ -132,6 +132,28 @@ const ApiService = {
             if (autoCreate) params.set('auto_create', '1');
             const query = params.toString();
             return ApiService.request(`/drivers/resolve${query ? `?${query}` : ''}`);
+        },
+
+        // Update driver live location
+        async updateLocation(driverId, lat, lng) {
+            return ApiService.request(`/drivers/${driverId}/location`, {
+                method: 'PATCH',
+                body: JSON.stringify({ lat, lng })
+            });
+        },
+
+        // Get driver last known location
+        async getLocation(driverId) {
+            return ApiService.request(`/drivers/${driverId}/location`);
+        },
+
+        // Get nearest driver to coordinates
+        async getNearest(lat, lng, carType = null) {
+            const params = new URLSearchParams();
+            params.set('lat', lat);
+            params.set('lng', lng);
+            if (carType) params.set('car_type', carType);
+            return ApiService.request(`/drivers/nearest?${params.toString()}`);
         }
     },
     

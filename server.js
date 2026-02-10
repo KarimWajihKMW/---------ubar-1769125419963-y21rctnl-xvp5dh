@@ -231,6 +231,18 @@ async function ensureTripTimeColumns() {
     }
 }
 
+async function ensureDriverLocationColumns() {
+    try {
+        await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_lat DECIMAL(10, 8);`);
+        await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_lng DECIMAL(11, 8);`);
+        await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_location_at TIMESTAMP;`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_drivers_location ON drivers(last_lat, last_lng);`);
+        console.log('✅ Driver location columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure driver location columns:', err.message);
+    }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
@@ -888,6 +900,102 @@ app.get('/api/drivers', async (req, res) => {
         });
     } catch (err) {
         console.error('Error fetching drivers:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Update driver live location
+app.patch('/api/drivers/:id/location', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { lat, lng } = req.body;
+
+        const latitude = lat !== undefined && lat !== null ? Number(lat) : null;
+        const longitude = lng !== undefined && lng !== null ? Number(lng) : null;
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return res.status(400).json({ success: false, error: 'Invalid coordinates.' });
+        }
+
+        const result = await pool.query(
+            `UPDATE drivers
+             SET last_lat = $1, last_lng = $2, last_location_at = CURRENT_TIMESTAMP, status = 'online', updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3
+             RETURNING id, name, status, last_lat, last_lng, last_location_at`,
+            [latitude, longitude, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Driver not found' });
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error updating driver location:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get driver last known location
+app.get('/api/drivers/:id/location', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query(
+            `SELECT id, name, status, car_type, last_lat, last_lng, last_location_at
+             FROM drivers
+             WHERE id = $1`,
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Driver not found' });
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error fetching driver location:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get nearest driver by coordinates
+app.get('/api/drivers/nearest', async (req, res) => {
+    try {
+        const { lat, lng, car_type } = req.query;
+        const latitude = lat !== undefined && lat !== null ? Number(lat) : null;
+        const longitude = lng !== undefined && lng !== null ? Number(lng) : null;
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return res.status(400).json({ success: false, error: 'Invalid coordinates.' });
+        }
+
+        const params = [latitude, longitude];
+        let carFilter = '';
+        if (car_type) {
+            params.push(String(car_type));
+            carFilter = ` AND car_type = $${params.length}`;
+        }
+
+        const result = await pool.query(
+            `SELECT id, name, status, car_type, last_lat, last_lng, last_location_at,
+                    (6371 * acos(
+                        cos(radians($1)) * cos(radians(last_lat)) * cos(radians(last_lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(last_lat))
+                    )) AS distance_km
+             FROM drivers
+             WHERE status = 'online'
+               AND approval_status = 'approved'
+               AND last_lat IS NOT NULL
+               AND last_lng IS NOT NULL
+               ${carFilter}
+             ORDER BY distance_km ASC
+             LIMIT 1`,
+            params
+        );
+
+        res.json({ success: true, data: result.rows[0] || null });
+    } catch (err) {
+        console.error('Error fetching nearest driver:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -2202,6 +2310,7 @@ ensureDefaultAdmins()
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
+    .then(() => ensureDriverLocationColumns())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');
         return driverSync.initializeSyncSystem();

@@ -172,6 +172,8 @@ let driverStartReady = false;
 let driverAwaitingPayment = false;
 let passengerTripStartedAt = null;
 let driverTripStartedAt = null;
+let lastDriverLocationUpdateAt = 0;
+let nearestDriverPreview = null;
 
 function isMapWorldActive() {
     const mapWorld = document.getElementById('map-world');
@@ -583,6 +585,20 @@ function applyDriverLocation(coords, shouldCenter) {
     if (leafletMap && shouldCenter) {
         leafletMap.setView([coords.lat, coords.lng], Math.max(leafletMap.getZoom(), 14));
     }
+    updateDriverLiveLocation(coords);
+}
+
+async function updateDriverLiveLocation(coords) {
+    if (!currentDriverProfile?.id || !coords) return;
+    const now = Date.now();
+    if (now - lastDriverLocationUpdateAt < 5000) return;
+    lastDriverLocationUpdateAt = now;
+
+    try {
+        await ApiService.drivers.updateLocation(currentDriverProfile.id, coords.lat, coords.lng);
+    } catch (error) {
+        console.error('Failed to update driver location:', error);
+    }
 }
 
 function maybeReverseGeocodePickup(coords) {
@@ -787,13 +803,15 @@ function startDriverTrackingLive() {
         iconAnchor: [16, 16]
     });
     
-    // Initial driver location: offset from pickup
-    const offsetLat = 0.04; // ~4km for realistic timing
-    const offsetLng = 0.04;
-    driverLocation = {
-        lat: currentPickup.lat + offsetLat,
-        lng: currentPickup.lng + offsetLng
-    };
+    if (!driverLocation || !Number.isFinite(driverLocation.lat) || !Number.isFinite(driverLocation.lng)) {
+        // Initial driver location: offset from pickup when no live location is available
+        const offsetLat = 0.04; // ~4km for realistic timing
+        const offsetLng = 0.04;
+        driverLocation = {
+            lat: currentPickup.lat + offsetLat,
+            lng: currentPickup.lng + offsetLng
+        };
+    }
     
     driverMarkerL = L.marker([driverLocation.lat, driverLocation.lng], { icon: carIcon }).addTo(leafletMap);
     driverMarkerL.bindPopup('🚗 السيارة قادمة إليك').openPopup();
@@ -1885,6 +1903,8 @@ window.resetApp = function() {
     stopPassengerMatchPolling();
     stopDriverTracking();
     stopDriverTrackingLive();
+    driverLocation = null;
+    nearestDriverPreview = null;
     
     // Reset payment
     selectedPaymentMethod = null;
@@ -2415,6 +2435,8 @@ window.logoutUser = function() {
     stopPassengerMatchPolling();
     stopDriverRequestPolling();
     stopLocationTracking();
+    driverLocation = null;
+    nearestDriverPreview = null;
     DB.clearSession();
     window.location.reload();
 };
@@ -2484,7 +2506,7 @@ async function checkPassengerMatch(tripId) {
 
         if (trip.driver_id) {
             stopPassengerMatchPolling();
-            handlePassengerAssignedTrip(trip);
+            await handlePassengerAssignedTrip(trip);
         }
     } catch (error) {
         console.error('Failed to check trip assignment:', error);
@@ -2499,12 +2521,57 @@ function startPassengerMatchPolling(tripId) {
     passengerMatchInterval = setInterval(() => checkPassengerMatch(tripId), 4000);
 }
 
-function handlePassengerAssignedTrip(trip) {
+async function loadAssignedDriverLocation(driverId) {
+    if (!driverId) return null;
+    try {
+        const response = await ApiService.drivers.getLocation(driverId);
+        if (response?.success && response?.data?.last_lat && response?.data?.last_lng) {
+            return {
+                lat: Number(response.data.last_lat),
+                lng: Number(response.data.last_lng),
+                name: response.data.name || null
+            };
+        }
+    } catch (error) {
+        console.error('Failed to fetch assigned driver location:', error);
+    }
+    return null;
+}
+
+async function fetchNearestDriverPreview(pickup, carType) {
+    if (!pickup?.lat || !pickup?.lng) return null;
+    try {
+        const response = await ApiService.drivers.getNearest(pickup.lat, pickup.lng, carType);
+        if (response?.success && response?.data) {
+            const nearest = response.data;
+            if (nearest.last_lat && nearest.last_lng) {
+                nearestDriverPreview = {
+                    lat: Number(nearest.last_lat),
+                    lng: Number(nearest.last_lng),
+                    name: nearest.name || null
+                };
+                return nearestDriverPreview;
+            }
+        }
+    } catch (error) {
+        console.error('Failed to fetch nearest driver:', error);
+    }
+    return null;
+}
+
+async function handlePassengerAssignedTrip(trip) {
     activePassengerTripId = trip.id || activePassengerTripId;
 
     const driverName = trip.driver_name || 'كابتن قريب';
     const driverLabelText = document.getElementById('driver-label-text');
     if (driverLabelText) driverLabelText.innerText = `${driverName} قادم إليك`;
+
+    const assignedLocation = await loadAssignedDriverLocation(trip.driver_id);
+    if (assignedLocation) {
+        driverLocation = { lat: assignedLocation.lat, lng: assignedLocation.lng };
+    } else if (nearestDriverPreview) {
+        driverLocation = { lat: nearestDriverPreview.lat, lng: nearestDriverPreview.lng };
+    }
 
     const est = lastTripEstimate || computeTripEstimates();
     const etaMin = est.etaMin || 10;
@@ -2588,6 +2655,7 @@ window.requestRide = async function() {
     // Show loading (searching for driver)
     switchSection('loading');
     if (activePassengerTripId) {
+        fetchNearestDriverPreview(currentPickup, currentCarType);
         startPassengerMatchPolling(activePassengerTripId);
     }
 };

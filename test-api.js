@@ -159,7 +159,30 @@ async function testAPI() {
         const autoEmail = `autodriver_${Date.now()}@ubar.sa`;
         response = await fetch(`${baseURL}/drivers/resolve?email=${encodeURIComponent(autoEmail)}&auto_create=1`);
         data = await response.json();
-        console.log('✅ Auto-created driver:', data.data?.id, data.data?.email);
+        const autoDriverId = data.data?.id;
+        console.log('✅ Auto-created driver:', autoDriverId, data.data?.email);
+
+        // Test 1️⃣4️⃣c: Update driver location
+        console.log('\n1️⃣4️⃣c Testing update driver location...');
+        response = await fetch(`${baseURL}/drivers/${autoDriverId}/location`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: 24.7136, lng: 46.6753 })
+        });
+        data = await response.json();
+        console.log('✅ Driver location updated:', data.data?.id, data.data?.last_lat, data.data?.last_lng);
+
+        // Test 1️⃣4️⃣d: Get driver location
+        console.log('\n1️⃣4️⃣d Testing get driver location...');
+        response = await fetch(`${baseURL}/drivers/${autoDriverId}/location`);
+        data = await response.json();
+        console.log('✅ Driver location fetched:', data.data?.last_lat, data.data?.last_lng);
+
+        // Test 1️⃣4️⃣e: Get nearest driver
+        console.log('\n1️⃣4️⃣e Testing get nearest driver...');
+        response = await fetch(`${baseURL}/drivers/nearest?lat=24.7136&lng=46.6753`);
+        data = await response.json();
+        console.log('✅ Nearest driver:', data.data?.id || 'none');
 
         // Test 1️⃣5️⃣: Get available drivers
         console.log('\n1️⃣5️⃣ Testing get available drivers...');
