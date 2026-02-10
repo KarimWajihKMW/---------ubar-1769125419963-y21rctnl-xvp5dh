@@ -249,6 +249,7 @@ let etaCountdown = null;
 let etaSeconds = 0;
 let driverToPassengerAnim = null;
 let driverToDestinationAnim = null;
+let passengerToDestinationAnim = null;
 let mapSelectionMode = 'destination';
 let isDriverInfoCollapsed = false;
 let isDriverPanelCollapsed = false;
@@ -1115,6 +1116,90 @@ function animateDriverToDestination(start, target) {
     driverToDestinationAnim = requestAnimationFrame(moveStep);
 }
 
+function startPassengerToDestinationRoute() {
+    if (!leafletMap || !currentDestination) return;
+
+    if (passengerToDestinationAnim) {
+        cancelAnimationFrame(passengerToDestinationAnim);
+        passengerToDestinationAnim = null;
+    }
+
+    if (routePolyline) {
+        routePolyline.remove();
+        routePolyline = null;
+    }
+
+    const start = driverLocation || currentPickup || getDriverBaseLocation();
+    const target = { lat: Number(currentDestination.lat), lng: Number(currentDestination.lng) };
+
+    if (!Number.isFinite(target.lat) || !Number.isFinite(target.lng)) return;
+
+    ensureDriverMarker(start);
+
+    routePolyline = L.polyline(
+        [
+            [start.lat, start.lng],
+            [target.lat, target.lng]
+        ],
+        { color: '#f59e0b', weight: 4, opacity: 0.85, dashArray: '6, 6' }
+    ).addTo(leafletMap);
+
+    const bounds = L.latLngBounds([
+        [start.lat, start.lng],
+        [target.lat, target.lng]
+    ]);
+    leafletMap.fitBounds(bounds, { padding: [50, 50] });
+
+    animatePassengerToDestination(start, target);
+}
+
+function animatePassengerToDestination(start, target) {
+    if (!driverMarkerL) return;
+    if (passengerToDestinationAnim) {
+        cancelAnimationFrame(passengerToDestinationAnim);
+        passengerToDestinationAnim = null;
+    }
+
+    const distanceMeters = calculateDistance(start.lat, start.lng, target.lat, target.lng);
+    const speedMps = 11; // ~40 km/h
+    const duration = Math.max(25000, Math.min(220000, Math.round(distanceMeters / speedMps) * 1000));
+    const startTime = Date.now();
+
+    function moveStep() {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+
+        const currentLat = start.lat + (target.lat - start.lat) * eased;
+        const currentLng = start.lng + (target.lng - start.lng) * eased;
+        driverLocation = { lat: currentLat, lng: currentLng };
+
+        driverMarkerL.setLatLng([currentLat, currentLng]);
+        if (routePolyline) {
+            routePolyline.setLatLngs([
+                [currentLat, currentLng],
+                [target.lat, target.lng]
+            ]);
+        }
+
+        const bearing = calculateBearing(currentLat, currentLng, target.lat, target.lng);
+        const carEl = driverMarkerL.getElement();
+        if (carEl) {
+            const iconDiv = carEl.querySelector('div');
+            if (iconDiv) iconDiv.style.transform = `rotate(${bearing}deg)`;
+        }
+
+        if (progress < 1) {
+            passengerToDestinationAnim = requestAnimationFrame(moveStep);
+        } else {
+            passengerToDestinationAnim = null;
+            showToast('✅ وصلت إلى الوجهة - يمكنك إنهاء الرحلة');
+        }
+    }
+
+    passengerToDestinationAnim = requestAnimationFrame(moveStep);
+}
+
 function animateDriverToPassenger(start, target) {
     const distanceMeters = calculateDistance(start.lat, start.lng, target.lat, target.lng);
     const speedMps = 9; // ~32 km/h
@@ -1196,6 +1281,8 @@ function startTripToDestination() {
         });
     }
     passengerTripStartedAt = Date.now();
+
+    startPassengerToDestinationRoute();
     
     const estimateMinutes = lastTripEstimate?.etaMin || 10;
     const tripDurationSeconds = Math.max(60, Math.round(estimateMinutes * 60));
@@ -1915,8 +2002,17 @@ window.resetApp = function() {
     stopPassengerMatchPolling();
     stopDriverTracking();
     stopDriverTrackingLive();
+    if (passengerToDestinationAnim) {
+        cancelAnimationFrame(passengerToDestinationAnim);
+        passengerToDestinationAnim = null;
+    }
+    if (routePolyline) {
+        routePolyline.remove();
+        routePolyline = null;
+    }
     driverLocation = null;
     nearestDriverPreview = null;
+    passengerTripStartedAt = null;
     
     // Reset payment
     selectedPaymentMethod = null;
@@ -4816,15 +4912,36 @@ window.updatePaymentSummary = function() {
     }
 };
 
+function getPassengerTripDurationMinutes() {
+    if (passengerTripStartedAt) {
+        const elapsedMs = Date.now() - passengerTripStartedAt;
+        if (elapsedMs > 0) {
+            return Math.max(1, Math.round(elapsedMs / 60000));
+        }
+    }
+
+    const fallbackEstimate = computeTripEstimates();
+    const fallback = tripDetails.duration
+        || lastTripEstimate?.etaMin
+        || fallbackEstimate.etaMin
+        || 0;
+
+    return Math.max(1, Math.round(Number(fallback) || 0));
+}
+
 function updatePaymentSuccessTripSummary(trip) {
     if (!trip) return;
     const distanceEl = document.getElementById('payment-success-distance');
     const durationEl = document.getElementById('payment-success-duration');
     const tripIdEl = document.getElementById('payment-success-trip-id');
+    const pickupEl = document.getElementById('payment-success-pickup');
+    const dropoffEl = document.getElementById('payment-success-dropoff');
 
     if (tripIdEl) tripIdEl.innerText = trip.id || '--';
     if (distanceEl) distanceEl.innerText = `${Number(trip.distance || 0)} كم`;
     if (durationEl) durationEl.innerText = `${Number(trip.duration || 0)} دقيقة`;
+    if (pickupEl) pickupEl.innerText = trip.pickup || currentPickup?.label || '--';
+    if (dropoffEl) dropoffEl.innerText = trip.dropoff || currentDestination?.label || '--';
 }
 
 window.showLastTripDetails = function() {
@@ -4893,6 +5010,9 @@ window.proceedToPayment = function() {
         const rideDestText = document.getElementById('ride-dest-text');
         const user = DB.getUser();
         const tripId = activePassengerTripId || `TR-${Math.floor(Math.random() * 9000) + 1000}`;
+        const actualDuration = getPassengerTripDurationMinutes();
+
+        tripDetails.duration = actualDuration;
 
         const fallbackTrip = {
             id: tripId,
@@ -4901,7 +5021,7 @@ window.proceedToPayment = function() {
             dropoff: rideDestText ? rideDestText.innerText : 'وجهة محددة',
             cost: amount,
             distance: Number(tripDetails.distance || 0),
-            duration: Number(tripDetails.duration || 0),
+            duration: Number(actualDuration || 0),
             status: 'completed',
             car: currentCarType || 'economy',
             driver: 'أحمد محمد',
@@ -4929,6 +5049,7 @@ window.proceedToPayment = function() {
                 const response = await ApiService.trips.updateStatus(activePassengerTripId, 'completed', {
                     cost: amount,
                     distance: tripDetails.distance,
+                    duration: actualDuration,
                     payment_method: paymentMethod
                 });
                 if (response?.data) {
@@ -4959,6 +5080,7 @@ window.proceedToPayment = function() {
         appliedPromo = null;
         promoDiscount = 0;
         SafeStorage.removeItem('akwadra_active_offer');
+        passengerTripStartedAt = null;
         
         // Show payment confirmation
         const amountEl = document.getElementById('payment-success-amount');
