@@ -3,11 +3,16 @@ const DARK_MODE_KEY = 'akwadra_dark_mode';
 function getRole() {
     const params = new URLSearchParams(window.location.search);
     const role = params.get('role');
-    return role === 'driver' ? 'driver' : 'passenger';
+    if (role === 'driver' || role === 'admin') return role;
+    return 'passenger';
 }
 
 const ROLE = getRole();
-const PREF_KEY = ROLE === 'driver' ? 'akwadra_driver_prefs' : 'akwadra_passenger_prefs';
+const PREF_KEY = ROLE === 'driver'
+    ? 'akwadra_driver_prefs'
+    : ROLE === 'admin'
+        ? 'akwadra_admin_prefs'
+        : 'akwadra_passenger_prefs';
 
 const BASE_PREF_DEFAULTS = {
     trips: true,
@@ -81,11 +86,25 @@ function applyRoleUI() {
     });
     const title = document.getElementById('settings-title');
     const subtitle = document.getElementById('settings-subtitle');
-    if (title) title.textContent = isDriver ? '⚙️ إعدادات الكابتن' : '⚙️ إعدادات الراكب';
-    if (subtitle) subtitle.textContent = isDriver
-        ? 'اضبط تفضيلاتك أثناء القيادة'
-        : 'اضبط تفضيلاتك بسهولة';
-    document.title = isDriver ? 'إعدادات الكابتن - أكوادرا' : 'إعدادات الراكب - أكوادرا';
+    if (title) {
+        title.textContent = isDriver
+            ? '⚙️ إعدادات الكابتن'
+            : ROLE === 'admin'
+                ? '⚙️ إعدادات الإدارة'
+                : '⚙️ إعدادات الراكب';
+    }
+    if (subtitle) {
+        subtitle.textContent = isDriver
+            ? 'اضبط تفضيلاتك أثناء القيادة'
+            : ROLE === 'admin'
+                ? 'اضبط تفضيلات لوحة الإدارة'
+                : 'اضبط تفضيلاتك بسهولة';
+    }
+    document.title = isDriver
+        ? 'إعدادات الكابتن - أكوادرا'
+        : ROLE === 'admin'
+            ? 'إعدادات الإدارة - أكوادرا'
+            : 'إعدادات الراكب - أكوادرا';
 }
 
 function setDarkMode(enabled) {
