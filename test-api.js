@@ -64,7 +64,6 @@ async function testAPI() {
         console.log('\n8️⃣ Testing create new trip...');
         const newTrip = {
             user_id: 3,
-            driver_id: 1,
             pickup_location: 'شارع التحلية، الرياض',
             dropoff_location: 'العليا مول',
             pickup_lat: 24.7136,
@@ -75,8 +74,7 @@ async function testAPI() {
             cost: 45.50,
             distance: 10.5,
             duration: 20,
-            payment_method: 'card',
-            driver_name: 'أحمد محمد'
+            payment_method: 'card'
         };
         
         response = await fetch(`${baseURL}/trips`, {
@@ -89,9 +87,9 @@ async function testAPI() {
         
         const createdTripId = data.data.id;
 
-        // Test 9: Get next pending trip (with auto demo)
-        console.log('\n9️⃣ Testing get next pending trip (auto demo)...');
-        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy&auto_demo=1`);
+        // Test 9: Get next pending trip
+        console.log('\n9️⃣ Testing get next pending trip...');
+        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy`);
         data = await response.json();
         console.log('✅ Pending trip:', data.data?.id || 'none');
 
@@ -125,7 +123,6 @@ async function testAPI() {
         console.log('\n1️⃣3️⃣ Testing reject pending trip...');
         const rejectTrip = {
             user_id: 3,
-            driver_id: 1,
             pickup_location: 'طريق الملك عبدالله، الرياض',
             dropoff_location: 'النخيل مول',
             pickup_lat: 24.7510,

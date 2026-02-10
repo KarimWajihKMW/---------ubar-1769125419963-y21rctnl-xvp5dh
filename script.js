@@ -161,6 +161,8 @@ let currentDriverProfile = null;
 let currentIncomingTrip = null;
 let activeDriverTripId = null;
 let activePassengerTripId = null;
+let passengerMatchInterval = null;
+let passengerMatchTripId = null;
 let lastTripEstimate = null;
 let lastCompletedTrip = null;
 let driverDemoRequestAt = 0;
@@ -1880,7 +1882,8 @@ window.resetApp = function() {
     if (userMarker) userMarker.classList.remove('opacity-0');
     if (destMarker) destMarker.classList.add('hidden');
     
-    stopDriverTracking(); 
+    stopPassengerMatchPolling();
+    stopDriverTracking();
     stopDriverTrackingLive();
     
     // Reset payment
@@ -2020,9 +2023,8 @@ window.sendChatMessage = function() {
 window.driverRejectRequest = async function() {
     try {
         const tripId = currentIncomingTrip?.id;
-        const isLocalDemo = tripId && typeof tripId === 'string' && tripId.startsWith('DEMO-');
-        if (tripId && !isLocalDemo) {
-            await ApiService.trips.reject(currentIncomingTrip.id);
+        if (tripId) {
+            await ApiService.trips.reject(tripId);
         }
     } catch (error) {
         console.error('Reject trip failed:', error);
@@ -2051,38 +2053,9 @@ window.driverAcceptRequest = async function() {
             return;
         }
 
-        let tripId = currentIncomingTrip.id;
-        const isLocalDemo = tripId && typeof tripId === 'string' && tripId.startsWith('DEMO-');
-
-        if (!tripId || isLocalDemo) {
-            try {
-                const created = await ApiService.trips.create({
-                    user_id: currentIncomingTrip.user_id || 1,
-                    pickup_location: currentIncomingTrip.pickup_location,
-                    dropoff_location: currentIncomingTrip.dropoff_location,
-                    pickup_lat: currentIncomingTrip.pickup_lat ?? null,
-                    pickup_lng: currentIncomingTrip.pickup_lng ?? null,
-                    dropoff_lat: currentIncomingTrip.dropoff_lat ?? null,
-                    dropoff_lng: currentIncomingTrip.dropoff_lng ?? null,
-                    car_type: currentIncomingTrip.car_type || currentDriverProfile?.car_type || 'economy',
-                    cost: currentIncomingTrip.cost || 0,
-                    distance: currentIncomingTrip.distance || null,
-                    duration: currentIncomingTrip.duration || null,
-                    payment_method: currentIncomingTrip.payment_method || 'cash',
-                    status: 'pending'
-                });
-
-                if (created?.data?.id) {
-                    tripId = created.data.id;
-                    currentIncomingTrip = { ...currentIncomingTrip, id: tripId };
-                }
-            } catch (error) {
-                console.error('Failed to create trip before assign:', error);
-            }
-        }
-
+        const tripId = currentIncomingTrip.id;
         if (!tripId) {
-            showToast('تعذر تجهيز الطلب، حاول مرة أخرى');
+            showToast('لا توجد رحلة صالحة للقبول');
             return;
         }
 
@@ -2098,11 +2071,11 @@ window.driverAcceptRequest = async function() {
         }
 
         if (!assignResponse?.success) {
-            showToast('تم قبول الطلب محلياً');
-            activeDriverTripId = tripId;
-        } else {
-            activeDriverTripId = assignResponse.data?.id || tripId;
+            showToast('تعذر قبول الطلب، حاول مرة أخرى');
+            return;
         }
+
+        activeDriverTripId = assignResponse.data?.id || tripId;
 
         const waiting = document.getElementById('driver-status-waiting');
         if (waiting) waiting.classList.add('hidden');
@@ -2439,6 +2412,7 @@ window.driverEndTrip = async function() {
 };
 
 window.logoutUser = function() {
+    stopPassengerMatchPolling();
     stopDriverRequestPolling();
     stopLocationTracking();
     DB.clearSession();
@@ -2483,6 +2457,76 @@ function updateTripEstimatesUI() {
     const tEl = document.getElementById('ride-time-badge');
     if (dEl) dEl.innerText = `${distanceKm} كم`;
     if (tEl) tEl.innerText = `~${etaMin} دقيقة`;
+}
+
+function stopPassengerMatchPolling() {
+    if (passengerMatchInterval) {
+        clearInterval(passengerMatchInterval);
+        passengerMatchInterval = null;
+    }
+    passengerMatchTripId = null;
+}
+
+async function checkPassengerMatch(tripId) {
+    if (!tripId) return;
+
+    try {
+        const response = await ApiService.trips.getById(tripId);
+        const trip = response?.data || null;
+        if (!trip) return;
+
+        if (trip.status === 'cancelled') {
+            stopPassengerMatchPolling();
+            showToast('تم إلغاء الرحلة');
+            resetApp();
+            return;
+        }
+
+        if (trip.driver_id) {
+            stopPassengerMatchPolling();
+            handlePassengerAssignedTrip(trip);
+        }
+    } catch (error) {
+        console.error('Failed to check trip assignment:', error);
+    }
+}
+
+function startPassengerMatchPolling(tripId) {
+    if (!tripId) return;
+    stopPassengerMatchPolling();
+    passengerMatchTripId = tripId;
+    checkPassengerMatch(tripId);
+    passengerMatchInterval = setInterval(() => checkPassengerMatch(tripId), 4000);
+}
+
+function handlePassengerAssignedTrip(trip) {
+    activePassengerTripId = trip.id || activePassengerTripId;
+
+    const driverName = trip.driver_name || 'كابتن قريب';
+    const driverLabelText = document.getElementById('driver-label-text');
+    if (driverLabelText) driverLabelText.innerText = `${driverName} قادم إليك`;
+
+    const est = lastTripEstimate || computeTripEstimates();
+    const etaMin = est.etaMin || 10;
+    const minETA = 10 * 60;
+    const maxETA = 15 * 60;
+    etaSeconds = Math.max(minETA, Math.min(maxETA, Math.round(etaMin * 60)));
+
+    const carTypeNames = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
+    const carType = trip.car_type || currentCarType;
+    const price = currentTripPrice || trip.cost || 0;
+    const carTypeEl = document.getElementById('trip-car-type');
+    if (carTypeEl) carTypeEl.innerText = carTypeNames[carType] || carType || 'اقتصادي';
+    const priceEl = document.getElementById('trip-price-display');
+    if (priceEl) priceEl.innerText = `${price} ر.س`;
+
+    const etaEl = document.getElementById('eta-display');
+    if (etaEl) etaEl.innerText = formatETA(etaSeconds);
+
+    switchSection('driver');
+    startDriverTrackingLive();
+    startETACountdown();
+    showToast('✅ تم قبول الرحلة بواسطة كابتن حقيقي', 4000);
 }
 
 window.requestRide = async function() {
@@ -2543,27 +2587,9 @@ window.requestRide = async function() {
 
     // Show loading (searching for driver)
     switchSection('loading');
-    // After a short delay, show driver found
-    setTimeout(() => {
-        // Realistic ETA between 10-15 minutes
-        const minETA = 10 * 60; // 10 minutes
-        const maxETA = 15 * 60; // 15 minutes
-        const calculatedETA = est.etaMin * 60;
-        etaSeconds = Math.max(minETA, Math.min(maxETA, calculatedETA));
-        
-        // Update trip info in driver section
-        const carTypeNames = { 'economy': 'اقتصادي', 'family': 'عائلي', 'luxury': 'فاخر', 'delivery': 'توصيل' };
-        document.getElementById('trip-car-type') && (document.getElementById('trip-car-type').innerText = carTypeNames[currentCarType] || currentCarType);
-        document.getElementById('trip-price-display') && (document.getElementById('trip-price-display').innerText = `${currentTripPrice} ر.س`);
-        document.getElementById('eta-display') && (document.getElementById('eta-display').innerText = formatETA(etaSeconds));
-        
-        switchSection('driver');
-        startDriverTrackingLive();
-        startETACountdown();
-        
-        // Show helpful message
-        showToast('✅ تم العثور على كابتن! شاهد السيارة على الخريطة', 4000);
-    }, 500);
+    if (activePassengerTripId) {
+        startPassengerMatchPolling(activePassengerTripId);
+    }
 };
 
 function loginSuccess() {
@@ -2678,9 +2704,6 @@ function initDriverMode() {
     resolveDriverProfile().then(() => {
         showDriverWaitingState();
         startDriverRequestPolling();
-        setTimeout(() => {
-            forceDriverIncomingRequest();
-        }, 600);
     });
 }
 
@@ -2781,157 +2804,6 @@ async function resolveDriverProfile() {
     return null;
 }
 
-async function createDriverDemoTrip() {
-    const now = Date.now();
-    if (now - driverDemoRequestAt < 15000) return null;
-    driverDemoRequestAt = now;
-
-    const demoTrips = [
-        {
-            pickup: 'شارع طلعت حرب، القاهرة',
-            dropoff: 'ميدان التحرير، القاهرة',
-            pickup_lat: 30.0522,
-            pickup_lng: 31.2437,
-            dropoff_lat: 30.0444,
-            dropoff_lng: 31.2357,
-            cost: 38.5,
-            distance: 6.4,
-            duration: 14
-        },
-        {
-            pickup: 'مدينة نصر، القاهرة',
-            dropoff: 'العباسية، القاهرة',
-            pickup_lat: 30.0561,
-            pickup_lng: 31.3301,
-            dropoff_lat: 30.0664,
-            dropoff_lng: 31.2775,
-            cost: 42.0,
-            distance: 7.9,
-            duration: 18
-        },
-        {
-            pickup: 'المعادي، القاهرة',
-            dropoff: 'كورنيش المعادي',
-            pickup_lat: 29.9602,
-            pickup_lng: 31.2569,
-            dropoff_lat: 29.9506,
-            dropoff_lng: 31.2623,
-            cost: 26.0,
-            distance: 4.1,
-            duration: 10
-        }
-    ];
-
-    const demo = demoTrips[Math.floor(Math.random() * demoTrips.length)];
-    const user = DB.getUser();
-    const payload = {
-        user_id: user?.id || 1,
-        pickup_location: demo.pickup,
-        dropoff_location: demo.dropoff,
-        pickup_lat: demo.pickup_lat,
-        pickup_lng: demo.pickup_lng,
-        dropoff_lat: demo.dropoff_lat,
-        dropoff_lng: demo.dropoff_lng,
-        car_type: currentDriverProfile?.car_type || 'economy',
-        cost: demo.cost,
-        distance: demo.distance,
-        duration: demo.duration,
-        payment_method: 'cash',
-        status: 'pending'
-    };
-
-    try {
-        const created = await ApiService.trips.create(payload);
-        return created?.data || null;
-    } catch (error) {
-        console.error('Failed to create demo trip:', error);
-        return null;
-    }
-}
-
-function buildLocalDemoTrip() {
-    const demoTrips = [
-        {
-            pickup_location: 'شارع طلعت حرب، القاهرة',
-            dropoff_location: 'ميدان التحرير، القاهرة',
-            pickup_lat: 30.0522,
-            pickup_lng: 31.2437,
-            dropoff_lat: 30.0444,
-            dropoff_lng: 31.2357,
-            cost: 38.5,
-            distance: 6.4,
-            duration: 14,
-            passenger_name: 'راكب جديد',
-            passenger_phone: '01000000000'
-        },
-        {
-            pickup_location: 'مدينة نصر، القاهرة',
-            dropoff_location: 'العباسية، القاهرة',
-            pickup_lat: 30.0561,
-            pickup_lng: 31.3301,
-            dropoff_lat: 30.0664,
-            dropoff_lng: 31.2775,
-            cost: 42.0,
-            distance: 7.9,
-            duration: 18,
-            passenger_name: 'راكب جديد',
-            passenger_phone: '01000000000'
-        },
-        {
-            pickup_location: 'المعادي، القاهرة',
-            dropoff_location: 'كورنيش المعادي',
-            pickup_lat: 29.9602,
-            pickup_lng: 31.2569,
-            dropoff_lat: 29.9506,
-            dropoff_lng: 31.2623,
-            cost: 26.0,
-            distance: 4.1,
-            duration: 10,
-            passenger_name: 'راكب جديد',
-            passenger_phone: '01000000000'
-        }
-    ];
-
-    const demo = demoTrips[Math.floor(Math.random() * demoTrips.length)];
-    return {
-        id: `DEMO-${Date.now()}`,
-        user_id: 1,
-        driver_id: null,
-        car_type: currentDriverProfile?.car_type || 'economy',
-        status: 'pending',
-        payment_method: 'cash',
-        created_at: new Date().toISOString(),
-        ...demo
-    };
-}
-
-async function forceDriverIncomingRequest() {
-    const now = Date.now();
-    if (now - driverForceRequestAt < 5000) return;
-    driverForceRequestAt = now;
-
-    if (!currentDriverProfile) {
-        await resolveDriverProfile();
-    }
-
-    try {
-        await createDriverDemoTrip();
-        const response = await ApiService.trips.getPendingNext(currentDriverProfile?.car_type, true);
-        const trip = response?.data || null;
-        if (trip) {
-            currentIncomingTrip = trip;
-            renderDriverIncomingTrip(trip);
-            return;
-        }
-    } catch (error) {
-        console.error('Force request failed:', error);
-    }
-
-    const localTrip = buildLocalDemoTrip();
-    currentIncomingTrip = localTrip;
-    renderDriverIncomingTrip(localTrip);
-}
-
 function startDriverRequestPolling() {
     stopDriverRequestPolling();
     triggerDriverRequestPolling();
@@ -2958,13 +2830,8 @@ async function triggerDriverRequestPolling() {
     if (incomingPanel && !incomingPanel.classList.contains('hidden')) return;
 
     try {
-        let response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
-        let trip = response?.data || null;
-        if (!trip) {
-            await createDriverDemoTrip();
-            response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
-            trip = response?.data || null;
-        }
+        const response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, false);
+        const trip = response?.data || null;
 
         if (!trip) {
             showDriverWaitingState();
@@ -2975,18 +2842,6 @@ async function triggerDriverRequestPolling() {
         renderDriverIncomingTrip(trip);
     } catch (error) {
         console.error('Failed to fetch pending trips:', error);
-        await createDriverDemoTrip();
-        try {
-            const retry = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, true);
-            const trip = retry?.data || null;
-            if (trip) {
-                currentIncomingTrip = trip;
-                renderDriverIncomingTrip(trip);
-                return;
-            }
-        } catch (retryError) {
-            console.error('Retry pending trips failed:', retryError);
-        }
         showDriverWaitingState();
     }
 }

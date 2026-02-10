@@ -450,7 +450,7 @@ app.post('/api/trips', async (req, res) => {
     try {
         const {
             id,
-            user_id = 1,
+            user_id,
             driver_id,
             pickup_location,
             dropoff_location,
@@ -466,9 +466,32 @@ app.post('/api/trips', async (req, res) => {
             status = 'pending',
             driver_name
         } = req.body;
-        
+
+        // Validation: Require core trip fields
+        if (!user_id || !pickup_location || !dropoff_location || cost === undefined || cost === null || isNaN(cost)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing or invalid required fields.'
+            });
+        }
+
+        const pickupLat = pickup_lat !== undefined && pickup_lat !== null ? Number(pickup_lat) : null;
+        const pickupLng = pickup_lng !== undefined && pickup_lng !== null ? Number(pickup_lng) : null;
+        const dropoffLat = dropoff_lat !== undefined && dropoff_lat !== null ? Number(dropoff_lat) : null;
+        const dropoffLng = dropoff_lng !== undefined && dropoff_lng !== null ? Number(dropoff_lng) : null;
+
+        if (
+            !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
+            !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)
+        ) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid coordinates.'
+            });
+        }
+
         const tripId = id || 'TR-' + Date.now();
-        
+
         const result = await pool.query(`
             INSERT INTO trips (
                 id, user_id, driver_id, pickup_location, dropoff_location,
@@ -478,10 +501,10 @@ app.post('/api/trips', async (req, res) => {
             RETURNING *
         `, [
             tripId, user_id, driver_id, pickup_location, dropoff_location,
-            pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+            pickupLat, pickupLng, dropoffLat, dropoffLng,
             car_type, cost, distance, duration, payment_method, status, driver_name
         ]);
-        
+
         res.status(201).json({
             success: true,
             data: result.rows[0]
@@ -657,7 +680,7 @@ app.patch('/api/trips/:id/status', async (req, res) => {
 // Get next pending trip (optionally by car type)
 app.get('/api/trips/pending/next', async (req, res) => {
     try {
-        const { car_type, auto_demo } = req.query;
+        const { car_type } = req.query;
 
         let query = `
             SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone
@@ -675,83 +698,6 @@ app.get('/api/trips/pending/next', async (req, res) => {
         query += ' ORDER BY t.created_at ASC LIMIT 1';
 
         const result = await pool.query(query, params);
-
-        if (result.rows.length === 0 && String(auto_demo) === '1') {
-            const demoId = `TR-${Date.now()}`;
-            const demoCarType = car_type || 'economy';
-            const demoTrips = [
-                {
-                    pickup: 'شارع طلعت حرب، القاهرة',
-                    dropoff: 'ميدان التحرير، القاهرة',
-                    pickup_lat: 30.0522,
-                    pickup_lng: 31.2437,
-                    dropoff_lat: 30.0444,
-                    dropoff_lng: 31.2357,
-                    cost: 38.5,
-                    distance: 6.4,
-                    duration: 14
-                },
-                {
-                    pickup: 'مدينة نصر، القاهرة',
-                    dropoff: 'العباسية، القاهرة',
-                    pickup_lat: 30.0561,
-                    pickup_lng: 31.3301,
-                    dropoff_lat: 30.0664,
-                    dropoff_lng: 31.2775,
-                    cost: 42.0,
-                    distance: 7.9,
-                    duration: 18
-                },
-                {
-                    pickup: 'المعادي، القاهرة',
-                    dropoff: 'كورنيش المعادي',
-                    pickup_lat: 29.9602,
-                    pickup_lng: 31.2569,
-                    dropoff_lat: 29.9506,
-                    dropoff_lng: 31.2623,
-                    cost: 26.0,
-                    distance: 4.1,
-                    duration: 10
-                }
-            ];
-            const demo = demoTrips[Math.floor(Math.random() * demoTrips.length)];
-
-            const insert = await pool.query(
-                `INSERT INTO trips (
-                    id, user_id, driver_id, pickup_location, dropoff_location,
-                    pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
-                    car_type, cost, distance, duration, payment_method, status
-                ) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'cash', 'pending')
-                RETURNING *`,
-                [
-                    demoId,
-                    1,
-                    demo.pickup,
-                    demo.dropoff,
-                    demo.pickup_lat,
-                    demo.pickup_lng,
-                    demo.dropoff_lat,
-                    demo.dropoff_lng,
-                    demoCarType,
-                    demo.cost,
-                    demo.distance,
-                    demo.duration
-                ]
-            );
-
-            const demoTrip = insert.rows[0];
-            const passenger = await pool.query('SELECT name, phone FROM users WHERE id = $1', [demoTrip.user_id]);
-            const passengerRow = passenger.rows[0] || {};
-
-            return res.json({
-                success: true,
-                data: {
-                    ...demoTrip,
-                    passenger_name: passengerRow.name || 'راكب جديد',
-                    passenger_phone: passengerRow.phone || null
-                }
-            });
-        }
 
         res.json({
             success: true,

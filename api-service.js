@@ -88,7 +88,7 @@ const ApiService = {
         },
 
         // Get next pending trip (optionally by car type)
-        async getPendingNext(carType = null, autoDemo = true) {
+        async getPendingNext(carType = null, autoDemo = false) {
             const params = new URLSearchParams();
             if (carType) params.set('car_type', carType);
             if (autoDemo) params.set('auto_demo', '1');
