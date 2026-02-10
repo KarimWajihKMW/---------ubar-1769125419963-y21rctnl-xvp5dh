@@ -1402,6 +1402,18 @@ const DB = {
         SafeStorage.setItem(this.keyTrips, JSON.stringify(trips));
     },
 
+    upsertTrip(trip) {
+        if (!trip || !trip.id) return;
+        const trips = this.getTrips();
+        const index = trips.findIndex(item => item.id === trip.id);
+        if (index >= 0) {
+            trips[index] = { ...trips[index], ...trip };
+        } else {
+            trips.unshift(trip);
+        }
+        this.setTrips(trips);
+    },
+
     saveSession() {
         SafeStorage.setItem(this.keySession, 'true');
     },
@@ -4921,18 +4933,22 @@ window.proceedToPayment = function() {
                 });
                 if (response?.data) {
                     lastCompletedTrip = DB.normalizeTrip(response.data, user?.name);
+                    DB.upsertTrip(lastCompletedTrip);
                     updatePaymentSuccessTripSummary(lastCompletedTrip);
                 } else {
                     lastCompletedTrip = fallbackTrip;
+                    DB.upsertTrip(lastCompletedTrip);
                 }
             } catch (err) {
                 console.error('Failed to finalize trip:', err);
                 lastCompletedTrip = fallbackTrip;
+                DB.upsertTrip(lastCompletedTrip);
             } finally {
                 activePassengerTripId = null;
             }
         } else {
             lastCompletedTrip = fallbackTrip;
+            DB.upsertTrip(lastCompletedTrip);
         }
         
         const paymentLabels = { cash: 'دفع كاش', card: 'بطاقة بنكية', wallet: 'محفظة إلكترونية' };
@@ -4956,6 +4972,12 @@ window.proceedToPayment = function() {
         window.switchSection('payment-success');
         if (typeof window.driverEndTrip === 'function') {
             window.driverEndTrip();
+        }
+
+        if (lastCompletedTrip?.id) {
+            setTimeout(() => {
+                window.showTripDetails(lastCompletedTrip.id);
+            }, 1200);
         }
         
         btn.disabled = false;
