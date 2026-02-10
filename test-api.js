@@ -63,8 +63,14 @@ async function testAPI() {
         // Test 8: Create a new trip
         console.log('\n8️⃣ Testing create new trip...');
         const newTrip = {
+            user_id: 3,
+            driver_id: 1,
             pickup_location: 'شارع التحلية، الرياض',
             dropoff_location: 'العليا مول',
+            pickup_lat: 24.7136,
+            pickup_lng: 46.6753,
+            dropoff_lat: 24.6917,
+            dropoff_lng: 46.6853,
             car_type: 'economy',
             cost: 45.50,
             distance: 10.5,
@@ -118,8 +124,14 @@ async function testAPI() {
         // Test 1️⃣3️⃣: Reject pending trip
         console.log('\n1️⃣3️⃣ Testing reject pending trip...');
         const rejectTrip = {
+            user_id: 3,
+            driver_id: 1,
             pickup_location: 'طريق الملك عبدالله، الرياض',
             dropoff_location: 'النخيل مول',
+            pickup_lat: 24.7510,
+            pickup_lng: 46.7050,
+            dropoff_lat: 24.7743,
+            dropoff_lng: 46.7386,
             car_type: 'economy',
             cost: 32.00,
             distance: 8.2,

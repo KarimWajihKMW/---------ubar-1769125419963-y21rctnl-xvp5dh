@@ -1,5 +1,30 @@
 const DARK_MODE_KEY = 'akwadra_dark_mode';
-const PREF_KEY = 'akwadra_passenger_prefs';
+
+function getRole() {
+    const params = new URLSearchParams(window.location.search);
+    const role = params.get('role');
+    return role === 'driver' ? 'driver' : 'passenger';
+}
+
+const ROLE = getRole();
+const PREF_KEY = ROLE === 'driver' ? 'akwadra_driver_prefs' : 'akwadra_passenger_prefs';
+
+const BASE_PREF_DEFAULTS = {
+    trips: true,
+    marketing: false,
+    location: true,
+    language: 'ar'
+};
+
+const DRIVER_PREF_DEFAULTS = {
+    ...BASE_PREF_DEFAULTS,
+    autoAccept: false,
+    soundAlerts: true,
+    shareLocation: true,
+    breakReminder: true
+};
+
+const PASSENGER_PREF_DEFAULTS = BASE_PREF_DEFAULTS;
 
 const LANGUAGES = [
     'aa','ab','ae','af','ak','am','an','ar','as','av','ay','az','ba','be','bg','bh','bi','bm','bn','bo','br','bs','ca','ce','ch','co','cr','cs','cu','cv','cy','da','de','dv','dz','ee','el','en','eo','es','et','eu','fa','ff','fi','fj','fo','fr','fy','ga','gd','gl','gn','gu','gv','ha','he','hi','ho','hr','ht','hu','hy','hz','ia','id','ie','ig','ii','ik','io','is','it','iu','ja','jv','ka','kg','ki','kj','kk','kl','km','kn','ko','kr','ks','ku','kv','kw','ky','la','lb','lg','li','ln','lo','lt','lu','lv','mg','mh','mi','mk','ml','mn','mr','ms','mt','my','na','nb','nd','ne','ng','nl','nn','no','nr','nv','ny','oc','oj','om','or','os','pa','pi','pl','ps','pt','qu','rm','rn','ro','ru','rw','sa','sc','sd','se','sg','si','sk','sl','sm','sn','so','sq','sr','ss','st','su','sv','sw','ta','te','tg','th','ti','tk','tl','tn','to','tr','ts','tt','tw','ty','ug','uk','ur','uz','ve','vi','vo','wa','wo','xh','yi','yo','za','zh','zu'
@@ -49,6 +74,20 @@ function updateDarkModeToggleUI() {
     }
 }
 
+function applyRoleUI() {
+    const isDriver = ROLE === 'driver';
+    document.querySelectorAll('.role-driver-only').forEach(el => {
+        el.style.display = isDriver ? '' : 'none';
+    });
+    const title = document.getElementById('settings-title');
+    const subtitle = document.getElementById('settings-subtitle');
+    if (title) title.textContent = isDriver ? '⚙️ إعدادات الكابتن' : '⚙️ إعدادات الراكب';
+    if (subtitle) subtitle.textContent = isDriver
+        ? 'اضبط تفضيلاتك أثناء القيادة'
+        : 'اضبط تفضيلاتك بسهولة';
+    document.title = isDriver ? 'إعدادات الكابتن - أكوادرا' : 'إعدادات الراكب - أكوادرا';
+}
+
 function setDarkMode(enabled) {
     document.body.classList.toggle('dark-mode', enabled);
     try { localStorage.setItem(DARK_MODE_KEY, enabled ? '1' : '0'); } catch (e) {}
@@ -91,7 +130,7 @@ function loadUser() {
 }
 
 function loadPrefs() {
-    const defaults = { trips: true, marketing: false, location: true, language: 'ar' };
+    const defaults = ROLE === 'driver' ? DRIVER_PREF_DEFAULTS : PASSENGER_PREF_DEFAULTS;
     try {
         const raw = localStorage.getItem(PREF_KEY);
         const prefs = raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
@@ -99,10 +138,18 @@ function loadPrefs() {
         const marketing = document.getElementById('pref-notify-marketing');
         const location = document.getElementById('pref-location');
         const language = document.getElementById('pref-language');
+        const autoAccept = document.getElementById('pref-driver-auto-accept');
+        const sound = document.getElementById('pref-driver-sound');
+        const shareLocation = document.getElementById('pref-driver-share-location');
+        const breakReminder = document.getElementById('pref-driver-break-reminder');
         if (trips) trips.checked = !!prefs.trips;
         if (marketing) marketing.checked = !!prefs.marketing;
         if (location) location.checked = !!prefs.location;
         if (language) language.value = prefs.language || 'ar';
+        if (autoAccept) autoAccept.checked = !!prefs.autoAccept;
+        if (sound) sound.checked = !!prefs.soundAlerts;
+        if (shareLocation) shareLocation.checked = !!prefs.shareLocation;
+        if (breakReminder) breakReminder.checked = !!prefs.breakReminder;
         applyLanguage(prefs.language || 'ar');
     } catch (e) {
         // ignore
@@ -118,6 +165,12 @@ function savePrefs() {
         location: !!document.getElementById('pref-location')?.checked,
         language: document.getElementById('pref-language')?.value || 'ar'
     };
+    if (ROLE === 'driver') {
+        prefs.autoAccept = !!document.getElementById('pref-driver-auto-accept')?.checked;
+        prefs.soundAlerts = !!document.getElementById('pref-driver-sound')?.checked;
+        prefs.shareLocation = !!document.getElementById('pref-driver-share-location')?.checked;
+        prefs.breakReminder = !!document.getElementById('pref-driver-break-reminder')?.checked;
+    }
     try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {}
     applyLanguage(prefs.language || 'ar');
     const status = document.getElementById('prefs-status');
@@ -158,6 +211,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     } catch (e) {}
     updateDarkModeToggleUI();
+    applyRoleUI();
     loadUser();
     populateLanguages();
     loadPrefs();
@@ -165,7 +219,9 @@ window.addEventListener('DOMContentLoaded', () => {
     const toggle = document.getElementById('settings-dark-toggle');
     if (toggle) toggle.addEventListener('click', toggleDarkMode);
 
-    ['pref-notify-trips', 'pref-notify-marketing', 'pref-location', 'pref-language'].forEach(id => {
+    ['pref-notify-trips', 'pref-notify-marketing', 'pref-location', 'pref-language',
+        'pref-driver-auto-accept', 'pref-driver-sound', 'pref-driver-share-location', 'pref-driver-break-reminder'
+    ].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', savePrefs);
     });
