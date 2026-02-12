@@ -2548,6 +2548,354 @@ app.post('/api/users/login', async (req, res) => {
     }
 });
 
+// ═══════════════════════════════════════════════════════════
+// PENDING RIDE REQUESTS API - طلبات الرحلات في قائمة الانتظار
+// ═══════════════════════════════════════════════════════════
+
+// Create new ride request
+app.post('/api/pending-rides', async (req, res) => {
+    try {
+        const {
+            user_id,
+            passenger_name,
+            passenger_phone,
+            pickup_location,
+            dropoff_location,
+            pickup_lat,
+            pickup_lng,
+            dropoff_lat,
+            dropoff_lng,
+            car_type,
+            estimated_cost,
+            estimated_distance,
+            estimated_duration,
+            payment_method,
+            notes
+        } = req.body;
+
+        if (!pickup_location || !dropoff_location) {
+            return res.status(400).json({
+                success: false,
+                error: 'Pickup and dropoff locations are required'
+            });
+        }
+
+        const request_id = `REQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const expires_at = new Date(Date.now() + 20 * 60 * 1000); // expires in 20 minutes
+
+        const result = await pool.query(`
+            INSERT INTO pending_ride_requests (
+                request_id, user_id, passenger_name, passenger_phone,
+                pickup_location, dropoff_location,
+                pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                car_type, estimated_cost, estimated_distance, estimated_duration,
+                payment_method, status, expires_at, notes
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'waiting', $16, $17)
+            RETURNING *
+        `, [
+            request_id, user_id, passenger_name, passenger_phone,
+            pickup_location, dropoff_location,
+            pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+            car_type || 'economy', estimated_cost, estimated_distance, estimated_duration,
+            payment_method || 'cash', expires_at, notes
+        ]);
+
+        res.json({
+            success: true,
+            message: 'تم إنشاء طلب الرحلة بنجاح',
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error creating ride request:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get all pending ride requests
+app.get('/api/pending-rides', async (req, res) => {
+    try {
+        const { status, car_type, limit } = req.query;
+        
+        let query = `
+            SELECT 
+                pr.*,
+                u.name as user_name,
+                u.phone as user_phone,
+                d.name as assigned_driver_name,
+                d.phone as assigned_driver_phone
+            FROM pending_ride_requests pr
+            LEFT JOIN users u ON pr.user_id = u.id
+            LEFT JOIN drivers d ON pr.assigned_driver_id = d.id
+            WHERE 1=1
+        `;
+        const params = [];
+        let paramCount = 0;
+
+        if (status) {
+            paramCount++;
+            query += ` AND pr.status = $${paramCount}`;
+            params.push(status);
+        }
+
+        if (car_type) {
+            paramCount++;
+            query += ` AND pr.car_type = $${paramCount}`;
+            params.push(car_type);
+        }
+
+        query += ` ORDER BY pr.created_at DESC`;
+
+        if (limit) {
+            paramCount++;
+            query += ` LIMIT $${paramCount}`;
+            params.push(parseInt(limit, 10));
+        }
+
+        const result = await pool.query(query, params);
+
+        res.json({
+            success: true,
+            count: result.rows.length,
+            data: result.rows
+        });
+    } catch (err) {
+        console.error('Error fetching pending rides:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get pending ride request by ID
+app.get('/api/pending-rides/:request_id', async (req, res) => {
+    try {
+        const { request_id } = req.params;
+
+        const result = await pool.query(`
+            SELECT 
+                pr.*,
+                u.name as user_name,
+                u.phone as user_phone,
+                d.name as assigned_driver_name,
+                d.phone as assigned_driver_phone
+            FROM pending_ride_requests pr
+            LEFT JOIN users u ON pr.user_id = u.id
+            LEFT JOIN drivers d ON pr.assigned_driver_id = d.id
+            WHERE pr.request_id = $1
+        `, [request_id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Ride request not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error fetching ride request:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Driver accepts ride request
+app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
+    try {
+        const { request_id } = req.params;
+        const { driver_id } = req.body;
+
+        if (!driver_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'Driver ID is required'
+            });
+        }
+
+        // Check if request exists and is still waiting
+        const checkResult = await pool.query(`
+            SELECT * FROM pending_ride_requests
+            WHERE request_id = $1 AND status = 'waiting'
+        `, [request_id]);
+
+        if (checkResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Ride request not found or already processed'
+            });
+        }
+
+        // Update request status to accepted
+        const result = await pool.query(`
+            UPDATE pending_ride_requests
+            SET status = 'accepted',
+                assigned_driver_id = $1,
+                assigned_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE request_id = $2
+            RETURNING *
+        `, [driver_id, request_id]);
+
+        res.json({
+            success: true,
+            message: 'تم قبول الطلب بنجاح',
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error accepting ride request:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Driver rejects ride request
+app.post('/api/pending-rides/:request_id/reject', async (req, res) => {
+    try {
+        const { request_id } = req.params;
+        const { driver_id } = req.body;
+
+        if (!driver_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'Driver ID is required'
+            });
+        }
+
+        // Check if request exists
+        const checkResult = await pool.query(`
+            SELECT * FROM pending_ride_requests
+            WHERE request_id = $1 AND status = 'waiting'
+        `, [request_id]);
+
+        if (checkResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Ride request not found or already processed'
+            });
+        }
+
+        // Add driver to rejected_by array and increment rejection count
+        const result = await pool.query(`
+            UPDATE pending_ride_requests
+            SET rejected_by = array_append(rejected_by, $1),
+                rejection_count = rejection_count + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE request_id = $2
+            RETURNING *
+        `, [driver_id, request_id]);
+
+        res.json({
+            success: true,
+            message: 'تم رفض الطلب',
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error rejecting ride request:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Cancel ride request
+app.post('/api/pending-rides/:request_id/cancel', async (req, res) => {
+    try {
+        const { request_id } = req.params;
+
+        const result = await pool.query(`
+            UPDATE pending_ride_requests
+            SET status = 'cancelled',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE request_id = $1 AND status = 'waiting'
+            RETURNING *
+        `, [request_id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Ride request not found or already processed'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'تم إلغاء الطلب',
+            data: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Error cancelling ride request:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get pending rides for a specific driver (based on location and car type)
+app.get('/api/drivers/:driver_id/pending-rides', async (req, res) => {
+    try {
+        const { driver_id } = req.params;
+        const { max_distance } = req.query;
+
+        // Get driver info
+        const driverResult = await pool.query(`
+            SELECT car_type, last_lat, last_lng FROM drivers WHERE id = $1
+        `, [driver_id]);
+
+        if (driverResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Driver not found'
+            });
+        }
+
+        const driver = driverResult.rows[0];
+        
+        // Get pending rides matching driver's car type and not rejected by this driver
+        const result = await pool.query(`
+            SELECT 
+                pr.*,
+                u.name as user_name,
+                u.phone as user_phone
+            FROM pending_ride_requests pr
+            LEFT JOIN users u ON pr.user_id = u.id
+            WHERE pr.status = 'waiting'
+                AND pr.car_type = $1
+                AND NOT ($2 = ANY(pr.rejected_by))
+                AND pr.expires_at > CURRENT_TIMESTAMP
+            ORDER BY pr.created_at ASC
+        `, [driver.car_type, driver_id]);
+
+        res.json({
+            success: true,
+            count: result.rows.length,
+            data: result.rows
+        });
+    } catch (err) {
+        console.error('Error fetching driver pending rides:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Cleanup expired ride requests (can be called periodically)
+app.post('/api/pending-rides/cleanup', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            UPDATE pending_ride_requests
+            SET status = 'expired',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'waiting'
+                AND expires_at < CURRENT_TIMESTAMP
+            RETURNING request_id
+        `);
+
+        res.json({
+            success: true,
+            message: `تم تحديث ${result.rows.length} طلب منتهي الصلاحية`,
+            expired_count: result.rows.length,
+            expired_requests: result.rows
+        });
+    } catch (err) {
+        console.error('Error cleaning up expired rides:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // Start server
 ensureDefaultAdmins()
     .then(() => ensureDefaultOffers())
