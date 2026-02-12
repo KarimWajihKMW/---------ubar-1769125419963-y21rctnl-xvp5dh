@@ -815,7 +815,7 @@ app.get('/api/trips/pending/next', async (req, res) => {
                  WHERE t.status = 'assigned'
                    AND t.driver_id = $1
                    AND t.source = 'passenger_app'
-                   AND u.role = 'passenger'
+                   AND (u.role IS NULL OR u.role IN ('passenger', 'user'))
                    AND t.created_at >= NOW() - ($2 * INTERVAL '1 minute')
                  ORDER BY t.created_at DESC
                  LIMIT 1`,
@@ -873,7 +873,7 @@ app.get('/api/trips/pending/next', async (req, res) => {
             `;
 
             fallbackQuery += " AND t.source = 'passenger_app'";
-            fallbackQuery += " AND u.role = 'passenger'";
+            fallbackQuery += " AND (u.role IS NULL OR u.role IN ('passenger', 'user'))";
             fallbackParams.push(PENDING_TRIP_TTL_MINUTES);
             fallbackQuery += ` AND t.created_at >= NOW() - ($${fallbackParams.length} * INTERVAL '1 minute')`;
 
@@ -922,7 +922,7 @@ app.get('/api/trips/pending/next', async (req, res) => {
 
         query += " AND t.pickup_lat IS NOT NULL AND t.pickup_lng IS NOT NULL";
         query += " AND t.source = 'passenger_app'";
-        query += " AND u.role = 'passenger'";
+        query += " AND (u.role IS NULL OR u.role IN ('passenger', 'user'))";
         params.push(PENDING_TRIP_TTL_MINUTES);
         query += ` AND t.created_at >= NOW() - ($${params.length} * INTERVAL '1 minute')`;
 
