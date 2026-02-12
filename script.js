@@ -2261,9 +2261,14 @@ window.sendChatMessage = function() {
 
 window.driverRejectRequest = async function() {
     try {
-        const tripId = currentIncomingTrip?.id;
-        if (tripId) {
-            await ApiService.trips.reject(tripId);
+        const requestId = currentIncomingTrip?.request_id;
+        if (requestId && currentDriverProfile?.id) {
+            await ApiService.pendingRides.reject(requestId, currentDriverProfile.id);
+        } else {
+            const tripId = currentIncomingTrip?.id;
+            if (tripId) {
+                await ApiService.trips.reject(tripId);
+            }
         }
     } catch (error) {
         console.error('Reject trip failed:', error);
@@ -2299,7 +2304,21 @@ window.driverAcceptRequest = async function() {
         }
 
         let assignResponse = null;
-        if (currentIncomingTrip.status === 'assigned') {
+        if (currentIncomingTrip.request_id) {
+            const acceptResponse = await ApiService.pendingRides.accept(
+                currentIncomingTrip.request_id,
+                currentDriverProfile.id
+            );
+            assignResponse = {
+                success: !!acceptResponse?.success,
+                data: {
+                    ...currentIncomingTrip,
+                    status: 'assigned',
+                    driver_id: currentDriverProfile.id,
+                    id: currentIncomingTrip.trip_id || tripId
+                }
+            };
+        } else if (currentIncomingTrip.status === 'assigned') {
             if (String(currentIncomingTrip.driver_id) !== String(currentDriverProfile.id)) {
                 showToast('هذا الطلب تم إسناده لكابتن آخر');
                 return;
@@ -3131,6 +3150,21 @@ function stopDriverRequestPolling() {
     }
 }
 
+function normalizeDriverIncomingRequest(rawRequest) {
+    if (!rawRequest) return null;
+    const tripRef = rawRequest.trip_ref || rawRequest.trip_id || rawRequest.id || null;
+    return {
+        ...rawRequest,
+        id: tripRef || rawRequest.request_id,
+        trip_id: tripRef,
+        request_id: rawRequest.request_id || null,
+        cost: rawRequest.estimated_cost ?? rawRequest.cost ?? 0,
+        distance: rawRequest.estimated_distance ?? rawRequest.distance ?? '-',
+        passenger_name: rawRequest.passenger_name || rawRequest.user_name || 'راكب جديد',
+        passenger_phone: rawRequest.passenger_phone || rawRequest.user_phone || null
+    };
+}
+
 async function triggerDriverRequestPolling() {
     if (currentUserRole !== 'driver') return;
     if (!currentDriverProfile) {
@@ -3144,16 +3178,11 @@ async function triggerDriverRequestPolling() {
     if (incomingPanel && !incomingPanel.classList.contains('hidden')) return;
 
     try {
-        const coords = driverLocation || lastGeoCoords || null;
-        const response = await ApiService.trips.getPendingNext({
-            carType: currentDriverProfile.car_type,
-            driverId: currentDriverProfile.id,
-            lat: coords?.lat,
-            lng: coords?.lng,
-            limit: 5
+        const response = await ApiService.pendingRides.getForDriver(currentDriverProfile.id, {
+            maxDistance: 30
         });
-        const data = response?.data || null;
-        const trips = Array.isArray(data) ? data : (data ? [data] : []);
+        const requests = Array.isArray(response?.data) ? response.data : [];
+        const trips = requests.map(normalizeDriverIncomingRequest).filter(Boolean);
 
         if (!trips.length) {
             showDriverWaitingState();

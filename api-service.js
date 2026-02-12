@@ -128,6 +128,33 @@ const ApiService = {
             });
         }
     },
+
+    // Pending rides endpoints (real-time nearest requests for drivers)
+    pendingRides: {
+        async getForDriver(driverId, options = {}) {
+            const { maxDistance = null } = options || {};
+            const params = new URLSearchParams();
+            if (Number.isFinite(maxDistance)) {
+                params.set('max_distance', maxDistance);
+            }
+            const query = params.toString();
+            return ApiService.request(`/drivers/${driverId}/pending-rides${query ? `?${query}` : ''}`);
+        },
+
+        async accept(requestId, driverId) {
+            return ApiService.request(`/pending-rides/${requestId}/accept`, {
+                method: 'POST',
+                body: JSON.stringify({ driver_id: driverId })
+            });
+        },
+
+        async reject(requestId, driverId) {
+            return ApiService.request(`/pending-rides/${requestId}/reject`, {
+                method: 'POST',
+                body: JSON.stringify({ driver_id: driverId })
+            });
+        }
+    },
     
     // Drivers endpoints
     drivers: {
