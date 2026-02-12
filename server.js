@@ -3037,24 +3037,22 @@ app.get('/api/drivers/:driver_id/pending-rides', async (req, res) => {
             ? Math.max(1, Math.min(Number(max_distance), 100))
             : MAX_ASSIGN_DISTANCE_KM;
 
-        // Show only real passenger trips linked to pending trip records and nearest to driver
-        const result = await pool.query(`
+        const queryBase = `
             SELECT
                 pr.*,
                 u.name as user_name,
                 u.phone as user_phone,
                 t.id as trip_ref,
                 (6371 * acos(
-                    cos(radians($3)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($4)) +
-                    sin(radians($3)) * sin(radians(pr.pickup_lat))
+                    cos(radians($2)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($3)) +
+                    sin(radians($2)) * sin(radians(pr.pickup_lat))
                 )) AS distance_km
             FROM pending_ride_requests pr
             LEFT JOIN users u ON pr.user_id = u.id
             INNER JOIN trips t ON t.id = pr.trip_id
             WHERE pr.status = 'waiting'
                 AND pr.source = 'passenger_app'
-                AND pr.car_type = $1
-                AND NOT ($2 = ANY(pr.rejected_by))
+                AND NOT ($1 = ANY(pr.rejected_by))
                 AND pr.expires_at > CURRENT_TIMESTAMP
                 AND t.status = 'pending'
                 AND t.driver_id IS NULL
@@ -3062,12 +3060,25 @@ app.get('/api/drivers/:driver_id/pending-rides', async (req, res) => {
                 AND pr.pickup_lat IS NOT NULL
                 AND pr.pickup_lng IS NOT NULL
                 AND (6371 * acos(
-                    cos(radians($3)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($4)) +
-                    sin(radians($3)) * sin(radians(pr.pickup_lat))
-                )) <= $5
+                    cos(radians($2)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($3)) +
+                    sin(radians($2)) * sin(radians(pr.pickup_lat))
+                )) <= $4
+        `;
+
+        const withCarTypeResult = await pool.query(`
+            ${queryBase}
+            AND pr.car_type = $5
             ORDER BY distance_km ASC, pr.created_at ASC
             LIMIT 30
-        `, [driver.car_type, driver_id, Number(driver.last_lat), Number(driver.last_lng), maxDistanceKm]);
+        `, [driver_id, Number(driver.last_lat), Number(driver.last_lng), maxDistanceKm, driver.car_type]);
+
+        const result = withCarTypeResult.rows.length > 0
+            ? withCarTypeResult
+            : await pool.query(`
+                ${queryBase}
+                ORDER BY distance_km ASC, pr.created_at ASC
+                LIMIT 30
+            `, [driver_id, Number(driver.last_lat), Number(driver.last_lng), maxDistanceKm]);
 
         res.json({
             success: true,
