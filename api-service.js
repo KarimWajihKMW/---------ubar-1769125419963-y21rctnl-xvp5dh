@@ -87,11 +87,16 @@ const ApiService = {
             return ApiService.request(`/trips/stats/summary${params}`);
         },
 
-        // Get next pending trip (optionally by car type)
-        async getPendingNext(carType = null, autoDemo = false) {
+        // Get next pending trip (optionally by car type and driver location)
+        async getPendingNext(options = {}) {
+            const { carType = null, driverId = null, lat = null, lng = null } = options || {};
             const params = new URLSearchParams();
             if (carType) params.set('car_type', carType);
-            if (autoDemo) params.set('auto_demo', '1');
+            if (driverId) params.set('driver_id', driverId);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                params.set('lat', lat);
+                params.set('lng', lng);
+            }
             const query = params.toString();
             return ApiService.request(`/trips/pending/next${query ? `?${query}` : ''}`);
         },

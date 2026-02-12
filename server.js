@@ -692,22 +692,67 @@ app.patch('/api/trips/:id/status', async (req, res) => {
 // Get next pending trip (optionally by car type)
 app.get('/api/trips/pending/next', async (req, res) => {
     try {
-        const { car_type } = req.query;
+        const { car_type, driver_id, lat, lng } = req.query;
+
+        let driverLat = null;
+        let driverLng = null;
+
+        const latVal = lat !== undefined && lat !== null ? Number(lat) : null;
+        const lngVal = lng !== undefined && lng !== null ? Number(lng) : null;
+
+        if (Number.isFinite(latVal) && Number.isFinite(lngVal)) {
+            driverLat = latVal;
+            driverLng = lngVal;
+        } else if (driver_id) {
+            const driverResult = await pool.query(
+                `SELECT last_lat, last_lng
+                 FROM drivers
+                 WHERE id = $1`,
+                [driver_id]
+            );
+            if (driverResult.rows.length > 0) {
+                const row = driverResult.rows[0];
+                const lastLat = row.last_lat !== null ? Number(row.last_lat) : null;
+                const lastLng = row.last_lng !== null ? Number(row.last_lng) : null;
+                if (Number.isFinite(lastLat) && Number.isFinite(lastLng)) {
+                    driverLat = lastLat;
+                    driverLng = lastLng;
+                }
+            }
+        }
+
+        const params = [];
+        let distanceSelect = '';
+        let orderClause = ' ORDER BY t.created_at ASC';
+
+        if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
+            params.push(driverLat, driverLng);
+            distanceSelect = `,
+                (6371 * acos(
+                    cos(radians($1)) * cos(radians(t.pickup_lat)) * cos(radians(t.pickup_lng) - radians($2)) +
+                    sin(radians($1)) * sin(radians(t.pickup_lat))
+                )) AS distance_km
+            `;
+            orderClause = ' ORDER BY distance_km ASC, t.created_at ASC';
+        }
 
         let query = `
-            SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone
+            SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone${distanceSelect}
             FROM trips t
             LEFT JOIN users u ON t.user_id = u.id
             WHERE t.status = 'pending' AND (t.driver_id IS NULL)
         `;
-        const params = [];
+
+        if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
+            query += ' AND t.pickup_lat IS NOT NULL AND t.pickup_lng IS NOT NULL';
+        }
 
         if (car_type) {
             params.push(car_type);
             query += ` AND t.car_type = $${params.length}`;
         }
 
-        query += ' ORDER BY t.created_at ASC LIMIT 1';
+        query += `${orderClause} LIMIT 1`;
 
         const result = await pool.query(query, params);
 

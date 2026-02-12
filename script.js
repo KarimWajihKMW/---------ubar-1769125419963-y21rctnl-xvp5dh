@@ -3062,7 +3062,13 @@ async function triggerDriverRequestPolling() {
     if (incomingPanel && !incomingPanel.classList.contains('hidden')) return;
 
     try {
-        const response = await ApiService.trips.getPendingNext(currentDriverProfile.car_type, false);
+        const coords = driverLocation || lastGeoCoords || null;
+        const response = await ApiService.trips.getPendingNext({
+            carType: currentDriverProfile.car_type,
+            driverId: currentDriverProfile.id,
+            lat: coords?.lat,
+            lng: coords?.lng
+        });
         const trip = response?.data || null;
 
         if (!trip) {

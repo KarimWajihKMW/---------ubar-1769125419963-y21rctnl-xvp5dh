@@ -1,5 +1,5 @@
 // Test script for API endpoints
-const baseURL = 'http://localhost:3000/api';
+const baseURL = process.env.API_BASE_URL || 'http://localhost:3000/api';
 
 async function testAPI() {
     console.log('🧪 Testing Akwadra API Endpoints\n');
@@ -87,9 +87,9 @@ async function testAPI() {
         
         const createdTripId = data.data.id;
 
-        // Test 9: Get next pending trip
+        // Test 9: Get next pending trip (nearest by driver location)
         console.log('\n9️⃣ Testing get next pending trip...');
-        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy`);
+        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy&lat=24.7136&lng=46.6753`);
         data = await response.json();
         console.log('✅ Pending trip:', data.data?.id || 'none');
 
