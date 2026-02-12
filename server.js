@@ -13,6 +13,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DRIVER_LOCATION_TTL_MINUTES = 5;
 const MAX_ASSIGN_DISTANCE_KM = 30;
+const PENDING_TRIP_TTL_MINUTES = 20;
+const ASSIGNED_TRIP_TTL_MINUTES = 120;
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -789,15 +791,29 @@ app.get('/api/trips/pending/next', async (req, res) => {
     try {
         const { car_type, driver_id, lat, lng } = req.query;
 
+        await pool.query(
+            `UPDATE trips
+             SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+             WHERE status = 'pending'
+               AND driver_id IS NULL
+               AND source = 'passenger_app'
+               AND created_at < NOW() - ($1 * INTERVAL '1 minute')`,
+            [PENDING_TRIP_TTL_MINUTES]
+        );
+
         if (driver_id) {
             const assignedResult = await pool.query(
                 `SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone
                  FROM trips t
                  LEFT JOIN users u ON t.user_id = u.id
-                 WHERE t.status = 'assigned' AND t.driver_id = $1
+                 WHERE t.status = 'assigned'
+                   AND t.driver_id = $1
+                   AND t.source = 'passenger_app'
+                   AND u.role = 'passenger'
+                   AND t.created_at >= NOW() - ($2 * INTERVAL '1 minute')
                  ORDER BY t.created_at DESC
                  LIMIT 1`,
-                [driver_id]
+                [driver_id, ASSIGNED_TRIP_TTL_MINUTES]
             );
 
             if (assignedResult.rows.length > 0) {
@@ -857,6 +873,9 @@ app.get('/api/trips/pending/next', async (req, res) => {
 
         query += " AND t.pickup_lat IS NOT NULL AND t.pickup_lng IS NOT NULL";
         query += " AND t.source = 'passenger_app'";
+        query += " AND u.role = 'passenger'";
+        params.push(PENDING_TRIP_TTL_MINUTES);
+        query += ` AND t.created_at >= NOW() - ($${params.length} * INTERVAL '1 minute')`;
 
         if (car_type) {
             params.push(car_type);
