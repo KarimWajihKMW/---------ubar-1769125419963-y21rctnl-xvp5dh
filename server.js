@@ -590,6 +590,40 @@ app.post('/api/trips', async (req, res) => {
 
         let createdTrip = result.rows[0];
 
+        // ✨ إضافة الطلب إلى جدول pending_ride_requests إذا كان في حالة pending
+        if (createdTrip.status === 'pending' && !createdTrip.driver_id) {
+            try {
+                // الحصول على معلومات الراكب
+                const userResult = await pool.query('SELECT name, phone FROM users WHERE id = $1', [user_id]);
+                const user = userResult.rows[0];
+                
+                const requestId = `REQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                const expiresAt = new Date(Date.now() + PENDING_TRIP_TTL_MINUTES * 60 * 1000);
+
+                await pool.query(`
+                    INSERT INTO pending_ride_requests (
+                        request_id, user_id, passenger_name, passenger_phone,
+                        pickup_location, dropoff_location,
+                        pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                        car_type, estimated_cost, estimated_distance, estimated_duration,
+                        payment_method, status, expires_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'waiting', $16)
+                `, [
+                    requestId, user_id, user?.name || 'راكب', user?.phone || '',
+                    pickup_location, dropoff_location,
+                    pickupLat, pickupLng, dropoffLat, dropoffLng,
+                    car_type, cost, distance, duration,
+                    payment_method, expiresAt
+                ]);
+
+                console.log(`✅ تم إضافة الطلب ${requestId} إلى pending_ride_requests للرحلة ${tripId}`);
+            } catch (pendingErr) {
+                console.error('⚠️ خطأ في إضافة الطلب إلى pending_ride_requests:', pendingErr.message);
+                // لا نوقف العملية، فقط نسجل الخطأ
+            }
+        }
+
         if (AUTO_ASSIGN_TRIPS && !createdTrip.driver_id && createdTrip.status === 'pending') {
             try {
                 const nearest = await findNearestAvailableDriver({
@@ -775,6 +809,61 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             } catch (driverErr) {
                 console.error('Error updating driver earnings:', driverErr);
             }
+        }
+
+        // ✨ تحديث حالة الطلب في pending_ride_requests
+        try {
+            const tripId = result.rows[0].id;
+            
+            // تحديث حالة الطلب بناءً على حالة الرحلة
+            if (status === 'assigned' && result.rows[0].driver_id) {
+                // عند تعيين سائق، نحدث الحالة إلى accepted
+                await pool.query(`
+                    UPDATE pending_ride_requests
+                    SET status = 'accepted',
+                        assigned_driver_id = $1,
+                        assigned_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = $2
+                        AND status = 'waiting'
+                        AND pickup_lat = $3
+                        AND pickup_lng = $4
+                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, [result.rows[0].driver_id, result.rows[0].user_id, 
+                    result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
+            } else if (status === 'cancelled') {
+                // عند إلغاء الرحلة، نحدث الحالة إلى cancelled
+                await pool.query(`
+                    UPDATE pending_ride_requests
+                    SET status = 'cancelled',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = $1
+                        AND status = 'waiting'
+                        AND pickup_lat = $2
+                        AND pickup_lng = $3
+                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
+            } else if (status === 'completed') {
+                // عند إكمال الرحلة، يمكن تحديث الحالة أو تركها كما هي
+                await pool.query(`
+                    UPDATE pending_ride_requests
+                    SET status = 'completed',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = $1
+                        AND status = 'accepted'
+                        AND pickup_lat = $2
+                        AND pickup_lng = $3
+                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
+            }
+        } catch (pendingUpdateErr) {
+            console.error('⚠️ خطأ في تحديث pending_ride_requests:', pendingUpdateErr.message);
         }
         
         res.json({
@@ -2736,6 +2825,73 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
             WHERE request_id = $2
             RETURNING *
         `, [driver_id, request_id]);
+
+        const pendingRequest = result.rows[0];
+
+        // ✨ إنشاء أو تحديث الرحلة في جدول trips
+        try {
+            // البحث عن رحلة مطابقة للطلب
+            const existingTripResult = await pool.query(`
+                SELECT id FROM trips
+                WHERE user_id = $1
+                    AND pickup_lat = $2
+                    AND pickup_lng = $3
+                    AND status = 'pending'
+                    AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                ORDER BY created_at DESC
+                LIMIT 1
+            `, [pendingRequest.user_id, pendingRequest.pickup_lat, pendingRequest.pickup_lng]);
+
+            if (existingTripResult.rows.length > 0) {
+                // تحديث الرحلة الموجودة بتعيين السائق
+                const tripId = existingTripResult.rows[0].id;
+                
+                // الحصول على معلومات السائق
+                const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [driver_id]);
+                const driverName = driverResult.rows[0]?.name || null;
+
+                await pool.query(`
+                    UPDATE trips
+                    SET driver_id = $1,
+                        driver_name = $2,
+                        status = 'assigned',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $3
+                `, [driver_id, driverName, tripId]);
+
+                console.log(`✅ تم تحديث الرحلة ${tripId} بتعيين السائق ${driver_id}`);
+            } else {
+                // إنشاء رحلة جديدة إذا لم توجد
+                const tripId = 'TR-' + Date.now();
+                
+                // الحصول على معلومات السائق
+                const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [driver_id]);
+                const driverName = driverResult.rows[0]?.name || null;
+
+                await pool.query(`
+                    INSERT INTO trips (
+                        id, user_id, driver_id, driver_name,
+                        pickup_location, dropoff_location,
+                        pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                        car_type, cost, distance, duration,
+                        payment_method, status, source
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'assigned', 'pending_rides')
+                `, [
+                    tripId, pendingRequest.user_id, driver_id, driverName,
+                    pendingRequest.pickup_location, pendingRequest.dropoff_location,
+                    pendingRequest.pickup_lat, pendingRequest.pickup_lng,
+                    pendingRequest.dropoff_lat, pendingRequest.dropoff_lng,
+                    pendingRequest.car_type, pendingRequest.estimated_cost,
+                    pendingRequest.estimated_distance, pendingRequest.estimated_duration,
+                    pendingRequest.payment_method
+                ]);
+
+                console.log(`✅ تم إنشاء رحلة جديدة ${tripId} للطلب ${request_id}`);
+            }
+        } catch (tripErr) {
+            console.error('⚠️ خطأ في تحديث/إنشاء الرحلة في trips:', tripErr.message);
+        }
 
         res.json({
             success: true,
