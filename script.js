@@ -420,6 +420,18 @@ function initLeafletMap() {
                 if (q) searchDestinationByName(q);
             }
         });
+        destInput.addEventListener('blur', () => {
+            const q = destInput.value.trim();
+            if (shouldGeocodeInput(q, currentDestination?.label)) {
+                searchDestinationByName(q);
+            }
+        });
+        destInput.addEventListener('change', () => {
+            const q = destInput.value.trim();
+            if (shouldGeocodeInput(q, currentDestination?.label)) {
+                searchDestinationByName(q);
+            }
+        });
     }
 
     // Hook pickup search input
@@ -429,6 +441,18 @@ function initLeafletMap() {
             if (evt.key === 'Enter') {
                 const q = pickupInput.value.trim();
                 if (q) searchPickupByName(q);
+            }
+        });
+        pickupInput.addEventListener('blur', () => {
+            const q = pickupInput.value.trim();
+            if (shouldGeocodeInput(q, currentPickup?.label)) {
+                searchPickupByName(q);
+            }
+        });
+        pickupInput.addEventListener('change', () => {
+            const q = pickupInput.value.trim();
+            if (shouldGeocodeInput(q, currentPickup?.label)) {
+                searchPickupByName(q);
             }
         });
     }
@@ -495,31 +519,80 @@ function setDestination(coords, label) {
 
 function searchDestinationByName(q) {
     const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&q=${encodeURIComponent(q)}`;
-    fetch(url, { headers: { 'Accept': 'application/json' }})
+    return fetch(url, { headers: { 'Accept': 'application/json' }})
         .then(r => r.json())
         .then(arr => {
-            if (!arr || !arr.length) { showToast('لم يتم العثور على نتائج'); return; }
+            if (!arr || !arr.length) {
+                showToast('لم يتم العثور على نتائج');
+                return false;
+            }
             const best = arr[0];
             const lat = parseFloat(best.lat), lon = parseFloat(best.lon);
             setDestination({ lat, lng: lon }, best.display_name);
             leafletMap.setView([lat, lon], 15);
+            return true;
         })
-        .catch(() => showToast('حدث خطأ في البحث'));
+        .catch(() => {
+            showToast('حدث خطأ في البحث');
+            return false;
+        });
 }
 
 function searchPickupByName(q) {
     const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&q=${encodeURIComponent(q)}`;
-    fetch(url, { headers: { 'Accept': 'application/json' }})
+    return fetch(url, { headers: { 'Accept': 'application/json' }})
         .then(r => r.json())
         .then(arr => {
-            if (!arr || !arr.length) { showToast('لم يتم العثور على نتائج'); return; }
+            if (!arr || !arr.length) {
+                showToast('لم يتم العثور على نتائج');
+                return false;
+            }
             const best = arr[0];
             const lat = parseFloat(best.lat), lon = parseFloat(best.lon);
             setPickup({ lat, lng: lon }, best.display_name);
             leafletMap.setView([lat, lon], 15);
             showToast('تم تحديد موقع الالتقاط');
+            return true;
         })
-        .catch(() => showToast('حدث خطأ في البحث'));
+        .catch(() => {
+            showToast('حدث خطأ في البحث');
+            return false;
+        });
+}
+
+function shouldGeocodeInput(value, currentLabel) {
+    const v = (value || '').trim();
+    if (!v || v.length < 3) return false;
+    if (!currentLabel) return true;
+    return v !== currentLabel.trim();
+}
+
+async function ensureDestinationFromInput() {
+    const destInput = document.getElementById('dest-input');
+    const value = destInput?.value?.trim();
+    if (!value || currentDestination) return !!currentDestination;
+    return searchDestinationByName(value);
+}
+
+async function ensurePickupFromInput() {
+    const pickupInput = document.getElementById('current-loc-input');
+    const value = pickupInput?.value?.trim();
+    if (!value || currentPickup) return !!currentPickup;
+    return searchPickupByName(value);
+}
+
+function ensurePickupFallback() {
+    if (currentPickup) return true;
+    if (lastGeoCoords) {
+        applyPassengerLocation(lastGeoCoords, true);
+        return true;
+    }
+    if (leafletMap) {
+        const center = leafletMap.getCenter();
+        setPickup({ lat: center.lat, lng: center.lng }, lastGeoLabel || 'موقعك الحالي');
+        return true;
+    }
+    return false;
 }
 
 function reverseGeocode(lat, lng, callback) {
@@ -2750,7 +2823,19 @@ async function handlePassengerAssignedTrip(trip) {
 }
 
 window.requestRide = async function() {
-    if (!currentPickup || !currentDestination) { showToast('حدد الالتقاط والوجهة أولاً'); return; }
+    if (!currentPickup) {
+        const picked = ensurePickupFallback();
+        if (!picked) {
+            await ensurePickupFromInput();
+        }
+    }
+    if (!currentDestination) {
+        await ensureDestinationFromInput();
+    }
+    if (!currentPickup || !currentDestination) {
+        showToast('حدد الالتقاط والوجهة أولاً');
+        return;
+    }
     if (!currentCarType) { showToast('اختر نوع السيارة'); return; }
     
     const scheduleCheck = document.getElementById('schedule-later-check');
@@ -2884,6 +2969,7 @@ function initPassengerMode() {
     }
 
     startLocationTracking();
+    requestSingleLocationFix();
 }
 
 window.switchToPassengerMode = function() {
