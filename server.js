@@ -863,9 +863,43 @@ app.get('/api/trips/pending/next', async (req, res) => {
         }
 
         if (!Number.isFinite(driverLat) || !Number.isFinite(driverLng)) {
-            return res.status(400).json({
-                success: false,
-                error: 'Driver location required to find nearest trips.'
+            const fallbackParams = [];
+            let fallbackQuery = `
+                SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone, NULL::numeric AS distance_km
+                FROM trips t
+                LEFT JOIN users u ON t.user_id = u.id
+                WHERE t.status = 'pending' AND (t.driver_id IS NULL)
+            `;
+
+            fallbackQuery += " AND t.source = 'passenger_app'";
+            fallbackQuery += " AND u.role = 'passenger'";
+            fallbackParams.push(PENDING_TRIP_TTL_MINUTES);
+            fallbackQuery += ` AND t.created_at >= NOW() - ($${fallbackParams.length} * INTERVAL '1 minute')`;
+
+            if (car_type) {
+                fallbackParams.push(car_type);
+                fallbackQuery += ` AND t.car_type = $${fallbackParams.length}`;
+            }
+
+            fallbackQuery += ' ORDER BY t.created_at ASC';
+            fallbackQuery += ` LIMIT $${fallbackParams.length + 1}`;
+            fallbackParams.push(listLimit);
+
+            const fallbackResult = await pool.query(fallbackQuery, fallbackParams);
+
+            if (listLimit > 1) {
+                return res.json({
+                    success: true,
+                    data: fallbackResult.rows,
+                    count: fallbackResult.rows.length,
+                    meta: { location_fallback: true }
+                });
+            }
+
+            return res.json({
+                success: true,
+                data: fallbackResult.rows[0] || null,
+                meta: { location_fallback: true }
             });
         }
 
