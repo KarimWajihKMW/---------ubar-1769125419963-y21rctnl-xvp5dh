@@ -98,13 +98,16 @@ const ApiService = {
 
         // Get next pending trip (optionally by car type and driver location)
         async getPendingNext(options = {}) {
-            const { carType = null, driverId = null, lat = null, lng = null } = options || {};
+            const { carType = null, driverId = null, lat = null, lng = null, limit = null } = options || {};
             const params = new URLSearchParams();
             if (carType) params.set('car_type', carType);
             if (driverId) params.set('driver_id', driverId);
             if (Number.isFinite(lat) && Number.isFinite(lng)) {
                 params.set('lat', lat);
                 params.set('lng', lng);
+            }
+            if (Number.isFinite(limit)) {
+                params.set('limit', limit);
             }
             const query = params.toString();
             return ApiService.request(`/trips/pending/next${query ? `?${query}` : ''}`);

@@ -789,7 +789,12 @@ app.patch('/api/trips/:id/status', async (req, res) => {
 // Get next pending trip (optionally by car type)
 app.get('/api/trips/pending/next', async (req, res) => {
     try {
-        const { car_type, driver_id, lat, lng } = req.query;
+        const { car_type, driver_id, lat, lng, limit } = req.query;
+
+        const requestedLimit = Number(limit);
+        const listLimit = Number.isFinite(requestedLimit)
+            ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 20)
+            : 1;
 
         await pool.query(
             `UPDATE trips
@@ -817,7 +822,16 @@ app.get('/api/trips/pending/next', async (req, res) => {
             );
 
             if (assignedResult.rows.length > 0) {
-                return res.json({ success: true, data: assignedResult.rows[0] });
+                const assignedTrip = assignedResult.rows[0];
+                if (listLimit > 1) {
+                    return res.json({
+                        success: true,
+                        data: [assignedTrip],
+                        count: 1,
+                        meta: { assigned: true }
+                    });
+                }
+                return res.json({ success: true, data: assignedTrip, meta: { assigned: true } });
             }
         }
 
@@ -882,9 +896,18 @@ app.get('/api/trips/pending/next', async (req, res) => {
             query += ` AND t.car_type = $${params.length}`;
         }
 
-        query += `${orderClause} LIMIT 1`;
+        query += `${orderClause} LIMIT $${params.length + 1}`;
+        params.push(listLimit);
 
         const result = await pool.query(query, params);
+
+        if (listLimit > 1) {
+            return res.json({
+                success: true,
+                data: result.rows,
+                count: result.rows.length
+            });
+        }
 
         res.json({
             success: true,

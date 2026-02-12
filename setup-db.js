@@ -52,6 +52,9 @@ async function setupDatabase() {
                 today_trips_count INTEGER DEFAULT 0,
                 last_earnings_update DATE DEFAULT CURRENT_DATE,
                 status VARCHAR(20) DEFAULT 'offline',
+                last_lat DECIMAL(10, 8),
+                last_lng DECIMAL(11, 8),
+                last_location_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -133,7 +136,9 @@ async function setupDatabase() {
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_user_id ON trips(user_id);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_created_at ON trips(created_at DESC);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_pickup_coords ON trips(pickup_lat, pickup_lng);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_driver_earnings_driver_date ON driver_earnings(driver_id, date DESC);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_drivers_location ON drivers(last_lat, last_lng);`);
             console.log('✅ Indexes created');
         } catch (err) {
             console.log('⚠️ Some indexes may already exist');

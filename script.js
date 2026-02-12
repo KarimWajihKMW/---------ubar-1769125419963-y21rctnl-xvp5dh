@@ -3149,17 +3149,20 @@ async function triggerDriverRequestPolling() {
             carType: currentDriverProfile.car_type,
             driverId: currentDriverProfile.id,
             lat: coords?.lat,
-            lng: coords?.lng
+            lng: coords?.lng,
+            limit: 5
         });
-        const trip = response?.data || null;
+        const data = response?.data || null;
+        const trips = Array.isArray(data) ? data : (data ? [data] : []);
 
-        if (!trip) {
+        if (!trips.length) {
             showDriverWaitingState();
             return;
         }
 
+        const trip = trips[0];
         currentIncomingTrip = trip;
-        renderDriverIncomingTrip(trip);
+        renderDriverIncomingTrip(trip, trips.length);
     } catch (error) {
         console.error('Failed to fetch pending trips:', error);
         showDriverWaitingState();
@@ -3177,7 +3180,7 @@ function showDriverWaitingState() {
     setDriverTripStarted(false);
 }
 
-function renderDriverIncomingTrip(trip) {
+function renderDriverIncomingTrip(trip, nearbyCount = 0) {
     const waiting = document.getElementById('driver-status-waiting');
     if (waiting) waiting.classList.add('hidden');
     const incoming = document.getElementById('driver-incoming-request');
@@ -3190,6 +3193,7 @@ function renderDriverIncomingTrip(trip) {
     const passengerEl = document.getElementById('driver-request-passenger');
     const carTypeEl = document.getElementById('driver-request-car-type');
     const tripIdEl = document.getElementById('driver-request-trip-id');
+    const countEl = document.getElementById('driver-request-nearby-count');
 
     if (tripIdEl) tripIdEl.innerText = trip.id || '-';
     if (pickupEl) pickupEl.innerText = trip.pickup_location || 'موقع الراكب';
@@ -3198,6 +3202,9 @@ function renderDriverIncomingTrip(trip) {
     if (distanceEl) distanceEl.innerText = trip.distance || '-';
     if (passengerEl) passengerEl.innerText = trip.passenger_name || 'راكب جديد';
     if (carTypeEl) carTypeEl.innerText = trip.car_type || 'اقتصادي';
+    if (countEl) {
+        countEl.innerText = nearbyCount > 1 ? `طلبات قريبة: ${nearbyCount}` : '';
+    }
 
     if (trip.pickup_lat !== undefined && trip.pickup_lat !== null && trip.pickup_lng !== undefined && trip.pickup_lng !== null) {
         setPassengerPickup({
