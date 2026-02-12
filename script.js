@@ -1553,15 +1553,7 @@ const DB = {
                 throw new Error(result.error || 'Failed to fetch trips');
             }
 
-            let tripsData = result.data || [];
-
-            if (role === 'passenger' && userId && tripsData.length === 0) {
-                const fallbackResponse = await fetch('/api/trips?limit=200&source=passenger_app');
-                const fallbackResult = await fallbackResponse.json();
-                if (fallbackResponse.ok && fallbackResult.success) {
-                    tripsData = fallbackResult.data || [];
-                }
-            }
+            const tripsData = result.data || [];
 
             const user = this.getUser();
             const passengerName = user?.name;
@@ -1570,7 +1562,8 @@ const DB = {
             return mapped;
         } catch (error) {
             console.error('Failed to fetch trips:', error);
-            return this.getTrips();
+            this.setTrips([]);
+            return [];
         }
     },
 
@@ -2609,7 +2602,7 @@ window.driverEndTrip = async function() {
     setDriverAwaitingPayment(false);
     setDriverStartReady(false);
     setDriverTripStarted(false);
-    showToast('تم إنهاء الرحلة بنجاح! +25 ر.س');
+    showToast('تم إنهاء الرحلة بنجاح');
     triggerConfetti();
 
     const tripId = activeDriverTripId;
@@ -2642,14 +2635,6 @@ window.driverEndTrip = async function() {
             } catch (err) {
                 console.error('Failed to fetch trip summary:', err);
             }
-        }
-
-        if (!summaryTrip && incomingSnapshot) {
-            summaryTrip = buildDriverSummaryTrip({
-                ...incomingSnapshot,
-                id: tripId,
-                status: 'completed'
-            });
         }
 
         if (summaryTrip) {
@@ -4423,34 +4408,37 @@ function startRide(startX, startY) {
     driverAnimationId = requestAnimationFrame(animateRide);
 }
 
-function finishTrip() {
-    const rideDestText = document.getElementById('ride-dest-text');
-    const fallbackEstimate = computeTripEstimates();
-    const newTrip = {
-        id: `TR-${Math.floor(Math.random() * 9000) + 1000}`,
-        date: new Date().toISOString(),
-        pickup: "حدد موقعك",
-        dropoff: rideDestText ? rideDestText.innerText : "وجهة محددة",
-        cost: currentTripPrice || 25,
-        distance: Number(fallbackEstimate.distanceKm || 0),
-        duration: Number(fallbackEstimate.etaMin || 0),
-        status: "completed",
-        car: currentCarType || "economy",
-        driver: "أحمد محمد",
-        passenger: "المستخدم"
-    };
-
-    DB.addTrip(newTrip);
-
-    const user = DB.getUser();
-    if(user) {
-        DB.updateUser({
-            balance: user.balance - (currentTripPrice || 25),
-            points: user.points + 25
-        });
+async function finishTrip() {
+    if (!activePassengerTripId) {
+        showToast('لا توجد رحلة نشطة لإنهائها');
+        return;
     }
 
-    showToast('تم حفظ الرحلة وخصم المبلغ من المحفظة');
+    const rideDestText = document.getElementById('ride-dest-text');
+    const fallbackEstimate = computeTripEstimates();
+    const user = DB.getUser();
+    const amount = Number(currentTripPrice || 0);
+
+    try {
+        const response = await ApiService.trips.updateStatus(activePassengerTripId, 'completed', {
+            cost: amount,
+            distance: Number(fallbackEstimate.distanceKm || 0),
+            duration: Number(fallbackEstimate.etaMin || 0),
+            payment_method: 'cash',
+            dropoff_location: rideDestText ? rideDestText.innerText : undefined
+        });
+
+        if (response?.data) {
+            lastCompletedTrip = DB.normalizeTrip(response.data, user?.name);
+            DB.upsertTrip(lastCompletedTrip);
+        }
+
+        activePassengerTripId = null;
+        showToast('تم إنهاء الرحلة');
+    } catch (error) {
+        console.error('Failed to finish trip:', error);
+        showToast('تعذر إنهاء الرحلة حالياً');
+    }
 }
 
 function stopDriverTracking() {
@@ -5166,28 +5154,16 @@ window.proceedToPayment = function() {
     btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري معالجة الدفع...';
     
     setTimeout(async () => {
-        const rideDestText = document.getElementById('ride-dest-text');
         const user = DB.getUser();
-        const tripId = activePassengerTripId || `TR-${Math.floor(Math.random() * 9000) + 1000}`;
+        if (!activePassengerTripId) {
+            showToast('لا توجد رحلة نشطة لإتمام الدفع');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';
+            return;
+        }
         const actualDuration = getPassengerTripDurationMinutes();
 
         tripDetails.duration = actualDuration;
-
-        const fallbackTrip = {
-            id: tripId,
-            date: new Date().toISOString(),
-            pickup: document.getElementById('current-loc-input').value || 'حدد موقعك',
-            dropoff: rideDestText ? rideDestText.innerText : 'وجهة محددة',
-            cost: amount,
-            distance: Number(tripDetails.distance || 0),
-            duration: Number(actualDuration || 0),
-            status: 'completed',
-            car: currentCarType || 'economy',
-            driver: 'أحمد محمد',
-            passenger: user?.name || 'المستخدم',
-            paymentMethod: paymentMethod,
-            promoApplied: appliedPromo || null
-        };
         
         if (user) {
             const newBalance = paymentMethod === 'wallet' 
@@ -5203,32 +5179,30 @@ window.proceedToPayment = function() {
             });
         }
 
-        if (activePassengerTripId) {
-            try {
-                const response = await ApiService.trips.updateStatus(activePassengerTripId, 'completed', {
-                    cost: amount,
-                    distance: tripDetails.distance,
-                    duration: actualDuration,
-                    payment_method: paymentMethod
-                });
-                if (response?.data) {
-                    lastCompletedTrip = DB.normalizeTrip(response.data, user?.name);
-                    DB.upsertTrip(lastCompletedTrip);
-                    updatePaymentSuccessTripSummary(lastCompletedTrip);
-                } else {
-                    lastCompletedTrip = fallbackTrip;
-                    DB.upsertTrip(lastCompletedTrip);
-                }
-            } catch (err) {
-                console.error('Failed to finalize trip:', err);
-                lastCompletedTrip = fallbackTrip;
+        try {
+            const response = await ApiService.trips.updateStatus(activePassengerTripId, 'completed', {
+                cost: amount,
+                distance: tripDetails.distance,
+                duration: actualDuration,
+                payment_method: paymentMethod
+            });
+            if (response?.data) {
+                lastCompletedTrip = DB.normalizeTrip(response.data, user?.name);
                 DB.upsertTrip(lastCompletedTrip);
-            } finally {
+                updatePaymentSuccessTripSummary(lastCompletedTrip);
                 activePassengerTripId = null;
+            } else {
+                showToast('تعذر تأكيد الدفع حالياً');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';
+                return;
             }
-        } else {
-            lastCompletedTrip = fallbackTrip;
-            DB.upsertTrip(lastCompletedTrip);
+        } catch (err) {
+            console.error('Failed to finalize trip:', err);
+            showToast('تعذر إتمام الدفع الآن، حاول مرة أخرى');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';
+            return;
         }
         
         const paymentLabels = { cash: 'دفع كاش', card: 'بطاقة بنكية', wallet: 'محفظة إلكترونية' };
@@ -5248,7 +5222,7 @@ window.proceedToPayment = function() {
         if (amountEl) amountEl.innerText = `${amount} ر.س`;
         if (methodEl) methodEl.innerText = paymentLabels[paymentMethod] || 'دفع كاش';
         if (timeEl) timeEl.innerText = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-        updatePaymentSuccessTripSummary(lastCompletedTrip || fallbackTrip);
+        updatePaymentSuccessTripSummary(lastCompletedTrip);
 
         window.switchSection('payment-success');
         if (typeof window.driverEndTrip === 'function') {
