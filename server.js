@@ -245,6 +245,25 @@ async function ensureTripSourceColumn() {
     }
 }
 
+async function ensurePendingRideColumns() {
+    try {
+        await pool.query(`ALTER TABLE pending_ride_requests ADD COLUMN IF NOT EXISTS trip_id VARCHAR(50);`);
+        await pool.query(`ALTER TABLE pending_ride_requests ADD COLUMN IF NOT EXISTS source VARCHAR(40) DEFAULT 'manual';`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_trip_id ON pending_ride_requests(trip_id);`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_source_status ON pending_ride_requests(source, status);`);
+
+        await pool.query(`
+            UPDATE pending_ride_requests
+            SET source = COALESCE(NULLIF(source, ''), 'manual')
+            WHERE source IS NULL OR source = ''
+        `);
+
+        console.log('✅ Pending rides columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure pending rides columns:', err.message);
+    }
+}
+
 async function ensureDriverLocationColumns() {
     try {
         await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_lat DECIMAL(10, 8);`);
@@ -602,14 +621,16 @@ app.post('/api/trips', async (req, res) => {
 
                 await pool.query(`
                     INSERT INTO pending_ride_requests (
+                        trip_id, source,
                         request_id, user_id, passenger_name, passenger_phone,
                         pickup_location, dropoff_location,
                         pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
                         car_type, estimated_cost, estimated_distance, estimated_duration,
                         payment_method, status, expires_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'waiting', $16)
+                    VALUES ($1, 'passenger_app', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'waiting', $17)
                 `, [
+                    tripId,
                     requestId, user_id, user?.name || 'راكب', user?.phone || '',
                     pickup_location, dropoff_location,
                     pickupLat, pickupLng, dropoffLat, dropoffLng,
@@ -2990,7 +3011,9 @@ app.get('/api/drivers/:driver_id/pending-rides', async (req, res) => {
 
         // Get driver info
         const driverResult = await pool.query(`
-            SELECT car_type, last_lat, last_lng FROM drivers WHERE id = $1
+            SELECT car_type, last_lat, last_lng, last_location_at
+            FROM drivers
+            WHERE id = $1
         `, [driver_id]);
 
         if (driverResult.rows.length === 0) {
@@ -3001,21 +3024,50 @@ app.get('/api/drivers/:driver_id/pending-rides', async (req, res) => {
         }
 
         const driver = driverResult.rows[0];
-        
-        // Get pending rides matching driver's car type and not rejected by this driver
+
+        if (!driver.last_lat || !driver.last_lng || !driver.last_location_at) {
+            return res.json({
+                success: true,
+                count: 0,
+                data: []
+            });
+        }
+
+        const maxDistanceKm = Number.isFinite(Number(max_distance))
+            ? Math.max(1, Math.min(Number(max_distance), 100))
+            : MAX_ASSIGN_DISTANCE_KM;
+
+        // Show only real passenger trips linked to pending trip records and nearest to driver
         const result = await pool.query(`
-            SELECT 
+            SELECT
                 pr.*,
                 u.name as user_name,
-                u.phone as user_phone
+                u.phone as user_phone,
+                t.id as trip_ref,
+                (6371 * acos(
+                    cos(radians($3)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($4)) +
+                    sin(radians($3)) * sin(radians(pr.pickup_lat))
+                )) AS distance_km
             FROM pending_ride_requests pr
             LEFT JOIN users u ON pr.user_id = u.id
+            INNER JOIN trips t ON t.id = pr.trip_id
             WHERE pr.status = 'waiting'
+                AND pr.source = 'passenger_app'
                 AND pr.car_type = $1
                 AND NOT ($2 = ANY(pr.rejected_by))
                 AND pr.expires_at > CURRENT_TIMESTAMP
-            ORDER BY pr.created_at ASC
-        `, [driver.car_type, driver_id]);
+                AND t.status = 'pending'
+                AND t.driver_id IS NULL
+                AND COALESCE(t.source, 'passenger_app') = 'passenger_app'
+                AND pr.pickup_lat IS NOT NULL
+                AND pr.pickup_lng IS NOT NULL
+                AND (6371 * acos(
+                    cos(radians($3)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($4)) +
+                    sin(radians($3)) * sin(radians(pr.pickup_lat))
+                )) <= $5
+            ORDER BY distance_km ASC, pr.created_at ASC
+            LIMIT 30
+        `, [driver.car_type, driver_id, Number(driver.last_lat), Number(driver.last_lng), maxDistanceKm]);
 
         res.json({
             success: true,
@@ -3059,6 +3111,7 @@ ensureDefaultAdmins()
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
     .then(() => ensureTripSourceColumn())
+    .then(() => ensurePendingRideColumns())
     .then(() => ensureDriverLocationColumns())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');
