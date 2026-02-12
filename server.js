@@ -15,6 +15,7 @@ const DRIVER_LOCATION_TTL_MINUTES = 5;
 const MAX_ASSIGN_DISTANCE_KM = 30;
 const PENDING_TRIP_TTL_MINUTES = 20;
 const ASSIGNED_TRIP_TTL_MINUTES = 120;
+const AUTO_ASSIGN_TRIPS = false;
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -589,7 +590,7 @@ app.post('/api/trips', async (req, res) => {
 
         let createdTrip = result.rows[0];
 
-        if (!createdTrip.driver_id && createdTrip.status === 'pending') {
+        if (AUTO_ASSIGN_TRIPS && !createdTrip.driver_id && createdTrip.status === 'pending') {
             try {
                 const nearest = await findNearestAvailableDriver({
                     pickupLat,
