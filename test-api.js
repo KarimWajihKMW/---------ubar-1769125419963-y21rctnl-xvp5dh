@@ -50,7 +50,7 @@ async function testAPI() {
 
         // Test 6: Get trip statistics
         console.log('\n6️⃣ Testing trip statistics...');
-        response = await fetch(`${baseURL}/trips/stats/summary`);
+        response = await fetch(`${baseURL}/trips/stats/summary?source=passenger_app`);
         data = await response.json();
         console.log('✅ Stats:', data.data);
 
@@ -74,7 +74,8 @@ async function testAPI() {
             cost: 45.50,
             distance: 10.5,
             duration: 20,
-            payment_method: 'card'
+            payment_method: 'card',
+            source: 'passenger_app'
         };
         
         response = await fetch(`${baseURL}/trips`, {
@@ -133,7 +134,8 @@ async function testAPI() {
             cost: 32.00,
             distance: 8.2,
             duration: 15,
-            payment_method: 'cash'
+            payment_method: 'cash',
+            source: 'passenger_app'
         };
 
         response = await fetch(`${baseURL}/trips`, {

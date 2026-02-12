@@ -37,15 +37,21 @@ const ApiService = {
         },
         
         // Get completed trips
-        async getCompleted(userId = null) {
-            const params = userId ? `?user_id=${userId}` : '';
-            return ApiService.request(`/trips/completed${params}`);
+        async getCompleted(userId = null, source = null) {
+            const params = new URLSearchParams();
+            if (userId) params.set('user_id', userId);
+            if (source) params.set('source', source);
+            const query = params.toString();
+            return ApiService.request(`/trips/completed${query ? `?${query}` : ''}`);
         },
         
         // Get cancelled trips
-        async getCancelled(userId = null) {
-            const params = userId ? `?user_id=${userId}` : '';
-            return ApiService.request(`/trips/cancelled${params}`);
+        async getCancelled(userId = null, source = null) {
+            const params = new URLSearchParams();
+            if (userId) params.set('user_id', userId);
+            if (source) params.set('source', source);
+            const query = params.toString();
+            return ApiService.request(`/trips/cancelled${query ? `?${query}` : ''}`);
         },
         
         // Get single trip
@@ -82,9 +88,12 @@ const ApiService = {
         },
         
         // Get trip statistics
-        async getStats(userId = null) {
-            const params = userId ? `?user_id=${userId}` : '';
-            return ApiService.request(`/trips/stats/summary${params}`);
+        async getStats(userId = null, source = null) {
+            const params = new URLSearchParams();
+            if (userId) params.set('user_id', userId);
+            if (source) params.set('source', source);
+            const query = params.toString();
+            return ApiService.request(`/trips/stats/summary${query ? `?${query}` : ''}`);
         },
 
         // Get next pending trip (optionally by car type and driver location)

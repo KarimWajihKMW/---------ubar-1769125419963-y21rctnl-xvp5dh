@@ -231,6 +231,15 @@ async function ensureTripTimeColumns() {
     }
 }
 
+async function ensureTripSourceColumn() {
+    try {
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS source VARCHAR(40);`);
+        console.log('✅ Trip source column ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure trip source column:', err.message);
+    }
+}
+
 async function ensureDriverLocationColumns() {
     try {
         await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_lat DECIMAL(10, 8);`);
@@ -310,7 +319,7 @@ app.get('/api/offers/validate', async (req, res) => {
 // Get all trips with filtering
 app.get('/api/trips', async (req, res) => {
     try {
-        const { status, user_id, limit = 50, offset = 0 } = req.query;
+        const { status, user_id, source, limit = 50, offset = 0 } = req.query;
         
         let query = 'SELECT * FROM trips WHERE 1=1';
         const params = [];
@@ -326,6 +335,12 @@ app.get('/api/trips', async (req, res) => {
             paramCount++;
             query += ` AND user_id = $${paramCount}`;
             params.push(user_id);
+        }
+
+        if (source && source !== 'all') {
+            paramCount++;
+            query += ` AND source = $${paramCount}`;
+            params.push(source);
         }
         
         query += ' ORDER BY created_at DESC';
@@ -356,6 +371,12 @@ app.get('/api/trips', async (req, res) => {
             countQuery += ` AND user_id = $${countParamIndex}`;
             countParams.push(user_id);
         }
+
+        if (source && source !== 'all') {
+            countParamIndex++;
+            countQuery += ` AND source = $${countParamIndex}`;
+            countParams.push(source);
+        }
         
         const countResult = await pool.query(countQuery, countParams);
         const total = parseInt(countResult.rows[0].count);
@@ -376,7 +397,7 @@ app.get('/api/trips', async (req, res) => {
 // Get completed trips
 app.get('/api/trips/completed', async (req, res) => {
     try {
-        const { user_id, limit = 50, offset = 0 } = req.query;
+        const { user_id, source, limit = 50, offset = 0 } = req.query;
         
         let query = `
             SELECT * FROM trips 
@@ -387,6 +408,11 @@ app.get('/api/trips/completed', async (req, res) => {
         if (user_id) {
             query += ' AND user_id = $1';
             params.push(user_id);
+        }
+
+        if (source && source !== 'all') {
+            query += ` AND source = $${params.length + 1}`;
+            params.push(source);
         }
         
         query += ' ORDER BY completed_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
@@ -408,7 +434,7 @@ app.get('/api/trips/completed', async (req, res) => {
 // Get cancelled trips
 app.get('/api/trips/cancelled', async (req, res) => {
     try {
-        const { user_id, limit = 50, offset = 0 } = req.query;
+        const { user_id, source, limit = 50, offset = 0 } = req.query;
         
         let query = `
             SELECT * FROM trips 
@@ -419,6 +445,11 @@ app.get('/api/trips/cancelled', async (req, res) => {
         if (user_id) {
             query += ' AND user_id = $1';
             params.push(user_id);
+        }
+
+        if (source && source !== 'all') {
+            query += ` AND source = $${params.length + 1}`;
+            params.push(source);
         }
         
         query += ' ORDER BY cancelled_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
@@ -476,7 +507,8 @@ app.post('/api/trips', async (req, res) => {
             duration,
             payment_method = 'cash',
             status = 'pending',
-            driver_name
+            driver_name,
+            source = 'passenger_app'
         } = req.body;
 
         // Validation: Require core trip fields
@@ -508,13 +540,13 @@ app.post('/api/trips', async (req, res) => {
             INSERT INTO trips (
                 id, user_id, driver_id, pickup_location, dropoff_location,
                 pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
-                car_type, cost, distance, duration, payment_method, status, driver_name
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                car_type, cost, distance, duration, payment_method, status, driver_name, source
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING *
         `, [
             tripId, user_id, driver_id, pickup_location, dropoff_location,
             pickupLat, pickupLng, dropoffLat, dropoffLng,
-            car_type, cost, distance, duration, payment_method, status, driver_name
+            car_type, cost, distance, duration, payment_method, status, driver_name, source
         ]);
 
         res.status(201).json({
@@ -721,20 +753,21 @@ app.get('/api/trips/pending/next', async (req, res) => {
             }
         }
 
-        const params = [];
-        let distanceSelect = '';
-        let orderClause = ' ORDER BY t.created_at ASC';
-
-        if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
-            params.push(driverLat, driverLng);
-            distanceSelect = `,
-                (6371 * acos(
-                    cos(radians($1)) * cos(radians(t.pickup_lat)) * cos(radians(t.pickup_lng) - radians($2)) +
-                    sin(radians($1)) * sin(radians(t.pickup_lat))
-                )) AS distance_km
-            `;
-            orderClause = ' ORDER BY distance_km ASC, t.created_at ASC';
+        if (!Number.isFinite(driverLat) || !Number.isFinite(driverLng)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Driver location required to find nearest trips.'
+            });
         }
+
+        const params = [driverLat, driverLng];
+        const distanceSelect = `,
+            (6371 * acos(
+                cos(radians($1)) * cos(radians(t.pickup_lat)) * cos(radians(t.pickup_lng) - radians($2)) +
+                sin(radians($1)) * sin(radians(t.pickup_lat))
+            )) AS distance_km
+        `;
+        let orderClause = ' ORDER BY distance_km ASC, t.created_at ASC';
 
         let query = `
             SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone${distanceSelect}
@@ -743,9 +776,8 @@ app.get('/api/trips/pending/next', async (req, res) => {
             WHERE t.status = 'pending' AND (t.driver_id IS NULL)
         `;
 
-        if (Number.isFinite(driverLat) && Number.isFinite(driverLng)) {
-            query += ' AND t.pickup_lat IS NOT NULL AND t.pickup_lng IS NOT NULL';
-        }
+        query += " AND t.pickup_lat IS NOT NULL AND t.pickup_lng IS NOT NULL";
+        query += " AND t.source = 'passenger_app'";
 
         if (car_type) {
             params.push(car_type);
@@ -822,7 +854,7 @@ app.patch('/api/trips/:id/reject', async (req, res) => {
 // Get trip statistics
 app.get('/api/trips/stats/summary', async (req, res) => {
     try {
-        const { user_id } = req.query;
+        const { user_id, source } = req.query;
         
         let whereClause = '';
         const params = [];
@@ -830,6 +862,12 @@ app.get('/api/trips/stats/summary', async (req, res) => {
         if (user_id) {
             whereClause = 'WHERE user_id = $1';
             params.push(user_id);
+        }
+
+        if (source && source !== 'all') {
+            const conjunction = whereClause ? ' AND' : 'WHERE';
+            whereClause += `${conjunction} source = $${params.length + 1}`;
+            params.push(source);
         }
         
         const result = await pool.query(`
@@ -867,6 +905,7 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
         const todayTripsResult = await pool.query(`
             SELECT COUNT(*) as count
             FROM trips
+            WHERE source = 'passenger_app'
         `);
         
         // Get ALL drivers count from database (not just online)
@@ -886,14 +925,16 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
         const earningsResult = await pool.query(`
             SELECT COALESCE(SUM(cost), 0) as total
             FROM trips
-            WHERE status = 'completed'
+            WHERE status = 'completed' AND source = 'passenger_app'
         `);
         
         // Get average rating
         const ratingResult = await pool.query(`
             SELECT COALESCE(AVG(COALESCE(passenger_rating, rating)), 0) as avg_rating
             FROM trips
-            WHERE status = 'completed' AND COALESCE(passenger_rating, rating) IS NOT NULL
+            WHERE status = 'completed'
+              AND source = 'passenger_app'
+              AND COALESCE(passenger_rating, rating) IS NOT NULL
         `);
         
         res.json({
@@ -2355,6 +2396,7 @@ ensureDefaultAdmins()
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
+    .then(() => ensureTripSourceColumn())
     .then(() => ensureDriverLocationColumns())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');

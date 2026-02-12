@@ -34,7 +34,10 @@ const TripsManager = {
             
             if (this.useAPI) {
                 // Fetch from API
-                const params = { status: filter !== 'all' ? filter : undefined };
+                const params = {
+                    status: filter !== 'all' ? filter : undefined,
+                    source: 'passenger_app'
+                };
                 const response = await ApiService.trips.getAll(params);
                 trips = response.data || [];
             } else {
@@ -75,7 +78,7 @@ const TripsManager = {
             let trips = [];
             
             if (this.useAPI) {
-                const response = await ApiService.trips.getCompleted();
+                const response = await ApiService.trips.getCompleted(null, 'passenger_app');
                 trips = response.data || [];
             } else {
                 trips = (DB.getTrips() || []).filter(t => t.status === 'completed');
@@ -99,7 +102,7 @@ const TripsManager = {
             let trips = [];
             
             if (this.useAPI) {
-                const response = await ApiService.trips.getCancelled();
+                const response = await ApiService.trips.getCancelled(null, 'passenger_app');
                 trips = response.data || [];
             } else {
                 trips = (DB.getTrips() || []).filter(t => t.status === 'cancelled');
@@ -208,7 +211,7 @@ const TripsManager = {
             let stats;
             
             if (this.useAPI) {
-                const response = await ApiService.trips.getStats();
+                const response = await ApiService.trips.getStats(null, 'passenger_app');
                 stats = response.data;
                 
                 const totalTripsEl = document.getElementById('total-trips-count');

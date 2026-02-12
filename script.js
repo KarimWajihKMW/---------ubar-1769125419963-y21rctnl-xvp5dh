@@ -1469,6 +1469,7 @@ const DB = {
         try {
             const params = new URLSearchParams();
             params.set('limit', '200');
+            params.set('source', 'passenger_app');
             if (role === 'passenger' && userId) {
                 params.set('user_id', String(userId));
             }
@@ -1482,7 +1483,7 @@ const DB = {
             let tripsData = result.data || [];
 
             if (role === 'passenger' && userId && tripsData.length === 0) {
-                const fallbackResponse = await fetch('/api/trips?limit=200');
+                const fallbackResponse = await fetch('/api/trips?limit=200&source=passenger_app');
                 const fallbackResult = await fallbackResponse.json();
                 if (fallbackResponse.ok && fallbackResult.success) {
                     tripsData = fallbackResult.data || [];
@@ -2793,7 +2794,8 @@ window.requestRide = async function() {
             distance: est.distanceKm,
             duration: est.etaMin,
             payment_method: 'cash',
-            status: 'pending'
+            status: 'pending',
+            source: 'passenger_app'
         };
 
         const created = await ApiService.trips.create(tripPayload);
