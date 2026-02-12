@@ -3029,6 +3029,7 @@ function initDriverMode() {
     showDriverWaitingState();
     updateDriverMenuData();
     startLocationTracking();
+    requestSingleLocationFix();
     resolveDriverProfile().then(() => {
         showDriverWaitingState();
         startDriverRequestPolling();
