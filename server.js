@@ -11,6 +11,8 @@ const driverSync = require('./driver-sync-system');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DRIVER_LOCATION_TTL_MINUTES = 5;
+const MAX_ASSIGN_DISTANCE_KM = 30;
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -250,6 +252,40 @@ async function ensureDriverLocationColumns() {
     } catch (err) {
         console.error('❌ Failed to ensure driver location columns:', err.message);
     }
+}
+
+async function findNearestAvailableDriver({ pickupLat, pickupLng, carType }) {
+    if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) return null;
+
+    const params = [pickupLat, pickupLng];
+    let carFilter = '';
+    if (carType) {
+        params.push(String(carType));
+        carFilter = ` AND d.car_type = $${params.length}`;
+    }
+
+    const result = await pool.query(
+        `SELECT d.id, d.name,
+                (6371 * acos(
+                    cos(radians($1)) * cos(radians(d.last_lat)) * cos(radians(d.last_lng) - radians($2)) +
+                    sin(radians($1)) * sin(radians(d.last_lat))
+                )) AS distance_km
+         FROM drivers d
+         LEFT JOIN trips t
+           ON t.driver_id = d.id AND t.status IN ('assigned', 'ongoing')
+         WHERE d.status = 'online'
+           AND d.approval_status = 'approved'
+           AND d.last_lat IS NOT NULL
+           AND d.last_lng IS NOT NULL
+                     AND d.last_location_at >= NOW() - ($${params.length + 1} * INTERVAL '1 minute')
+           AND t.id IS NULL
+           ${carFilter}
+         ORDER BY distance_km ASC
+         LIMIT 1`,
+                [...params, DRIVER_LOCATION_TTL_MINUTES]
+    );
+
+    return result.rows[0] || null;
 }
 
 // Health check
@@ -549,9 +585,36 @@ app.post('/api/trips', async (req, res) => {
             car_type, cost, distance, duration, payment_method, status, driver_name, source
         ]);
 
+        let createdTrip = result.rows[0];
+
+        if (!createdTrip.driver_id && createdTrip.status === 'pending') {
+            try {
+                const nearest = await findNearestAvailableDriver({
+                    pickupLat,
+                    pickupLng,
+                    carType: createdTrip.car_type
+                });
+
+                if (nearest && Number(nearest.distance_km) <= MAX_ASSIGN_DISTANCE_KM) {
+                    const assignResult = await pool.query(
+                        `UPDATE trips
+                         SET driver_id = $1, driver_name = $2, status = 'assigned', updated_at = CURRENT_TIMESTAMP
+                         WHERE id = $3 AND status = 'pending'
+                         RETURNING *`,
+                        [nearest.id, nearest.name || null, createdTrip.id]
+                    );
+                    if (assignResult.rows.length > 0) {
+                        createdTrip = assignResult.rows[0];
+                    }
+                }
+            } catch (assignErr) {
+                console.error('Error auto-assigning nearest driver:', assignErr);
+            }
+        }
+
         res.status(201).json({
             success: true,
-            data: result.rows[0]
+            data: createdTrip
         });
     } catch (err) {
         console.error('Error creating trip:', err);
@@ -726,6 +789,22 @@ app.get('/api/trips/pending/next', async (req, res) => {
     try {
         const { car_type, driver_id, lat, lng } = req.query;
 
+        if (driver_id) {
+            const assignedResult = await pool.query(
+                `SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone
+                 FROM trips t
+                 LEFT JOIN users u ON t.user_id = u.id
+                 WHERE t.status = 'assigned' AND t.driver_id = $1
+                 ORDER BY t.created_at DESC
+                 LIMIT 1`,
+                [driver_id]
+            );
+
+            if (assignedResult.rows.length > 0) {
+                return res.json({ success: true, data: assignedResult.rows[0] });
+            }
+        }
+
         let driverLat = null;
         let driverLng = null;
 
@@ -811,7 +890,7 @@ app.patch('/api/trips/:id/assign', async (req, res) => {
         const result = await pool.query(
             `UPDATE trips
              SET driver_id = $1, driver_name = $2, status = 'assigned', updated_at = CURRENT_TIMESTAMP
-             WHERE id = $3 AND status = 'pending'
+             WHERE id = $3 AND (status = 'pending' OR (status = 'assigned' AND driver_id = $1))
              RETURNING *`,
             [driver_id, driver_name || null, id]
         );
@@ -834,8 +913,9 @@ app.patch('/api/trips/:id/reject', async (req, res) => {
 
         const result = await pool.query(
             `UPDATE trips
-             SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND status = 'pending'
+             SET status = 'pending', driver_id = NULL, driver_name = NULL,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status IN ('pending', 'assigned')
              RETURNING *`,
             [id]
         );
@@ -1073,10 +1153,11 @@ app.get('/api/drivers/nearest', async (req, res) => {
                AND approval_status = 'approved'
                AND last_lat IS NOT NULL
                AND last_lng IS NOT NULL
+               AND last_location_at >= NOW() - ($${params.length + 1} * INTERVAL '1 minute')
                ${carFilter}
              ORDER BY distance_km ASC
              LIMIT 1`,
-            params
+            [...params, DRIVER_LOCATION_TTL_MINUTES]
         );
 
         res.json({ success: true, data: result.rows[0] || null });

@@ -2306,14 +2306,22 @@ window.driverAcceptRequest = async function() {
         }
 
         let assignResponse = null;
-        try {
-            assignResponse = await ApiService.trips.assignDriver(
-                tripId,
-                currentDriverProfile.id,
-                currentDriverProfile.name
-            );
-        } catch (error) {
-            console.error('Assign trip failed:', error);
+        if (currentIncomingTrip.status === 'assigned') {
+            if (String(currentIncomingTrip.driver_id) !== String(currentDriverProfile.id)) {
+                showToast('هذا الطلب تم إسناده لكابتن آخر');
+                return;
+            }
+            assignResponse = { success: true, data: currentIncomingTrip };
+        } else {
+            try {
+                assignResponse = await ApiService.trips.assignDriver(
+                    tripId,
+                    currentDriverProfile.id,
+                    currentDriverProfile.name
+                );
+            } catch (error) {
+                console.error('Assign trip failed:', error);
+            }
         }
 
         if (!assignResponse?.success) {

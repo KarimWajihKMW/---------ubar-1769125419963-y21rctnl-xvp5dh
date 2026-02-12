@@ -109,6 +109,10 @@
             "approve": true,
             "matchCommandLine": true
         },
-        "lsof": true
+        "lsof": true,
+        "/^node test-api\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }
