@@ -373,6 +373,53 @@ async function ensureTripSourceColumn() {
     }
 }
 
+async function ensureTripsRequiredColumns() {
+    try {
+        // Required-by-spec columns (keep legacy columns for backward compatibility)
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS rider_id INTEGER;`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS price DECIMAL(10, 2);`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS distance_km DECIMAL(10, 2);`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS rider_rating INTEGER;`);
+
+        // Backfill from legacy fields
+        await pool.query(`
+            UPDATE trips
+            SET rider_id = COALESCE(rider_id, user_id)
+            WHERE rider_id IS NULL AND user_id IS NOT NULL
+        `);
+        await pool.query(`
+            UPDATE trips
+            SET price = COALESCE(price, cost)
+            WHERE price IS NULL AND cost IS NOT NULL
+        `);
+        await pool.query(`
+            UPDATE trips
+            SET distance_km = COALESCE(distance_km, distance)
+            WHERE distance_km IS NULL AND distance IS NOT NULL
+        `);
+        await pool.query(`
+            UPDATE trips
+            SET duration_minutes = COALESCE(duration_minutes, duration)
+            WHERE duration_minutes IS NULL AND duration IS NOT NULL
+        `);
+        await pool.query(`
+            UPDATE trips
+            SET rider_rating = COALESCE(rider_rating, passenger_rating, rating)
+            WHERE rider_rating IS NULL AND (passenger_rating IS NOT NULL OR rating IS NOT NULL)
+        `);
+
+        // Helpful indexes
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_trips_rider_id ON trips(rider_id);`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_trips_driver_id ON trips(driver_id);`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_trips_completed_at ON trips(completed_at DESC);`);
+
+        console.log('✅ Trips required columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure trips required columns:', err.message);
+    }
+}
+
 async function ensurePickupMetaColumns() {
     try {
         await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_accuracy DOUBLE PRECISION;`);
@@ -753,6 +800,7 @@ app.post('/api/trips', async (req, res) => {
         const {
             id,
             user_id,
+            rider_id,
             driver_id,
             pickup_location,
             dropoff_location,
@@ -764,16 +812,22 @@ app.post('/api/trips', async (req, res) => {
             dropoff_lng,
             car_type = 'economy',
             cost,
+            price,
             distance,
+            distance_km,
             duration,
+            duration_minutes,
             payment_method = 'cash',
             status = 'pending',
             driver_name,
             source = 'passenger_app'
         } = req.body;
 
+        const effectiveRiderId = rider_id || user_id;
+        const effectiveCost = price !== undefined && price !== null ? price : cost;
+
         // Validation: Require core trip fields
-        if (!user_id || !pickup_location || !dropoff_location || cost === undefined || cost === null || isNaN(cost)) {
+        if (!effectiveRiderId || !pickup_location || !dropoff_location || effectiveCost === undefined || effectiveCost === null || isNaN(effectiveCost)) {
             return res.status(400).json({
                 success: false,
                 error: 'Missing or invalid required fields.'
@@ -825,17 +879,28 @@ app.post('/api/trips', async (req, res) => {
 
         const tripId = id || 'TR-' + Date.now();
 
+        const effectiveDistance = distance_km !== undefined && distance_km !== null ? distance_km : distance;
+        const effectiveDuration = duration_minutes !== undefined && duration_minutes !== null ? duration_minutes : duration;
+
         const result = await pool.query(`
             INSERT INTO trips (
-                id, user_id, driver_id, pickup_location, dropoff_location,
+                id, user_id, rider_id, driver_id, pickup_location, dropoff_location,
                 pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp, dropoff_lat, dropoff_lng,
-                car_type, cost, distance, duration, payment_method, status, driver_name, source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                car_type,
+                cost, price,
+                distance, distance_km,
+                duration, duration_minutes,
+                payment_method, status, driver_name, source
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
             RETURNING *
         `, [
-            tripId, user_id, driver_id, pickup_location, dropoff_location,
+            tripId, effectiveRiderId, effectiveRiderId, driver_id, pickup_location, dropoff_location,
             pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
-            car_type, cost, distance, duration, payment_method, status, driver_name, source
+            car_type,
+            effectiveCost, effectiveCost,
+            effectiveDistance, effectiveDistance,
+            effectiveDuration, effectiveDuration,
+            payment_method, status, driver_name, source
         ]);
 
         let createdTrip = result.rows[0];
@@ -1080,6 +1145,9 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             paramCount++;
             query += `, cost = $${paramCount}`;
             params.push(cost);
+
+            // Keep spec field in sync
+            query += `, price = $${paramCount}`;
         }
 
         // If trip is being completed, compute distance from coordinates when caller didn't provide it.
@@ -1101,18 +1169,25 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             paramCount++;
             query += `, distance = $${paramCount}`;
             params.push(distance);
+
+            query += `, distance_km = $${paramCount}`;
         } else if (computedDistance !== null) {
             paramCount++;
             query += `, distance = $${paramCount}`;
             params.push(computedDistance);
+
+            query += `, distance_km = $${paramCount}`;
         }
 
         if (duration !== undefined) {
             paramCount++;
             query += `, duration = $${paramCount}`;
             params.push(duration);
+
+            query += `, duration_minutes = $${paramCount}`;
         } else if (status === 'completed') {
             query += `, duration = COALESCE(duration, GREATEST(1, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(started_at, created_at))) / 60)))`;
+            query += `, duration_minutes = COALESCE(duration_minutes, duration, GREATEST(1, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(started_at, created_at))) / 60)))`;
         }
 
         if (payment_method !== undefined) {
@@ -1129,6 +1204,9 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             paramCount++;
             query += `, rating = $${paramCount}`;
             params.push(effectivePassengerRating);
+
+            // Keep spec field in sync
+            query += `, rider_rating = $${paramCount}`;
         }
 
         if (driver_rating !== undefined) {
@@ -1378,6 +1456,269 @@ app.patch('/api/trips/:id/status', async (req, res) => {
     }
 });
 
+// Driver ends trip (server-side completion)
+async function endTripHandler(req, res) {
+    const client = await pool.connect();
+    try {
+        const tripId = req.body?.trip_id ? String(req.body.trip_id) : null;
+        const driverId = req.body?.driver_id !== undefined && req.body?.driver_id !== null ? Number(req.body.driver_id) : null;
+
+        const bodyDistanceKm = req.body?.distance_km !== undefined && req.body?.distance_km !== null ? Number(req.body.distance_km) : null;
+        const bodyPrice = req.body?.price !== undefined && req.body?.price !== null ? Number(req.body.price) : (req.body?.cost !== undefined && req.body?.cost !== null ? Number(req.body.cost) : null);
+        const bodyDropoffLat = req.body?.dropoff_lat !== undefined && req.body?.dropoff_lat !== null ? Number(req.body.dropoff_lat) : null;
+        const bodyDropoffLng = req.body?.dropoff_lng !== undefined && req.body?.dropoff_lng !== null ? Number(req.body.dropoff_lng) : null;
+
+        if (!tripId && !Number.isFinite(driverId)) {
+            return res.status(400).json({ success: false, error: 'trip_id or driver_id is required' });
+        }
+
+        await client.query('BEGIN');
+
+        let tripRow = null;
+        if (tripId) {
+            const found = await client.query(
+                `SELECT *
+                 FROM trips
+                 WHERE id = $1
+                 LIMIT 1
+                 FOR UPDATE`,
+                [tripId]
+            );
+            tripRow = found.rows[0] || null;
+        } else {
+            const found = await client.query(
+                `SELECT *
+                 FROM trips
+                 WHERE driver_id = $1
+                   AND (trip_status = 'started'::trip_status_enum OR status = 'ongoing')
+                 ORDER BY COALESCE(started_at, created_at) DESC
+                 LIMIT 1
+                 FOR UPDATE`,
+                [driverId]
+            );
+            tripRow = found.rows[0] || null;
+        }
+
+        if (!tripRow) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: 'Active started trip not found' });
+        }
+
+        const beforeStatus = tripRow.status || null;
+        const beforeTripStatus = tripRow.trip_status || null;
+        const isStarted = beforeTripStatus === 'started' || beforeStatus === 'ongoing';
+        if (!isStarted) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                success: false,
+                error: `Trip is not started (trip_status=${beforeTripStatus || 'null'}, status=${beforeStatus || 'null'})`
+            });
+        }
+
+        const now = new Date();
+        const startedAt = tripRow.started_at ? new Date(tripRow.started_at) : (tripRow.created_at ? new Date(tripRow.created_at) : null);
+        const durationMinutes = startedAt
+            ? Math.max(1, Math.round((now.getTime() - startedAt.getTime()) / 60000))
+            : (tripRow.duration_minutes !== null && tripRow.duration_minutes !== undefined ? Number(tripRow.duration_minutes) : (tripRow.duration !== null && tripRow.duration !== undefined ? Number(tripRow.duration) : 1));
+
+        let distanceKm = Number.isFinite(bodyDistanceKm) && bodyDistanceKm >= 0 ? bodyDistanceKm : null;
+        if (distanceKm === null) {
+            const pickupLat = tripRow.pickup_lat !== undefined && tripRow.pickup_lat !== null ? Number(tripRow.pickup_lat) : null;
+            const pickupLng = tripRow.pickup_lng !== undefined && tripRow.pickup_lng !== null ? Number(tripRow.pickup_lng) : null;
+            const dropoffLat = Number.isFinite(bodyDropoffLat) ? bodyDropoffLat : (tripRow.dropoff_lat !== undefined && tripRow.dropoff_lat !== null ? Number(tripRow.dropoff_lat) : null);
+            const dropoffLng = Number.isFinite(bodyDropoffLng) ? bodyDropoffLng : (tripRow.dropoff_lng !== undefined && tripRow.dropoff_lng !== null ? Number(tripRow.dropoff_lng) : null);
+
+            if (Number.isFinite(pickupLat) && Number.isFinite(pickupLng) && Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng)) {
+                distanceKm = Math.round(haversineKm({ lat: pickupLat, lng: pickupLng }, { lat: dropoffLat, lng: dropoffLng }) * 10) / 10;
+            } else {
+                const existing = tripRow.distance_km !== undefined && tripRow.distance_km !== null ? Number(tripRow.distance_km) : (tripRow.distance !== undefined && tripRow.distance !== null ? Number(tripRow.distance) : 0);
+                distanceKm = Number.isFinite(existing) ? existing : 0;
+            }
+        }
+
+        const finalPrice = Number.isFinite(bodyPrice) ? bodyPrice : (
+            tripRow.price !== undefined && tripRow.price !== null
+                ? Number(tripRow.price)
+                : (tripRow.cost !== undefined && tripRow.cost !== null ? Number(tripRow.cost) : 0)
+        );
+
+        const update = await client.query(
+            `UPDATE trips
+             SET status = 'completed',
+                 trip_status = 'completed'::trip_status_enum,
+                 completed_at = CURRENT_TIMESTAMP,
+                 duration = $2,
+                 duration_minutes = $2,
+                 distance = $3,
+                 distance_km = $3,
+                 cost = $4,
+                 price = $4,
+                 dropoff_lat = COALESCE($5, dropoff_lat),
+                 dropoff_lng = COALESCE($6, dropoff_lng),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING *`,
+            [tripRow.id, durationMinutes, distanceKm, finalPrice, Number.isFinite(bodyDropoffLat) ? bodyDropoffLat : null, Number.isFinite(bodyDropoffLng) ? bodyDropoffLng : null]
+        );
+
+        const updatedTrip = update.rows[0];
+
+        // Side effects (only on first completion transition)
+        if (beforeStatus !== 'completed') {
+            // Driver earnings
+            if (updatedTrip.driver_id) {
+                const tripCost = Number(updatedTrip.cost || 0);
+                if (Number.isFinite(tripCost) && tripCost > 0) {
+                    await client.query(
+                        `UPDATE drivers 
+                         SET total_earnings = COALESCE(total_earnings, 0) + $1,
+                             balance = COALESCE(balance, 0) + $1,
+                             today_earnings = COALESCE(today_earnings, 0) + $1,
+                             today_trips_count = COALESCE(today_trips_count, 0) + 1,
+                             total_trips = COALESCE(total_trips, 0) + 1
+                         WHERE id = $2`,
+                        [tripCost, updatedTrip.driver_id]
+                    );
+
+                    await client.query(
+                        `INSERT INTO driver_earnings (driver_id, date, today_trips, today_earnings, total_trips, total_earnings)
+                         VALUES ($1, CURRENT_DATE, 1, $2, 1, $2)
+                         ON CONFLICT (driver_id, date)
+                         DO UPDATE SET
+                            today_trips = driver_earnings.today_trips + 1,
+                            today_earnings = driver_earnings.today_earnings + $2,
+                            updated_at = CURRENT_TIMESTAMP`,
+                        [updatedTrip.driver_id, tripCost]
+                    );
+
+                    const totalResult = await client.query(
+                        `SELECT COUNT(*) as total_trips, COALESCE(SUM(cost), 0) as total_earnings
+                         FROM trips
+                         WHERE driver_id = $1 AND status = 'completed'`,
+                        [updatedTrip.driver_id]
+                    );
+                    if (totalResult.rows.length > 0) {
+                        await client.query(
+                            `UPDATE driver_earnings
+                             SET total_trips = $1, total_earnings = $2
+                             WHERE driver_id = $3 AND date = CURRENT_DATE`,
+                            [
+                                parseInt(totalResult.rows[0].total_trips),
+                                parseFloat(totalResult.rows[0].total_earnings),
+                                updatedTrip.driver_id
+                            ]
+                        );
+                    }
+                }
+            }
+
+            // Admin counters
+            try {
+                await ensureAdminTripCountersTables();
+                const completedAt = updatedTrip.completed_at ? new Date(updatedTrip.completed_at) : now;
+                const dayKey = completedAt.toISOString().slice(0, 10);
+                const monthKey = monthKeyFromDate(completedAt);
+
+                const tripRevenue = Number(updatedTrip.cost || 0);
+                const tripDistance = Number(updatedTrip.distance || 0);
+
+                await client.query(
+                    `INSERT INTO admin_daily_counters (day, daily_trips, daily_revenue, daily_distance, updated_at)
+                     VALUES ($1, 1, $2, $3, CURRENT_TIMESTAMP)
+                     ON CONFLICT (day)
+                     DO UPDATE SET
+                        daily_trips = admin_daily_counters.daily_trips + 1,
+                        daily_revenue = admin_daily_counters.daily_revenue + EXCLUDED.daily_revenue,
+                        daily_distance = admin_daily_counters.daily_distance + EXCLUDED.daily_distance,
+                        updated_at = CURRENT_TIMESTAMP`,
+                    [dayKey, tripRevenue, tripDistance]
+                );
+
+                await client.query(
+                    `INSERT INTO admin_monthly_counters (month_key, monthly_trips, monthly_revenue, monthly_distance, updated_at)
+                     VALUES ($1, 1, $2, $3, CURRENT_TIMESTAMP)
+                     ON CONFLICT (month_key)
+                     DO UPDATE SET
+                        monthly_trips = admin_monthly_counters.monthly_trips + 1,
+                        monthly_revenue = admin_monthly_counters.monthly_revenue + EXCLUDED.monthly_revenue,
+                        monthly_distance = admin_monthly_counters.monthly_distance + EXCLUDED.monthly_distance,
+                        updated_at = CURRENT_TIMESTAMP`,
+                    [monthKey, tripRevenue, tripDistance]
+                );
+            } catch (e) {
+                // Non-blocking
+            }
+
+            // Pending ride request status
+            try {
+                await client.query(
+                    `WITH target AS (
+                        SELECT id
+                        FROM pending_ride_requests
+                        WHERE user_id = $1
+                          AND status = 'accepted'
+                          AND pickup_lat = $2
+                          AND pickup_lng = $3
+                          AND created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    )
+                    UPDATE pending_ride_requests pr
+                    SET status = 'completed',
+                        updated_at = CURRENT_TIMESTAMP
+                    FROM target
+                    WHERE pr.id = target.id`,
+                    [updatedTrip.user_id, updatedTrip.pickup_lat, updatedTrip.pickup_lng]
+                );
+            } catch (e) {
+                // Non-blocking
+            }
+        }
+
+        await client.query('COMMIT');
+
+        // Realtime emit (after commit)
+        try {
+            if (beforeTripStatus !== 'completed') {
+                io.to(tripRoom(updatedTrip.id)).emit('trip_completed', {
+                    trip_id: String(updatedTrip.id),
+                    trip_status: 'completed',
+                    duration: updatedTrip.duration_minutes !== undefined && updatedTrip.duration_minutes !== null ? Number(updatedTrip.duration_minutes) : (updatedTrip.duration !== undefined && updatedTrip.duration !== null ? Number(updatedTrip.duration) : null),
+                    distance: updatedTrip.distance_km !== undefined && updatedTrip.distance_km !== null ? Number(updatedTrip.distance_km) : (updatedTrip.distance !== undefined && updatedTrip.distance !== null ? Number(updatedTrip.distance) : null),
+                    price: updatedTrip.price !== undefined && updatedTrip.price !== null ? Number(updatedTrip.price) : (updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null)
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                trip_id: String(updatedTrip.id),
+                price: updatedTrip.price !== undefined && updatedTrip.price !== null ? Number(updatedTrip.price) : Number(updatedTrip.cost || 0),
+                duration: updatedTrip.duration_minutes !== undefined && updatedTrip.duration_minutes !== null ? Number(updatedTrip.duration_minutes) : Number(updatedTrip.duration || durationMinutes),
+                distance: updatedTrip.distance_km !== undefined && updatedTrip.distance_km !== null ? Number(updatedTrip.distance_km) : Number(updatedTrip.distance || distanceKm),
+                payment_method: updatedTrip.payment_method || null
+            },
+            trip: updatedTrip
+        });
+    } catch (err) {
+        try {
+            await client.query('ROLLBACK');
+        } catch (e) {
+            // ignore
+        }
+        console.error('Error ending trip:', err);
+        return res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+}
+
+app.post('/trips/end', endTripHandler);
+app.post('/api/trips/end', endTripHandler);
+
 // Rate driver (Passenger -> Driver)
 // Required by rider completion flow: POST /rate-driver { trip_id, rating, comment }
 async function rateDriverHandler(req, res) {
@@ -1450,9 +1791,9 @@ async function riderTripsHandler(req, res) {
                 COALESCE(t.driver_name, d.name) AS driver_name
              FROM trips t
              LEFT JOIN drivers d ON d.id = t.driver_id
-             WHERE t.user_id = $1
-               AND t.status IN ('completed', 'cancelled')
-             ORDER BY COALESCE(t.completed_at, t.cancelled_at, t.created_at) DESC`,
+                         WHERE COALESCE(t.rider_id, t.user_id) = $1
+                             AND t.trip_status IN ('completed'::trip_status_enum, 'rated'::trip_status_enum)
+                         ORDER BY t.completed_at DESC NULLS LAST`,
             [riderId]
         );
 
@@ -1479,8 +1820,8 @@ async function driverTripsHandler(req, res) {
              FROM trips t
              LEFT JOIN users u ON u.id = t.user_id
              WHERE t.driver_id = $1
-               AND t.status IN ('completed', 'cancelled')
-             ORDER BY COALESCE(t.completed_at, t.cancelled_at, t.created_at) DESC`,
+                             AND t.trip_status IN ('completed'::trip_status_enum, 'rated'::trip_status_enum)
+                         ORDER BY t.completed_at DESC NULLS LAST`,
             [driverId]
         );
 
@@ -1575,7 +1916,7 @@ app.get('/api/trips/pending/next', async (req, res) => {
         if (!Number.isFinite(driverLat) || !Number.isFinite(driverLng)) {
             const fallbackParams = [];
             let fallbackQuery = `
-                SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone, NULL::numeric AS distance_km
+                SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone, NULL::numeric AS pickup_distance_km
                 FROM trips t
                 LEFT JOIN users u ON t.user_id = u.id
                 WHERE t.status = 'pending' AND (t.driver_id IS NULL)
@@ -1618,9 +1959,9 @@ app.get('/api/trips/pending/next', async (req, res) => {
             (6371 * acos(
                 cos(radians($1)) * cos(radians(t.pickup_lat)) * cos(radians(t.pickup_lng) - radians($2)) +
                 sin(radians($1)) * sin(radians(t.pickup_lat))
-            )) AS distance_km
+            )) AS pickup_distance_km
         `;
-        let orderClause = ' ORDER BY distance_km ASC, t.created_at ASC';
+        let orderClause = ' ORDER BY pickup_distance_km ASC, t.created_at ASC';
 
         let query = `
             SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone${distanceSelect}
@@ -3786,6 +4127,7 @@ ensureDefaultAdmins()
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
     .then(() => ensureTripStatusColumn())
+    .then(() => ensureTripsRequiredColumns())
     .then(() => ensureTripSourceColumn())
     .then(() => ensurePickupMetaColumns())
     .then(() => ensurePendingRideColumns())

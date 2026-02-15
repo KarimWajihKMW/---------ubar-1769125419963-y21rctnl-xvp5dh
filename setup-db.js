@@ -118,6 +118,7 @@ async function setupDatabase() {
             CREATE TABLE trips (
                 id VARCHAR(50) PRIMARY KEY,
                 user_id INTEGER REFERENCES users(id),
+                rider_id INTEGER REFERENCES users(id),
                 driver_id INTEGER REFERENCES drivers(id),
                 pickup_location VARCHAR(255) NOT NULL,
                 dropoff_location VARCHAR(255) NOT NULL,
@@ -129,8 +130,11 @@ async function setupDatabase() {
                 dropoff_lng DECIMAL(11, 8),
                 car_type VARCHAR(50) DEFAULT 'economy',
                 cost DECIMAL(10, 2) NOT NULL,
+                price DECIMAL(10, 2),
                 distance DECIMAL(10, 2),
+                distance_km DECIMAL(10, 2),
                 duration INTEGER,
+                duration_minutes INTEGER,
                 payment_method VARCHAR(20) DEFAULT 'cash',
                 status VARCHAR(20) DEFAULT 'pending',
                 trip_status trip_status_enum DEFAULT 'pending',
@@ -138,6 +142,7 @@ async function setupDatabase() {
                 rating INTEGER,
                 review TEXT,
                 passenger_rating INTEGER,
+                rider_rating INTEGER,
                 driver_rating INTEGER,
                 passenger_review TEXT,
                 driver_review TEXT,
@@ -150,6 +155,42 @@ async function setupDatabase() {
             );
         `);
         console.log('✅ Trips table created');
+
+        // Create pending_ride_requests table (required by server pending rides flow)
+        await client.query(`
+            CREATE TABLE pending_ride_requests (
+                id SERIAL PRIMARY KEY,
+                request_id VARCHAR(50) UNIQUE NOT NULL,
+                trip_id VARCHAR(50),
+                source VARCHAR(40) DEFAULT 'manual',
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                passenger_name VARCHAR(100),
+                passenger_phone VARCHAR(20),
+                pickup_location VARCHAR(255) NOT NULL,
+                dropoff_location VARCHAR(255) NOT NULL,
+                pickup_lat DECIMAL(10, 8),
+                pickup_lng DECIMAL(11, 8),
+                pickup_accuracy DOUBLE PRECISION,
+                pickup_timestamp BIGINT,
+                dropoff_lat DECIMAL(10, 8),
+                dropoff_lng DECIMAL(11, 8),
+                car_type VARCHAR(50) DEFAULT 'economy',
+                estimated_cost DECIMAL(10, 2),
+                estimated_distance DECIMAL(10, 2),
+                estimated_duration INTEGER,
+                payment_method VARCHAR(20) DEFAULT 'cash',
+                status VARCHAR(20) DEFAULT 'waiting',
+                assigned_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                assigned_at TIMESTAMP,
+                rejected_by INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+                rejection_count INTEGER DEFAULT 0,
+                expires_at TIMESTAMP,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('✅ Pending ride requests table created');
 
         // Admin counters tables (daily/monthly)
         await client.query(`
@@ -175,9 +216,20 @@ async function setupDatabase() {
         // Create indexes for better performance
         try {
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_user_id ON trips(user_id);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_rider_id ON trips(rider_id);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_created_at ON trips(created_at DESC);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_completed_at ON trips(completed_at DESC);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_trips_pickup_coords ON trips(pickup_lat, pickup_lng);`);
+
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_trip_id ON pending_ride_requests(trip_id);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_source_status ON pending_ride_requests(source, status);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_status ON pending_ride_requests(status);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_user_id ON pending_ride_requests(user_id);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_created_at ON pending_ride_requests(created_at DESC);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_pickup_coords ON pending_ride_requests(pickup_lat, pickup_lng);`);
+            await client.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_expires_at ON pending_ride_requests(expires_at);`);
+
             await client.query(`CREATE INDEX IF NOT EXISTS idx_driver_earnings_driver_date ON driver_earnings(driver_id, date DESC);`);
             await client.query(`CREATE INDEX IF NOT EXISTS idx_drivers_location ON drivers(last_lat, last_lng);`);
             console.log('✅ Indexes created');
