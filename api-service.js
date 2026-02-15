@@ -58,6 +58,15 @@ const ApiService = {
         async getById(id) {
             return ApiService.request(`/trips/${id}`);
         },
+
+        // Get trip log (events + summary + optional path)
+        async getLog(id, options = {}) {
+            const { includePath = false } = options || {};
+            const params = new URLSearchParams();
+            if (includePath) params.set('include_path', '1');
+            const q = params.toString();
+            return ApiService.request(`/trips/${id}/log${q ? `?${q}` : ''}`);
+        },
         
         // Create new trip
         async create(tripData) {
@@ -179,10 +188,10 @@ const ApiService = {
         },
 
         // Update driver live location
-        async updateLocation(driverId, lat, lng) {
+        async updateLocation(driverId, lat, lng, accuracy_m = null) {
             return ApiService.request(`/drivers/${driverId}/location`, {
                 method: 'PATCH',
-                body: JSON.stringify({ lat, lng })
+                body: JSON.stringify({ lat, lng, accuracy_m })
             });
         },
 

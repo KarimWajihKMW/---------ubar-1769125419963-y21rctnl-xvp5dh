@@ -163,6 +163,8 @@ let activeDriverTripId = null;
 let activePassengerTripId = null;
 let passengerMatchInterval = null;
 let passengerMatchTripId = null;
+let passengerLiveTripInterval = null;
+let passengerLiveTripId = null;
 let lastTripEstimate = null;
 let lastCompletedTrip = null;
 let driverDemoRequestAt = 0;
@@ -677,6 +679,70 @@ function applyDriverLocation(coords, shouldCenter) {
         leafletMap.setView([coords.lat, coords.lng], Math.max(leafletMap.getZoom(), 14));
     }
     updateDriverLiveLocation(coords);
+    updateDriverTripProgressFromLocation(coords);
+}
+
+function updateDriverTripProgressFromLocation(coords) {
+    if (currentUserRole !== 'driver') return;
+    if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) return;
+    if (!activeDriverTripId || !currentIncomingTrip) return;
+
+    const pickupLat = Number(currentIncomingTrip.pickup_lat);
+    const pickupLng = Number(currentIncomingTrip.pickup_lng);
+    const dropoffLat = Number(currentIncomingTrip.dropoff_lat);
+    const dropoffLng = Number(currentIncomingTrip.dropoff_lng);
+
+    const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
+    const hasDropoff = Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng);
+
+    if (leafletMap && hasPickup) {
+        setPassengerPickup({ lat: pickupLat, lng: pickupLng }, currentIncomingTrip.pickup_location || 'موقع الراكب');
+    }
+
+    const arrivalThresholdMeters = 120;
+
+    if (!driverTripStarted && hasPickup) {
+        const meters = calculateDistance(coords.lat, coords.lng, pickupLat, pickupLng);
+        if (meters <= arrivalThresholdMeters) {
+            setDriverStartReady(true);
+        }
+
+        if (leafletMap) {
+            if (routePolyline) {
+                routePolyline.remove();
+                routePolyline = null;
+            }
+            routePolyline = L.polyline(
+                [
+                    [coords.lat, coords.lng],
+                    [pickupLat, pickupLng]
+                ],
+                { color: '#10b981', weight: 4, opacity: 0.85, dashArray: '8, 8' }
+            ).addTo(leafletMap);
+        }
+        return;
+    }
+
+    if (driverTripStarted && !driverAwaitingPayment && hasDropoff) {
+        const meters = calculateDistance(coords.lat, coords.lng, dropoffLat, dropoffLng);
+        if (meters <= arrivalThresholdMeters) {
+            setDriverAwaitingPayment(true);
+        }
+
+        if (leafletMap) {
+            if (routePolyline) {
+                routePolyline.remove();
+                routePolyline = null;
+            }
+            routePolyline = L.polyline(
+                [
+                    [coords.lat, coords.lng],
+                    [dropoffLat, dropoffLng]
+                ],
+                { color: '#2563eb', weight: 4, opacity: 0.85, dashArray: '8, 6' }
+            ).addTo(leafletMap);
+        }
+    }
 }
 
 async function updateDriverLiveLocation(coords) {
@@ -686,7 +752,7 @@ async function updateDriverLiveLocation(coords) {
     lastDriverLocationUpdateAt = now;
 
     try {
-        await ApiService.drivers.updateLocation(currentDriverProfile.id, coords.lat, coords.lng);
+        await ApiService.drivers.updateLocation(currentDriverProfile.id, coords.lat, coords.lng, coords.accuracy_m ?? null);
     } catch (error) {
         console.error('Failed to update driver location:', error);
     }
@@ -714,7 +780,8 @@ function maybeReverseGeocodePickup(coords) {
 function handleGeoSuccess(position) {
     const coords = {
         lat: position.coords.latitude,
-        lng: position.coords.longitude
+        lng: position.coords.longitude,
+        accuracy_m: position.coords.accuracy
     };
     lastGeoCoords = coords;
     geoPermissionDenied = false;
@@ -895,17 +962,12 @@ function startDriverTrackingLive() {
     });
     
     if (!driverLocation || !Number.isFinite(driverLocation.lat) || !Number.isFinite(driverLocation.lng)) {
-        // Initial driver location: offset from pickup when no live location is available
-        const offsetLat = 0.04; // ~4km for realistic timing
-        const offsetLng = 0.04;
-        driverLocation = {
-            lat: currentPickup.lat + offsetLat,
-            lng: currentPickup.lng + offsetLng
-        };
+        showToast('📡 جاري تحديد موقع الكابتن...');
+        return;
     }
-    
+
     driverMarkerL = L.marker([driverLocation.lat, driverLocation.lng], { icon: carIcon }).addTo(leafletMap);
-    driverMarkerL.bindPopup('🚗 السيارة قادمة إليك').openPopup();
+    driverMarkerL.bindPopup('🚗 موقع الكابتن').openPopup();
     
     console.log('✅ Driver marker added at:', driverLocation);
     
@@ -926,8 +988,7 @@ function startDriverTrackingLive() {
     
     console.log('✅ Map fitted to bounds, starting animation...');
     
-    // Animate driver moving to pickup
-    animateDriverToPickup();
+    // Real tracking: marker updates come from polling/live GPS (no scripted animation)
 }
 
 function animateDriverToPickup() {
@@ -2360,8 +2421,44 @@ window.driverAcceptRequest = async function() {
             passengerPickup.phone = currentIncomingTrip.passenger_phone;
         }
 
-        startDriverToPassengerRoute();
-        showToast('تم قبول الطلب! اذهب للراكب');
+        // Real trip: show pickup on map and rely on live GPS updates (no scripted animation)
+        if (!leafletMap) {
+            initLeafletMap();
+        }
+        moveLeafletMapToContainer('map-container');
+
+        if (routePolyline) {
+            routePolyline.remove();
+            routePolyline = null;
+        }
+
+        const pickupLat = Number(currentIncomingTrip.pickup_lat);
+        const pickupLng = Number(currentIncomingTrip.pickup_lng);
+        if (Number.isFinite(pickupLat) && Number.isFinite(pickupLng)) {
+            setPassengerPickup({ lat: pickupLat, lng: pickupLng }, currentIncomingTrip.pickup_location || 'موقع الراكب');
+            if (driverLocation && Number.isFinite(driverLocation.lat) && Number.isFinite(driverLocation.lng)) {
+                routePolyline = L.polyline(
+                    [
+                        [driverLocation.lat, driverLocation.lng],
+                        [pickupLat, pickupLng]
+                    ],
+                    { color: '#10b981', weight: 4, opacity: 0.85, dashArray: '8, 8' }
+                ).addTo(leafletMap);
+                const bounds = L.latLngBounds([
+                    [driverLocation.lat, driverLocation.lng],
+                    [pickupLat, pickupLng]
+                ]);
+                leafletMap.fitBounds(bounds, { padding: [50, 50] });
+            } else if (leafletMap) {
+                leafletMap.setView([pickupLat, pickupLng], Math.max(leafletMap.getZoom(), 14));
+            }
+        }
+
+        setDriverStartReady(false);
+        setDriverAwaitingPayment(false);
+        setDriverTripStarted(false);
+
+        showToast('تم قبول الطلب! تابع الخريطة للوصول للراكب');
     } catch (error) {
         console.error('Error accepting driver request:', error);
         showToast('❌ خطأ أثناء قبول الطلب');
@@ -2454,8 +2551,36 @@ window.driverStartTrip = async function() {
     setDriverStartReady(false);
     setDriverAwaitingPayment(false);
     setDriverTripStarted(true);
-    startDriverToDestinationRoute();
-    showToast('🚗 تم بدء الرحلة');
+
+    // Real trip: draw live line to destination (no scripted movement)
+    if (!leafletMap) {
+        initLeafletMap();
+    }
+    moveLeafletMapToContainer('map-container');
+
+    const dropoffLat = Number(currentIncomingTrip?.dropoff_lat);
+    const dropoffLng = Number(currentIncomingTrip?.dropoff_lng);
+    if (leafletMap && Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng) && driverLocation) {
+        if (routePolyline) {
+            routePolyline.remove();
+            routePolyline = null;
+        }
+        routePolyline = L.polyline(
+            [
+                [driverLocation.lat, driverLocation.lng],
+                [dropoffLat, dropoffLng]
+            ],
+            { color: '#2563eb', weight: 4, opacity: 0.85, dashArray: '8, 6' }
+        ).addTo(leafletMap);
+
+        const bounds = L.latLngBounds([
+            [driverLocation.lat, driverLocation.lng],
+            [dropoffLat, dropoffLng]
+        ]);
+        leafletMap.fitBounds(bounds, { padding: [50, 50] });
+    }
+
+    showToast('🚗 تم بدء الرحلة - التتبع مباشر من موقعك');
 };
 
 function setDriverPanelVisible(visible) {
@@ -2629,10 +2754,8 @@ window.driverEndTrip = async function() {
 
     if (tripId) {
         const driverSummary = incomingSnapshot ? {
-            cost: incomingSnapshot.cost,
-            distance: incomingSnapshot.distance,
             payment_method: incomingSnapshot.payment_method || 'cash'
-        } : null;
+        } : { payment_method: 'cash' };
 
         let summaryTrip = null;
 
@@ -2671,6 +2794,7 @@ window.driverEndTrip = async function() {
 
 window.logoutUser = function() {
     stopPassengerMatchPolling();
+    stopPassengerLiveTripPolling();
     stopDriverRequestPolling();
     stopLocationTracking();
     driverLocation = null;
@@ -2725,6 +2849,130 @@ function stopPassengerMatchPolling() {
         passengerMatchInterval = null;
     }
     passengerMatchTripId = null;
+}
+
+function stopPassengerLiveTripPolling() {
+    if (passengerLiveTripInterval) {
+        clearInterval(passengerLiveTripInterval);
+        passengerLiveTripInterval = null;
+    }
+    passengerLiveTripId = null;
+}
+
+function ensurePassengerDriverMarker(location) {
+    if (!leafletMap || !location) return;
+    const carIcon = L.divIcon({
+        className: 'driver-car-marker',
+        html: '<div style="font-size: 32px; transform: rotate(0deg);"><i class="fas fa-car" style="color: #4f46e5;"></i></div>',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+    });
+
+    if (driverMarkerL) {
+        driverMarkerL.setLatLng([location.lat, location.lng]);
+        return;
+    }
+    driverMarkerL = L.marker([location.lat, location.lng], { icon: carIcon }).addTo(leafletMap);
+}
+
+async function pollPassengerLiveTripOnce(tripId) {
+    if (!tripId) return;
+
+    const tripResp = await ApiService.trips.getById(tripId);
+    const trip = tripResp?.data;
+    if (!trip) return;
+
+    activePassengerTripId = trip.id || activePassengerTripId;
+
+    if (trip.pickup_lat !== null && trip.pickup_lng !== null) {
+        currentPickup = {
+            lat: Number(trip.pickup_lat),
+            lng: Number(trip.pickup_lng),
+            label: trip.pickup_location
+        };
+    }
+    if (trip.dropoff_lat !== null && trip.dropoff_lng !== null) {
+        currentDestination = {
+            lat: Number(trip.dropoff_lat),
+            lng: Number(trip.dropoff_lng),
+            label: trip.dropoff_location
+        };
+    }
+
+    if (trip.status === 'cancelled') {
+        stopPassengerLiveTripPolling();
+        showToast('تم إلغاء الرحلة');
+        resetApp();
+        return;
+    }
+
+    if (trip.status === 'completed') {
+        stopPassengerLiveTripPolling();
+        showToast('✅ انتهت الرحلة - جاري عرض سجل الرحلة');
+        try {
+            await showTripDetails(trip.id);
+        } catch (e) {
+            console.error('Failed to open trip details:', e);
+        }
+        return;
+    }
+
+    if (!leafletMap) {
+        initLeafletMap();
+    }
+
+    if (trip.status === 'ongoing') {
+        // Switch passenger UI to in-ride when driver starts
+        const rideSection = document.getElementById('state-in-ride');
+        if (rideSection && rideSection.classList.contains('hidden')) {
+            switchSection('in-ride');
+            showToast('🚗 بدأت الرحلة - تتبع مباشر');
+        }
+    }
+
+    if (trip.driver_id) {
+        const loc = await loadAssignedDriverLocation(trip.driver_id);
+        if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) {
+            driverLocation = { lat: loc.lat, lng: loc.lng };
+            moveLeafletMapToContainer('driver-map-view');
+            ensurePassengerDriverMarker(driverLocation);
+
+            if (routePolyline) {
+                routePolyline.remove();
+                routePolyline = null;
+            }
+
+            if (trip.status === 'assigned' && currentPickup) {
+                routePolyline = L.polyline(
+                    [
+                        [driverLocation.lat, driverLocation.lng],
+                        [currentPickup.lat, currentPickup.lng]
+                    ],
+                    { color: '#4f46e5', weight: 4, opacity: 0.75, dashArray: '10, 10' }
+                ).addTo(leafletMap);
+            }
+
+            if (trip.status === 'ongoing' && currentDestination) {
+                routePolyline = L.polyline(
+                    [
+                        [driverLocation.lat, driverLocation.lng],
+                        [currentDestination.lat, currentDestination.lng]
+                    ],
+                    { color: '#f59e0b', weight: 4, opacity: 0.85, dashArray: '6, 6' }
+                ).addTo(leafletMap);
+            }
+        }
+    }
+}
+
+function startPassengerLiveTripPolling(tripId) {
+    if (!tripId) return;
+    stopPassengerLiveTripPolling();
+    passengerLiveTripId = tripId;
+    pollPassengerLiveTripOnce(tripId).catch(() => {});
+    passengerLiveTripInterval = setInterval(() => {
+        pollPassengerLiveTripOnce(tripId).catch(() => {});
+    }, 4000);
 }
 
 async function checkPassengerMatch(tripId) {
@@ -2829,9 +3077,8 @@ async function handlePassengerAssignedTrip(trip) {
     if (etaEl) etaEl.innerText = formatETA(etaSeconds);
 
     switchSection('driver');
-    startDriverTrackingLive();
-    startETACountdown();
-    showToast('✅ تم قبول الرحلة بواسطة كابتن حقيقي', 4000);
+    startPassengerLiveTripPolling(activePassengerTripId);
+    showToast('✅ تم قبول الرحلة بواسطة كابتن حقيقي (تتبع مباشر)', 4000);
 }
 
 window.requestRide = async function() {
@@ -3629,10 +3876,24 @@ window.filterTrips = function(filter) {
 };
 
 // Show trip details
-window.showTripDetails = function(tripId) {
-    const trips = DB.getTrips();
-    const trip = trips.find(t => t.id === tripId);
-    
+window.showTripDetails = async function(tripId) {
+    let trips = DB.getTrips();
+    let trip = trips.find(t => t.id === tripId);
+
+    if (!trip) {
+        try {
+            const apiResp = await ApiService.trips.getById(tripId);
+            if (apiResp?.data) {
+                const user = DB.getUser();
+                trip = DB.normalizeTrip(apiResp.data, user?.name);
+                DB.upsertTrip(trip);
+                trips = DB.getTrips();
+            }
+        } catch (e) {
+            console.error('Failed to fetch trip details from API:', e);
+        }
+    }
+
     if (!trip) return;
     
     // Fill in details
@@ -3682,7 +3943,58 @@ window.showTripDetails = function(tripId) {
     
     // Switch to details view
     switchSection('trip-details');
+
+    // Load full trip log (events + summary)
+    loadTripLogIntoDetails(tripId);
 };
+
+async function loadTripLogIntoDetails(tripId) {
+    const container = document.getElementById('trip-detail-log');
+    if (!container) return;
+
+    container.innerHTML = '<p class="text-xs text-gray-500">جارٍ تحميل السجل...</p>';
+
+    try {
+        const resp = await ApiService.trips.getLog(tripId, { includePath: false });
+        const log = resp?.data;
+        const summary = log?.summary;
+        const events = Array.isArray(log?.events) ? log.events : [];
+
+        const lines = [];
+        if (summary?.started_at) lines.push(`⏱️ بدأ: ${formatTripDateTime(summary.started_at)}`);
+        if (summary?.completed_at) lines.push(`🏁 انتهى: ${formatTripDateTime(summary.completed_at)}`);
+        if (summary?.duration_min) lines.push(`🕒 المدة: ${Number(summary.duration_min)} دقيقة`);
+        if (summary?.distance_km !== null && summary?.distance_km !== undefined) lines.push(`📍 المسافة: ${Number(summary.distance_km)} كم`);
+        if (summary?.cost_sar !== null && summary?.cost_sar !== undefined) lines.push(`💰 التكلفة: ${Number(summary.cost_sar)} ر.س`);
+        if (summary?.end?.lat && summary?.end?.lng) lines.push(`📌 انتهت عند: ${Number(summary.end.lat).toFixed(5)}, ${Number(summary.end.lng).toFixed(5)}`);
+
+        const eventLines = events
+            .filter(e => e && e.event_type)
+            .map(e => {
+                const t = e.created_at ? formatTripDateTime(e.created_at) : '';
+                const labelMap = {
+                    started: 'بدأت الرحلة',
+                    completed: 'اكتملت الرحلة',
+                    cancelled: 'تم إلغاء الرحلة'
+                };
+                const label = labelMap[e.event_type] || e.event_type;
+                return `• ${label}${t ? ` — ${t}` : ''}`;
+            });
+
+        const htmlParts = [];
+        if (lines.length) {
+            htmlParts.push(`<div class="space-y-1">${lines.map(l => `<p>${l}</p>`).join('')}</div>`);
+        }
+        if (eventLines.length) {
+            htmlParts.push(`<div class="space-y-1 text-xs text-gray-600">${eventLines.map(l => `<p>${l}</p>`).join('')}</div>`);
+        }
+
+        container.innerHTML = htmlParts.length ? htmlParts.join('') : '<p class="text-xs text-gray-500">لا يوجد سجل متاح</p>';
+    } catch (e) {
+        console.error('Failed to load trip log:', e);
+        container.innerHTML = '<p class="text-xs text-gray-500">تعذر تحميل السجل</p>';
+    }
+}
 
 function simulateDriverResponse(userText) {
     const chatMessages = document.getElementById('chat-messages');
