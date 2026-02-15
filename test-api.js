@@ -164,6 +164,36 @@ async function testAPI() {
             passenger_review: data.data?.passenger_review
         });
 
+        // Verify rider trip history includes the trip
+        console.log('\n1️⃣1️⃣d Testing GET /rider/trips ...');
+        response = await fetch(`${baseURL}/rider/trips?rider_id=3`);
+        data = await response.json();
+        const riderTrips = Array.isArray(data.data) ? data.data : [];
+        console.log('✅ Rider trips fetched:', riderTrips.length);
+        const riderHasTrip = riderTrips.some(t => t.id === createdTripId);
+        console.log('   Contains created trip:', riderHasTrip ? '✅' : '❌');
+
+        // Verify driver trip history includes the trip
+        console.log('\n1️⃣1️⃣e Testing GET /driver/trips ...');
+        response = await fetch(`${baseURL}/driver/trips?driver_id=1`);
+        data = await response.json();
+        const driverTrips = Array.isArray(data.data) ? data.data : [];
+        console.log('✅ Driver trips fetched:', driverTrips.length);
+        const driverHasTrip = driverTrips.some(t => t.id === createdTripId);
+        console.log('   Contains created trip:', driverHasTrip ? '✅' : '❌');
+
+        // Verify admin dashboard metrics
+        console.log('\n1️⃣1️⃣f Testing admin dashboard metrics ...');
+        response = await fetch(`${baseURL}/admin/dashboard/stats`);
+        data = await response.json();
+        console.log('✅ Admin stats keys:', Object.keys(data.data || {}).slice(0, 12));
+        console.log('   total_trips:', data.data?.total_trips);
+        console.log('   total_revenue:', data.data?.total_revenue);
+        console.log('   total_drivers_earnings:', data.data?.total_drivers_earnings);
+        console.log('   total_distance:', data.data?.total_distance);
+        console.log('   trips_today:', data.data?.trips_today);
+        console.log('   trips_this_month:', data.data?.trips_this_month);
+
         // Test 1️⃣2️⃣: Get single trip
         console.log('\n1️⃣2️⃣ Testing get single trip...');
         response = await fetch(`${baseURL}/trips/${createdTripId}`);

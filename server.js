@@ -19,6 +19,25 @@ const PENDING_TRIP_TTL_MINUTES = 20;
 const ASSIGNED_TRIP_TTL_MINUTES = 120;
 const AUTO_ASSIGN_TRIPS = false;
 
+function haversineKm(a, b) {
+    const R = 6371;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const sinDLat = Math.sin(dLat / 2);
+    const sinDLng = Math.sin(dLng / 2);
+    const c = 2 * Math.asin(Math.sqrt(sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng));
+    return Math.max(0, R * c);
+}
+
+function monthKeyFromDate(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+}
+
 // ------------------------------
 // Realtime (Socket.io)
 // ------------------------------
@@ -396,6 +415,34 @@ async function ensureDriverLocationColumns() {
         console.log('✅ Driver location columns ensured');
     } catch (err) {
         console.error('❌ Failed to ensure driver location columns:', err.message);
+    }
+}
+
+async function ensureAdminTripCountersTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_daily_counters (
+                day DATE PRIMARY KEY,
+                daily_trips INTEGER NOT NULL DEFAULT 0,
+                daily_revenue DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                daily_distance DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_monthly_counters (
+                month_key VARCHAR(7) PRIMARY KEY,
+                monthly_trips INTEGER NOT NULL DEFAULT 0,
+                monthly_revenue DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                monthly_distance DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        console.log('✅ Admin daily/monthly counters tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure admin counters tables:', err.message);
     }
 }
 
@@ -958,18 +1005,42 @@ app.patch('/api/trips/:id/status', async (req, res) => {
         } = req.body;
 
         // Fetch current status for state-machine transition checks + event dedupe
+        // Also load trip coords/timestamps for completion calculations.
         let beforeTripStatus = null;
         let beforeStatus = null;
+        let beforeTripRow = null;
         try {
-            const before = await pool.query('SELECT status, trip_status FROM trips WHERE id = $1 LIMIT 1', [id]);
+            const before = await pool.query(
+                `SELECT
+                    status,
+                    trip_status,
+                    pickup_lat,
+                    pickup_lng,
+                    dropoff_lat,
+                    dropoff_lng,
+                    started_at,
+                    created_at,
+                    completed_at,
+                    distance,
+                    duration,
+                    cost,
+                    driver_id,
+                    user_id
+                 FROM trips
+                 WHERE id = $1
+                 LIMIT 1`,
+                [id]
+            );
             if (before.rows.length > 0) {
                 beforeStatus = before.rows[0].status || null;
                 beforeTripStatus = before.rows[0].trip_status || null;
+                beforeTripRow = before.rows[0];
             }
         } catch (err) {
             // Non-blocking
             beforeTripStatus = null;
             beforeStatus = null;
+            beforeTripRow = null;
         }
 
         const effectivePassengerRating = passenger_rating !== undefined ? passenger_rating : rating;
@@ -1011,10 +1082,29 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             params.push(cost);
         }
 
+        // If trip is being completed, compute distance from coordinates when caller didn't provide it.
+        let computedDistance = null;
+        if (status === 'completed' && distance === undefined) {
+            const existingDistance = beforeTripRow?.distance !== undefined && beforeTripRow?.distance !== null ? Number(beforeTripRow.distance) : null;
+            if (!Number.isFinite(existingDistance)) {
+                const pl = beforeTripRow?.pickup_lat !== undefined && beforeTripRow?.pickup_lat !== null ? Number(beforeTripRow.pickup_lat) : null;
+                const pg = beforeTripRow?.pickup_lng !== undefined && beforeTripRow?.pickup_lng !== null ? Number(beforeTripRow.pickup_lng) : null;
+                const dl = beforeTripRow?.dropoff_lat !== undefined && beforeTripRow?.dropoff_lat !== null ? Number(beforeTripRow.dropoff_lat) : null;
+                const dg = beforeTripRow?.dropoff_lng !== undefined && beforeTripRow?.dropoff_lng !== null ? Number(beforeTripRow.dropoff_lng) : null;
+                if (Number.isFinite(pl) && Number.isFinite(pg) && Number.isFinite(dl) && Number.isFinite(dg)) {
+                    computedDistance = Math.round(haversineKm({ lat: pl, lng: pg }, { lat: dl, lng: dg }) * 10) / 10;
+                }
+            }
+        }
+
         if (distance !== undefined) {
             paramCount++;
             query += `, distance = $${paramCount}`;
             params.push(distance);
+        } else if (computedDistance !== null) {
+            paramCount++;
+            query += `, distance = $${paramCount}`;
+            params.push(computedDistance);
         }
 
         if (duration !== undefined) {
@@ -1105,11 +1195,14 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             console.warn('⚠️ Failed to emit trip realtime event:', err.message);
         }
         
-        // Update driver earnings if trip completed
-        if (status === 'completed' && result.rows[0].driver_id && cost) {
+        // Update driver earnings if trip completed (once per trip completion)
+        if (status === 'completed' && beforeStatus !== 'completed' && result.rows[0].driver_id) {
             try {
                 const driverId = result.rows[0].driver_id;
-                const tripCost = parseFloat(cost);
+                const tripCost = parseFloat(cost !== undefined ? cost : result.rows[0].cost);
+                if (!Number.isFinite(tripCost) || tripCost <= 0) {
+                    // Nothing to add
+                } else {
                 
                 // Update drivers table
                 await pool.query(`
@@ -1151,8 +1244,49 @@ app.patch('/api/trips/:id/status', async (req, res) => {
                         driverId
                     ]);
                 }
+                }
             } catch (driverErr) {
                 console.error('Error updating driver earnings:', driverErr);
+            }
+        }
+
+        // Daily/Monthly counters (increment on completion transition)
+        if (status === 'completed' && beforeStatus !== 'completed') {
+            try {
+                await ensureAdminTripCountersTables();
+                const updatedTrip = result.rows[0];
+                const completedAt = updatedTrip.completed_at ? new Date(updatedTrip.completed_at) : new Date();
+                const dayKey = completedAt.toISOString().slice(0, 10);
+                const monthKey = monthKeyFromDate(completedAt);
+
+                const tripRevenue = Number(updatedTrip.cost || 0);
+                const tripDistance = Number(updatedTrip.distance || 0);
+
+                await pool.query(
+                    `INSERT INTO admin_daily_counters (day, daily_trips, daily_revenue, daily_distance, updated_at)
+                     VALUES ($1, 1, $2, $3, CURRENT_TIMESTAMP)
+                     ON CONFLICT (day)
+                     DO UPDATE SET
+                        daily_trips = admin_daily_counters.daily_trips + 1,
+                        daily_revenue = admin_daily_counters.daily_revenue + EXCLUDED.daily_revenue,
+                        daily_distance = admin_daily_counters.daily_distance + EXCLUDED.daily_distance,
+                        updated_at = CURRENT_TIMESTAMP`,
+                    [dayKey, tripRevenue, tripDistance]
+                );
+
+                await pool.query(
+                    `INSERT INTO admin_monthly_counters (month_key, monthly_trips, monthly_revenue, monthly_distance, updated_at)
+                     VALUES ($1, 1, $2, $3, CURRENT_TIMESTAMP)
+                     ON CONFLICT (month_key)
+                     DO UPDATE SET
+                        monthly_trips = admin_monthly_counters.monthly_trips + 1,
+                        monthly_revenue = admin_monthly_counters.monthly_revenue + EXCLUDED.monthly_revenue,
+                        monthly_distance = admin_monthly_counters.monthly_distance + EXCLUDED.monthly_distance,
+                        updated_at = CURRENT_TIMESTAMP`,
+                    [monthKey, tripRevenue, tripDistance]
+                );
+            } catch (err) {
+                console.warn('⚠️ Failed to update admin counters:', err.message);
             }
         }
 
@@ -1301,6 +1435,66 @@ async function rateDriverHandler(req, res) {
 
 app.post('/rate-driver', rateDriverHandler);
 app.post('/api/rate-driver', rateDriverHandler);
+
+// Rider trip history
+async function riderTripsHandler(req, res) {
+    try {
+        const riderId = req.query.rider_id || req.query.user_id;
+        if (!riderId) {
+            return res.status(400).json({ success: false, error: 'rider_id is required' });
+        }
+
+        const result = await pool.query(
+            `SELECT
+                t.*,
+                COALESCE(t.driver_name, d.name) AS driver_name
+             FROM trips t
+             LEFT JOIN drivers d ON d.id = t.driver_id
+             WHERE t.user_id = $1
+               AND t.status IN ('completed', 'cancelled')
+             ORDER BY COALESCE(t.completed_at, t.cancelled_at, t.created_at) DESC`,
+            [riderId]
+        );
+
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        console.error('Error fetching rider trips:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+// Driver trip history
+async function driverTripsHandler(req, res) {
+    try {
+        const driverId = req.query.driver_id;
+        if (!driverId) {
+            return res.status(400).json({ success: false, error: 'driver_id is required' });
+        }
+
+        const result = await pool.query(
+            `SELECT
+                t.*,
+                u.name AS passenger_name,
+                u.phone AS passenger_phone
+             FROM trips t
+             LEFT JOIN users u ON u.id = t.user_id
+             WHERE t.driver_id = $1
+               AND t.status IN ('completed', 'cancelled')
+             ORDER BY COALESCE(t.completed_at, t.cancelled_at, t.created_at) DESC`,
+            [driverId]
+        );
+
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        console.error('Error fetching driver trips:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+app.get('/rider/trips', riderTripsHandler);
+app.get('/api/rider/trips', riderTripsHandler);
+app.get('/driver/trips', driverTripsHandler);
+app.get('/api/driver/trips', driverTripsHandler);
 
 // Get next pending trip (optionally by car type)
 app.get('/api/trips/pending/next', async (req, res) => {
@@ -1567,55 +1761,95 @@ app.get('/api/trips/stats/summary', async (req, res) => {
 // Get admin dashboard statistics
 app.get('/api/admin/dashboard/stats', async (req, res) => {
     try {
-        // Get today's date range (start and end of day)
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        
-        // Get ALL trips count from database (not just today)
-        const todayTripsResult = await pool.query(`
-            SELECT COUNT(*) as count
+        const now = new Date();
+        const monthKey = monthKeyFromDate(now);
+
+        const totalTripsResult = await pool.query(`
+            SELECT COUNT(*)::int AS count
             FROM trips
-            WHERE source = 'passenger_app'
+            WHERE status = 'completed'
         `);
-        
-        // Get ALL drivers count from database (not just online)
-        const activeDriversResult = await pool.query(`
-            SELECT COUNT(*) as count
+
+        const totalRevenueResult = await pool.query(`
+            SELECT COALESCE(SUM(cost), 0) AS total
+            FROM trips
+            WHERE status = 'completed'
+        `);
+
+        const totalDistanceResult = await pool.query(`
+            SELECT COALESCE(SUM(distance), 0) AS total
+            FROM trips
+            WHERE status = 'completed'
+        `);
+
+        const tripsTodayResult = await pool.query(`
+            SELECT COUNT(*)::int AS count
+            FROM trips
+            WHERE status = 'completed'
+              AND completed_at::date = CURRENT_DATE
+        `);
+
+        const tripsThisMonthResult = await pool.query(`
+            SELECT COUNT(*)::int AS count
+            FROM trips
+            WHERE status = 'completed'
+              AND DATE_TRUNC('month', completed_at) = DATE_TRUNC('month', CURRENT_DATE)
+        `);
+
+        const driversEarningsResult = await pool.query(`
+            SELECT COALESCE(SUM(total_earnings), 0) AS total
             FROM drivers
         `);
-        
-        // Get passengers count (users with role 'passenger', 'user' or NULL)
-        const passengersResult = await pool.query(`
-            SELECT COUNT(*) as count
-            FROM users
-            WHERE role = 'passenger' OR role = 'user' OR role IS NULL
-        `);
-        
-        // Get total earnings (completed trips)
-        const earningsResult = await pool.query(`
-            SELECT COALESCE(SUM(cost), 0) as total
-            FROM trips
-            WHERE status = 'completed' AND source = 'passenger_app'
-        `);
-        
-        // Get average rating
+
         const ratingResult = await pool.query(`
             SELECT COALESCE(AVG(COALESCE(passenger_rating, rating)), 0) as avg_rating
             FROM trips
             WHERE status = 'completed'
-              AND source = 'passenger_app'
               AND COALESCE(passenger_rating, rating) IS NOT NULL
         `);
+
+        // Optional (legacy UI)
+        const activeDriversResult = await pool.query(`SELECT COUNT(*)::int as count FROM drivers`);
+        const passengersResult = await pool.query(`
+            SELECT COUNT(*)::int as count
+            FROM users
+            WHERE role = 'passenger' OR role = 'user' OR role IS NULL
+        `);
+
+        // Counters (incremented on completion)
+        let dailyCounters = null;
+        let monthlyCounters = null;
+        try {
+            await ensureAdminTripCountersTables();
+            const daily = await pool.query('SELECT * FROM admin_daily_counters WHERE day = CURRENT_DATE LIMIT 1');
+            dailyCounters = daily.rows[0] || null;
+            const monthly = await pool.query('SELECT * FROM admin_monthly_counters WHERE month_key = $1 LIMIT 1', [monthKey]);
+            monthlyCounters = monthly.rows[0] || null;
+        } catch (e) {
+            dailyCounters = null;
+            monthlyCounters = null;
+        }
         
         res.json({
             success: true,
             data: {
-                today_trips: parseInt(todayTripsResult.rows[0].count),
-                active_drivers: parseInt(activeDriversResult.rows[0].count),
-                total_passengers: parseInt(passengersResult.rows[0].count),
-                total_earnings: parseFloat(earningsResult.rows[0].total),
+                // Required metrics
+                total_trips: totalTripsResult.rows[0].count,
+                total_revenue: parseFloat(totalRevenueResult.rows[0].total),
+                total_drivers_earnings: parseFloat(driversEarningsResult.rows[0].total),
+                total_distance: parseFloat(totalDistanceResult.rows[0].total),
+                trips_today: tripsTodayResult.rows[0].count,
+                trips_this_month: tripsThisMonthResult.rows[0].count,
+                // Counters
+                daily_trips: dailyCounters ? Number(dailyCounters.daily_trips) : tripsTodayResult.rows[0].count,
+                daily_revenue: dailyCounters ? Number(dailyCounters.daily_revenue) : parseFloat(totalRevenueResult.rows[0].total),
+                monthly_trips: monthlyCounters ? Number(monthlyCounters.monthly_trips) : tripsThisMonthResult.rows[0].count,
+                monthly_revenue: monthlyCounters ? Number(monthlyCounters.monthly_revenue) : parseFloat(totalRevenueResult.rows[0].total),
+                // Backward-compatible fields
+                today_trips: tripsTodayResult.rows[0].count,
+                active_drivers: activeDriversResult.rows[0].count,
+                total_passengers: passengersResult.rows[0].count,
+                total_earnings: parseFloat(totalRevenueResult.rows[0].total),
                 avg_rating: parseFloat(ratingResult.rows[0].avg_rating).toFixed(1)
             }
         });
@@ -3556,6 +3790,7 @@ ensureDefaultAdmins()
     .then(() => ensurePickupMetaColumns())
     .then(() => ensurePendingRideColumns())
     .then(() => ensureDriverLocationColumns())
+    .then(() => ensureAdminTripCountersTables())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');
         return driverSync.initializeSyncSystem();

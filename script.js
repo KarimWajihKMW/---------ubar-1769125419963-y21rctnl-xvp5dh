@@ -454,6 +454,28 @@ function showPassengerTripSummaryAndRating(tripId, details = {}) {
     if (typeof window.switchSection === 'function') {
         window.switchSection('payment-success');
     }
+
+    // Refresh trip history cache so My Trips updates instantly
+    try {
+        const user = DB.getUser();
+        if (user?.id) {
+            DB.fetchTrips({ userId: user.id, role: user.role || 'passenger' }).then(() => {
+                try {
+                    // Profile "آخر الرحلات"
+                    renderTripHistory('trip-history-container', 3);
+                    // Full history screen if present
+                    const all = document.getElementById('all-trips-container');
+                    if (all && !document.getElementById('state-trip-history')?.classList.contains('hidden')) {
+                        window.renderAllTrips && window.renderAllTrips();
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            });
+        }
+    } catch (e) {
+        // ignore
+    }
 }
 
 function handleTripCompletedRealtime(payload) {
@@ -2248,14 +2270,22 @@ const DB = {
 
     async fetchTrips({ userId, role } = {}) {
         try {
-            const params = new URLSearchParams();
-            params.set('limit', '200');
-            params.set('source', 'passenger_app');
+            let url = '/api/trips?';
             if (role === 'passenger' && userId) {
-                params.set('user_id', String(userId));
+                url = `/api/rider/trips?rider_id=${encodeURIComponent(String(userId))}`;
+            } else if (role === 'driver') {
+                const driverId = currentDriverProfile?.id;
+                if (driverId) {
+                    url = `/api/driver/trips?driver_id=${encodeURIComponent(String(driverId))}`;
+                }
+            } else {
+                const params = new URLSearchParams();
+                params.set('limit', '200');
+                params.set('source', 'passenger_app');
+                url = `/api/trips?${params.toString()}`;
             }
 
-            const response = await fetch(`/api/trips?${params.toString()}`);
+            const response = await fetch(url);
             const result = await response.json();
             if (!response.ok || !result.success) {
                 throw new Error(result.error || 'Failed to fetch trips');
@@ -3402,6 +3432,14 @@ window.driverEndTrip = async function() {
                 openDriverTripSummary(summaryTrip);
             }
         }
+
+        // Refresh driver trip history cache so it appears instantly
+        try {
+            const user = DB.getUser();
+            await DB.fetchTrips({ userId: user?.id, role: 'driver' });
+        } catch (e) {
+            // ignore
+        }
     }
 
     activeDriverTripId = null;
@@ -3834,37 +3872,38 @@ async function loadAdminDashboardStats() {
     try {
         const response = await ApiService.admin.getDashboardStats();
         if (response?.success && response?.data) {
-            const { today_trips, active_drivers, total_passengers, total_earnings, avg_rating } = response.data;
-            
-            // Update today's trips
-            const todayTripsEl = document.getElementById('admin-today-trips');
-            if (todayTripsEl) {
-                todayTripsEl.textContent = today_trips.toLocaleString('ar-EG');
+            const {
+                total_trips,
+                total_revenue,
+                total_drivers_earnings,
+                total_distance,
+                trips_today,
+                trips_this_month
+            } = response.data;
+
+            const totalTripsEl = document.getElementById('admin-total-trips');
+            if (totalTripsEl) totalTripsEl.textContent = Number(total_trips || 0).toLocaleString('ar-EG');
+
+            const totalRevenueEl = document.getElementById('admin-total-revenue');
+            if (totalRevenueEl) {
+                totalRevenueEl.innerHTML = `${Number(total_revenue || 0).toLocaleString('ar-EG')} <span class="text-sm text-gray-400">ر.س</span>`;
             }
-            
-            // Update active drivers
-            const activeDriversEl = document.getElementById('admin-active-drivers');
-            if (activeDriversEl) {
-                activeDriversEl.textContent = active_drivers.toLocaleString('ar-EG');
+
+            const driversEarningsEl = document.getElementById('admin-total-drivers-earnings');
+            if (driversEarningsEl) {
+                driversEarningsEl.innerHTML = `${Number(total_drivers_earnings || 0).toLocaleString('ar-EG')} <span class="text-sm text-gray-400">ر.س</span>`;
             }
-            
-            // Update total passengers
-            const passengersEl = document.getElementById('admin-total-passengers');
-            if (passengersEl) {
-                passengersEl.textContent = total_passengers.toLocaleString('ar-EG');
+
+            const distanceEl = document.getElementById('admin-total-distance');
+            if (distanceEl) {
+                distanceEl.innerHTML = `${Number(total_distance || 0).toLocaleString('ar-EG')} <span class="text-sm text-gray-400">كم</span>`;
             }
-            
-            // Update total earnings
-            const earningsEl = document.getElementById('admin-total-earnings');
-            if (earningsEl) {
-                earningsEl.innerHTML = `${parseFloat(total_earnings).toLocaleString('ar-EG')} <span class="text-sm text-gray-400">ر.س</span>`;
-            }
-            
-            // Update average rating
-            const ratingEl = document.getElementById('admin-avg-rating');
-            if (ratingEl) {
-                ratingEl.textContent = avg_rating;
-            }
+
+            const tripsTodayEl = document.getElementById('admin-trips-today');
+            if (tripsTodayEl) tripsTodayEl.textContent = Number(trips_today || 0).toLocaleString('ar-EG');
+
+            const tripsMonthEl = document.getElementById('admin-trips-this-month');
+            if (tripsMonthEl) tripsMonthEl.textContent = Number(trips_this_month || 0).toLocaleString('ar-EG');
             
             console.log('✅ Admin dashboard stats loaded from database');
         }
@@ -3873,6 +3912,77 @@ async function loadAdminDashboardStats() {
         // Keep default values (0) if API fails
     }
 }
+
+// ==================== DRIVER TRIPS SCREEN ====================
+
+window.openDriverTrips = async function() {
+    const screen = document.getElementById('driver-trips-screen');
+    const container = document.getElementById('driver-trips-container');
+    if (!screen || !container) return;
+
+    const driverId = currentDriverProfile?.id;
+    if (!driverId) {
+        showToast('تعذر تحديد ملف السائق');
+        return;
+    }
+
+    screen.classList.remove('hidden');
+    container.innerHTML = '<p class="text-gray-500 text-center py-8">جاري تحميل الرحلات...</p>';
+
+    try {
+        const resp = await fetch(`/api/driver/trips?driver_id=${encodeURIComponent(String(driverId))}`);
+        const data = await resp.json();
+        if (!resp.ok || !data?.success) throw new Error(data?.error || 'Failed');
+
+        const trips = Array.isArray(data.data) ? data.data : [];
+        container.innerHTML = '';
+        if (!trips.length) {
+            container.innerHTML = '<p class="text-gray-500 text-center py-8">لا توجد رحلات</p>';
+            return;
+        }
+
+        trips.forEach((t) => {
+            const dateStr = new Date(t.completed_at || t.cancelled_at || t.created_at).toLocaleString('ar-EG', {
+                year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            });
+
+            const riderName = t.passenger_name || 'راكب';
+            const earnings = Number(t.cost || 0);
+            const distance = Number(t.distance || 0);
+            const duration = Number(t.duration || 0);
+            const riderRating = Number(t.driver_rating || 0);
+            const ratingStars = '⭐'.repeat(Math.max(0, Math.min(5, riderRating)));
+
+            const html = `
+                <div class="bg-white border-2 border-gray-200 rounded-2xl p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <p class="text-xs text-gray-500 font-bold">${dateStr}</p>
+                            <p class="font-extrabold text-gray-800">${riderName}</p>
+                        </div>
+                        <div class="text-left font-extrabold text-emerald-700">${earnings} ر.س</div>
+                    </div>
+                    <div class="flex justify-between text-sm font-bold text-gray-700">
+                        <span>المسافة: ${distance} كم</span>
+                        <span>المدة: ${duration} دقيقة</span>
+                    </div>
+                    <div class="mt-2 text-sm font-bold text-gray-700">
+                        تقييم الراكب: <span class="text-yellow-500">${ratingStars || '—'}</span>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', html);
+        });
+    } catch (e) {
+        console.error('Failed to load driver trips:', e);
+        container.innerHTML = '<p class="text-gray-500 text-center py-8">تعذر تحميل الرحلات</p>';
+    }
+};
+
+window.closeDriverTrips = function() {
+    const screen = document.getElementById('driver-trips-screen');
+    if (screen) screen.classList.add('hidden');
+};
 
 function getGuestDriverIdentity() {
     const key = 'akwadra_guest_driver_identity';
@@ -4225,6 +4335,11 @@ async function renderTripHistory(containerId = 'trip-history-container', limit =
                     <span class="text-xs text-yellow-500">${stars}</span>
                     <span class="text-lg font-extrabold text-indigo-600">${trip.cost} ر.س</span>
                 </div>
+            </div>
+
+            <div class="mt-2 text-xs font-bold text-gray-600 flex justify-between">
+                <span>المسافة: ${Number(trip.distance || 0)} كم</span>
+                <span>المدة: ${Number(trip.duration || 0)} دقيقة</span>
             </div>
         </div>`;
         
@@ -4917,42 +5032,6 @@ async function updateDriverMenuData() {
     avatarIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.src = user.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver';
-    });
-}
-
-function renderTripHistory() {
-    const container = document.getElementById('trip-history-container');
-    if (!container) return;
-    const trips = DB.getTrips();
-    container.innerHTML = '';
-
-    if (trips.length === 0) {
-        container.innerHTML = '<div class="text-center text-gray-400 py-4">لا توجد رحلات سابقة</div>';
-        return;
-    }
-
-    trips.forEach(trip => {
-        const date = new Date(trip.date);
-        const formattedDate = date.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' });
-        const formattedTime = date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-
-        const html = `
-        <div class="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all cursor-pointer group">
-             <div class="flex items-center">
-                 <div class="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                     <i class="fas fa-car"></i>
-                 </div>
-                 <div class="mr-4">
-                     <h4 class="font-bold text-gray-800">من ${trip.pickup} إلى ${trip.dropoff}</h4>
-                     <p class="text-xs text-gray-400 mt-1 font-medium">${formattedDate} • ${formattedTime}</p>
-                 </div>
-             </div>
-             <div class="text-left">
-                 <div class="font-bold text-gray-800">${trip.cost} ر.س</div>
-                 <span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">مكتملة</span>
-             </div>
-        </div>`;
-        container.insertAdjacentHTML('beforeend', html);
     });
 }
 

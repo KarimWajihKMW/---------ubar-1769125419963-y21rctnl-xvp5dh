@@ -17,6 +17,16 @@ async function setupDatabase() {
 
         // Drop enum types created by the app (optional)
         await client.query(`DROP TYPE IF EXISTS trip_status_enum CASCADE;`);
+
+        // Create enum types required by schema
+        await client.query(`
+            DO $$
+            BEGIN
+                CREATE TYPE trip_status_enum AS ENUM ('pending', 'accepted', 'arrived', 'started', 'completed', 'rated');
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+        `);
         
         // Create users table
         await client.query(`
@@ -123,6 +133,8 @@ async function setupDatabase() {
                 duration INTEGER,
                 payment_method VARCHAR(20) DEFAULT 'cash',
                 status VARCHAR(20) DEFAULT 'pending',
+                trip_status trip_status_enum DEFAULT 'pending',
+                source VARCHAR(40) DEFAULT 'passenger_app',
                 rating INTEGER,
                 review TEXT,
                 passenger_rating INTEGER,
@@ -138,6 +150,27 @@ async function setupDatabase() {
             );
         `);
         console.log('✅ Trips table created');
+
+        // Admin counters tables (daily/monthly)
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS admin_daily_counters (
+                day DATE PRIMARY KEY,
+                daily_trips INTEGER NOT NULL DEFAULT 0,
+                daily_revenue DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                daily_distance DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS admin_monthly_counters (
+                month_key VARCHAR(7) PRIMARY KEY,
+                monthly_trips INTEGER NOT NULL DEFAULT 0,
+                monthly_revenue DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                monthly_distance DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('✅ Admin counters tables created');
         
         // Create indexes for better performance
         try {
