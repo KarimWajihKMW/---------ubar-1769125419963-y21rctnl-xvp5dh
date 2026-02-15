@@ -264,11 +264,16 @@ let isDriverPanelCollapsed = false;
 let isPassengerPanelHidden = false;
 let locationWatchId = null;
 let lastGeoCoords = null;
+let lastGeoAccuracy = null;
+let lastGeoTimestamp = null;
 let lastGeoLabel = null;
 let lastReverseGeocodeAt = 0;
 let lastGeoToastAt = 0;
 let hasCenteredOnGeo = false;
 let geoPermissionDenied = false;
+
+let passengerPickupUpdateInterval = null;
+let driverIncomingTripUpdateInterval = null;
 
 function formatStreetLabel(label) {
     if (!label) return 'موقع محدد';
@@ -725,6 +730,8 @@ function handleGeoSuccess(position) {
         lng: position.coords.longitude
     };
     lastGeoCoords = coords;
+    lastGeoAccuracy = Number.isFinite(Number(position?.coords?.accuracy)) ? Number(position.coords.accuracy) : null;
+    lastGeoTimestamp = Number.isFinite(Number(position?.timestamp)) ? Number(position.timestamp) : Date.now();
     geoPermissionDenied = false;
 
     if (currentUserRole === 'passenger') {
@@ -739,6 +746,71 @@ function handleGeoSuccess(position) {
     if (!hasCenteredOnGeo) {
         hasCenteredOnGeo = true;
     }
+}
+
+function getHighAccuracyPickupFix() {
+    return new Promise((resolve, reject) => {
+        if (!canUseGeolocation()) {
+            reject(new Error('Geolocation not available'));
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = Number(position?.coords?.latitude);
+                const lng = Number(position?.coords?.longitude);
+                const accuracy = Number.isFinite(Number(position?.coords?.accuracy)) ? Number(position.coords.accuracy) : null;
+                const timestamp = Number.isFinite(Number(position?.timestamp)) ? Number(position.timestamp) : Date.now();
+                resolve({ lat, lng, accuracy, timestamp });
+            },
+            (err) => reject(err || new Error('Failed to get location')),
+            {
+                enableHighAccuracy: true,
+                maximumAge: 0,
+                timeout: 15000
+            }
+        );
+    });
+}
+
+function stopPassengerPickupLiveUpdates() {
+    if (passengerPickupUpdateInterval) {
+        clearInterval(passengerPickupUpdateInterval);
+        passengerPickupUpdateInterval = null;
+    }
+}
+
+function startPassengerPickupLiveUpdates(tripId) {
+    stopPassengerPickupLiveUpdates();
+    if (!tripId) return;
+
+    let lastSent = null;
+    passengerPickupUpdateInterval = setInterval(async () => {
+        if (!activePassengerTripId || String(activePassengerTripId) !== String(tripId)) return;
+        if (!lastGeoCoords || !Number.isFinite(Number(lastGeoCoords.lat)) || !Number.isFinite(Number(lastGeoCoords.lng))) return;
+
+        const payload = {
+            pickup_lat: Number(lastGeoCoords.lat),
+            pickup_lng: Number(lastGeoCoords.lng),
+            pickup_accuracy: Number.isFinite(Number(lastGeoAccuracy)) ? Number(lastGeoAccuracy) : null,
+            pickup_timestamp: Number.isFinite(Number(lastGeoTimestamp)) ? Number(lastGeoTimestamp) : Date.now(),
+            source: 'passenger_gps_watch'
+        };
+
+        const sameAsLast = lastSent &&
+            Math.abs(lastSent.pickup_lat - payload.pickup_lat) < 0.000001 &&
+            Math.abs(lastSent.pickup_lng - payload.pickup_lng) < 0.000001;
+
+        if (sameAsLast) return;
+        lastSent = { pickup_lat: payload.pickup_lat, pickup_lng: payload.pickup_lng };
+
+        console.log('📡 Rider pickup live update (before send):', payload);
+        try {
+            await ApiService.trips.updatePickupLocation(tripId, payload);
+        } catch (error) {
+            console.warn('⚠️ Failed to send pickup live update:', error?.message || error);
+        }
+    }, 5000);
 }
 
 function getDriverActiveTargetCoords() {
@@ -1372,6 +1444,13 @@ window.focusCaptainOnMap = function() {
 
 function setPassengerPickup(coords, label) {
     passengerPickup = { ...coords, label: label || 'موقع الراكب' };
+    console.log('📌 Driver rendering pickup marker from coords:', {
+        pickup_lat: Number(coords?.lat),
+        pickup_lng: Number(coords?.lng),
+        label: passengerPickup.label,
+        request_id: currentIncomingTrip?.request_id || null,
+        trip_id: currentIncomingTrip?.trip_id || currentIncomingTrip?.id || null
+    });
     if (!leafletMap) return;
     if (passengerMarkerL) passengerMarkerL.remove();
 
@@ -2509,6 +2588,8 @@ window.cancelRide = function() {
         activePassengerTripId = null;
     }
 
+    stopPassengerPickupLiveUpdates();
+
     stopPassengerLiveTripTracking();
     
     // Clear driver marker and route
@@ -2586,6 +2667,7 @@ window.driverRejectRequest = async function() {
         showToast('❌ تعذر رفض الطلب الآن');
     }
 
+    stopDriverIncomingTripLiveUpdates();
     currentIncomingTrip = null;
     const incoming = document.getElementById('driver-incoming-request');
     if (incoming) incoming.classList.add('hidden');
@@ -3048,6 +3130,7 @@ async function checkPassengerMatch(tripId) {
 
         if (trip.status === 'cancelled') {
             stopPassengerMatchPolling();
+            stopPassengerPickupLiveUpdates();
             showToast('تم إلغاء الرحلة');
             resetApp();
             return;
@@ -3055,6 +3138,7 @@ async function checkPassengerMatch(tripId) {
 
         if (trip.driver_id) {
             stopPassengerMatchPolling();
+            stopPassengerPickupLiveUpdates();
             await handlePassengerAssignedTrip(trip);
         }
     } catch (error) {
@@ -3194,12 +3278,34 @@ window.requestRide = async function() {
     
     try {
         const user = DB.getUser();
+
+        // GPS ONLY (high accuracy) for pickup coordinates
+        const fix = await getHighAccuracyPickupFix();
+        if (!Number.isFinite(fix?.lat) || !Number.isFinite(fix?.lng)) {
+            showToast('⚠️ تعذر تحديد موقعك بدقة، حاول مرة أخرى');
+            return;
+        }
+
+        // Update local pickup marker/state to match what will be sent
+        const gpsPickupCoords = { lat: fix.lat, lng: fix.lng };
+        applyPassengerLocation(gpsPickupCoords, false);
+        maybeReverseGeocodePickup(gpsPickupCoords);
+
+        console.log('📍 Rider pickup before sending trip:', {
+            pickup_lat: fix.lat,
+            pickup_lng: fix.lng,
+            pickup_accuracy: fix.accuracy,
+            pickup_timestamp: fix.timestamp
+        });
+
         const tripPayload = {
             user_id: user?.id || 1,
             pickup_location: currentPickup.label || 'نقطة الالتقاط',
             dropoff_location: currentDestination.label || 'الوجهة',
-            pickup_lat: currentPickup.lat,
-            pickup_lng: currentPickup.lng,
+            pickup_lat: fix.lat,
+            pickup_lng: fix.lng,
+            pickup_accuracy: fix.accuracy,
+            pickup_timestamp: fix.timestamp,
             dropoff_lat: currentDestination.lat,
             dropoff_lng: currentDestination.lng,
             car_type: currentCarType,
@@ -3213,6 +3319,9 @@ window.requestRide = async function() {
 
         const created = await ApiService.trips.create(tripPayload);
         activePassengerTripId = created?.data?.id || null;
+        if (activePassengerTripId) {
+            startPassengerPickupLiveUpdates(activePassengerTripId);
+        }
     } catch (error) {
         console.error('Failed to create trip:', error);
         showToast('❌ تعذر إرسال الطلب، حاول مرة أخرى');
@@ -3481,6 +3590,68 @@ function normalizeDriverIncomingRequest(rawRequest) {
     };
 }
 
+function stopDriverIncomingTripLiveUpdates() {
+    if (driverIncomingTripUpdateInterval) {
+        clearInterval(driverIncomingTripUpdateInterval);
+        driverIncomingTripUpdateInterval = null;
+    }
+}
+
+function startDriverIncomingTripLiveUpdates(requestId) {
+    stopDriverIncomingTripLiveUpdates();
+    if (!requestId) return;
+
+    driverIncomingTripUpdateInterval = setInterval(async () => {
+        if (currentUserRole !== 'driver') return;
+        if (!currentIncomingTrip?.request_id) return;
+        if (String(currentIncomingTrip.request_id) !== String(requestId)) return;
+
+        try {
+            const response = await ApiService.pendingRides.getById(requestId);
+            const raw = response?.data || null;
+            const updated = normalizeDriverIncomingRequest(raw);
+            if (!updated) return;
+
+            const prevLat = currentIncomingTrip.pickup_lat;
+            const prevLng = currentIncomingTrip.pickup_lng;
+            currentIncomingTrip = { ...currentIncomingTrip, ...updated };
+
+            const nextLat = updated.pickup_lat;
+            const nextLng = updated.pickup_lng;
+            const lat = nextLat !== undefined && nextLat !== null ? Number(nextLat) : null;
+            const lng = nextLng !== undefined && nextLng !== null ? Number(nextLng) : null;
+
+            const changed =
+                String(prevLat ?? '') !== String(nextLat ?? '') ||
+                String(prevLng ?? '') !== String(nextLng ?? '');
+
+            if (changed) {
+                console.log('🔄 Driver received updated pickup coords (poll):', {
+                    prev: { pickup_lat: prevLat, pickup_lng: prevLng },
+                    next: { pickup_lat: nextLat, pickup_lng: nextLng },
+                    request_id: requestId
+                });
+            }
+
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                setPassengerPickup({
+                    lat,
+                    lng,
+                    phone: updated.passenger_phone || currentIncomingTrip.passenger_phone
+                }, updated.pickup_location || currentIncomingTrip.pickup_location);
+
+                // If route is shown, keep it aligned to latest pickup coords.
+                if (driverLocation) {
+                    updateDriverActiveRouteFromGps(driverLocation);
+                }
+            }
+        } catch (error) {
+            // Silent-ish: polling should not spam user
+            console.warn('⚠️ Driver incoming request refresh failed:', error?.message || error);
+        }
+    }, 3000);
+}
+
 async function triggerDriverRequestPolling() {
     if (currentUserRole !== 'driver') return;
     if (!currentDriverProfile) {
@@ -3515,6 +3686,7 @@ async function triggerDriverRequestPolling() {
 }
 
 function showDriverWaitingState() {
+    stopDriverIncomingTripLiveUpdates();
     const waiting = document.getElementById('driver-status-waiting');
     const incoming = document.getElementById('driver-incoming-request');
     if (incoming) incoming.classList.add('hidden');
@@ -3558,6 +3730,10 @@ function renderDriverIncomingTrip(trip, nearbyCount = 0) {
             phone: trip.passenger_phone
         }, trip.pickup_location);
         passengerPickup.phone = trip.passenger_phone;
+    }
+
+    if (trip.request_id) {
+        startDriverIncomingTripLiveUpdates(trip.request_id);
     }
     setDriverPanelVisible(true);
 }

@@ -131,6 +131,14 @@ const ApiService = {
             return ApiService.request(`/trips/${tripId}/reject`, {
                 method: 'PATCH'
             });
+        },
+
+        // Update trip pickup location (lat/lng are the source of truth)
+        async updatePickupLocation(tripId, pickupUpdate = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/pickup`, {
+                method: 'PATCH',
+                body: JSON.stringify(pickupUpdate)
+            });
         }
     },
 
@@ -144,6 +152,10 @@ const ApiService = {
             }
             const query = params.toString();
             return ApiService.request(`/drivers/${driverId}/pending-rides${query ? `?${query}` : ''}`);
+        },
+
+        async getById(requestId) {
+            return ApiService.request(`/pending-rides/${encodeURIComponent(requestId)}`);
         },
 
         async accept(requestId, driverId) {

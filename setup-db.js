@@ -107,6 +107,8 @@ async function setupDatabase() {
                 dropoff_location VARCHAR(255) NOT NULL,
                 pickup_lat DECIMAL(10, 8),
                 pickup_lng DECIMAL(11, 8),
+                pickup_accuracy DOUBLE PRECISION,
+                pickup_timestamp BIGINT,
                 dropoff_lat DECIMAL(10, 8),
                 dropoff_lng DECIMAL(11, 8),
                 car_type VARCHAR(50) DEFAULT 'economy',

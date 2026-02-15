@@ -245,6 +245,20 @@ async function ensureTripSourceColumn() {
     }
 }
 
+async function ensurePickupMetaColumns() {
+    try {
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_accuracy DOUBLE PRECISION;`);
+        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_timestamp BIGINT;`);
+
+        await pool.query(`ALTER TABLE pending_ride_requests ADD COLUMN IF NOT EXISTS pickup_accuracy DOUBLE PRECISION;`);
+        await pool.query(`ALTER TABLE pending_ride_requests ADD COLUMN IF NOT EXISTS pickup_timestamp BIGINT;`);
+
+        console.log('✅ Pickup meta columns ensured (accuracy/timestamp)');
+    } catch (err) {
+        console.error('❌ Failed to ensure pickup meta columns:', err.message);
+    }
+}
+
 async function ensurePendingRideColumns() {
     try {
         await pool.query(`ALTER TABLE pending_ride_requests ADD COLUMN IF NOT EXISTS trip_id VARCHAR(50);`);
@@ -588,6 +602,8 @@ app.post('/api/trips', async (req, res) => {
             dropoff_location,
             pickup_lat,
             pickup_lng,
+            pickup_accuracy,
+            pickup_timestamp,
             dropoff_lat,
             dropoff_lng,
             car_type = 'economy',
@@ -610,6 +626,8 @@ app.post('/api/trips', async (req, res) => {
 
         const pickupLat = pickup_lat !== undefined && pickup_lat !== null ? Number(pickup_lat) : null;
         const pickupLng = pickup_lng !== undefined && pickup_lng !== null ? Number(pickup_lng) : null;
+        const pickupAccuracy = pickup_accuracy !== undefined && pickup_accuracy !== null ? Number(pickup_accuracy) : null;
+        const pickupTimestamp = pickup_timestamp !== undefined && pickup_timestamp !== null ? Number(pickup_timestamp) : null;
         const dropoffLat = dropoff_lat !== undefined && dropoff_lat !== null ? Number(dropoff_lat) : null;
         const dropoffLng = dropoff_lng !== undefined && dropoff_lng !== null ? Number(dropoff_lng) : null;
 
@@ -623,18 +641,44 @@ app.post('/api/trips', async (req, res) => {
             });
         }
 
+        if (pickupAccuracy !== null && !Number.isFinite(pickupAccuracy)) {
+            return res.status(400).json({ success: false, error: 'Invalid pickup_accuracy.' });
+        }
+
+        if (pickupTimestamp !== null && !Number.isFinite(pickupTimestamp)) {
+            return res.status(400).json({ success: false, error: 'Invalid pickup_timestamp.' });
+        }
+
+        console.log('📥 Trip create received pickup coords:', {
+            trip_id: id || null,
+            user_id,
+            raw: {
+                pickup_lat,
+                pickup_lng,
+                pickup_accuracy,
+                pickup_timestamp
+            },
+            parsed: {
+                pickup_lat: pickupLat,
+                pickup_lng: pickupLng,
+                pickup_accuracy: pickupAccuracy,
+                pickup_timestamp: pickupTimestamp
+            },
+            source
+        });
+
         const tripId = id || 'TR-' + Date.now();
 
         const result = await pool.query(`
             INSERT INTO trips (
                 id, user_id, driver_id, pickup_location, dropoff_location,
-                pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp, dropoff_lat, dropoff_lng,
                 car_type, cost, distance, duration, payment_method, status, driver_name, source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             RETURNING *
         `, [
             tripId, user_id, driver_id, pickup_location, dropoff_location,
-            pickupLat, pickupLng, dropoffLat, dropoffLng,
+            pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
             car_type, cost, distance, duration, payment_method, status, driver_name, source
         ]);
 
@@ -655,16 +699,16 @@ app.post('/api/trips', async (req, res) => {
                         trip_id, source,
                         request_id, user_id, passenger_name, passenger_phone,
                         pickup_location, dropoff_location,
-                        pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                        pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp, dropoff_lat, dropoff_lng,
                         car_type, estimated_cost, estimated_distance, estimated_duration,
                         payment_method, status, expires_at
                     )
-                    VALUES ($1, 'passenger_app', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'waiting', $17)
+                    VALUES ($1, 'passenger_app', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'waiting', $19)
                 `, [
                     tripId,
                     requestId, user_id, user?.name || 'راكب', user?.phone || '',
                     pickup_location, dropoff_location,
-                    pickupLat, pickupLng, dropoffLat, dropoffLng,
+                    pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
                     car_type, cost, distance, duration,
                     payment_method, expiresAt
                 ]);
@@ -707,6 +751,80 @@ app.post('/api/trips', async (req, res) => {
         });
     } catch (err) {
         console.error('Error creating trip:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Update pickup location for a trip (GPS coordinates are the source of truth)
+app.patch('/api/trips/:id/pickup', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp, source } = req.body || {};
+
+        const pickupLat = pickup_lat !== undefined && pickup_lat !== null ? Number(pickup_lat) : null;
+        const pickupLng = pickup_lng !== undefined && pickup_lng !== null ? Number(pickup_lng) : null;
+        const pickupAccuracy = pickup_accuracy !== undefined && pickup_accuracy !== null ? Number(pickup_accuracy) : null;
+        const pickupTimestamp = pickup_timestamp !== undefined && pickup_timestamp !== null ? Number(pickup_timestamp) : null;
+
+        if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+            return res.status(400).json({ success: false, error: 'Invalid pickup coordinates.' });
+        }
+
+        if (pickupAccuracy !== null && !Number.isFinite(pickupAccuracy)) {
+            return res.status(400).json({ success: false, error: 'Invalid pickup_accuracy.' });
+        }
+
+        if (pickupTimestamp !== null && !Number.isFinite(pickupTimestamp)) {
+            return res.status(400).json({ success: false, error: 'Invalid pickup_timestamp.' });
+        }
+
+        console.log('📥 Trip pickup update received:', {
+            trip_id: id,
+            raw: { pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp },
+            parsed: {
+                pickup_lat: pickupLat,
+                pickup_lng: pickupLng,
+                pickup_accuracy: pickupAccuracy,
+                pickup_timestamp: pickupTimestamp
+            },
+            source: source || null
+        });
+
+        const tripResult = await pool.query(
+            `UPDATE trips
+             SET pickup_lat = $1,
+                 pickup_lng = $2,
+                 pickup_accuracy = $3,
+                 pickup_timestamp = $4,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $5
+             RETURNING id, pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp`,
+            [pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, id]
+        );
+
+        if (tripResult.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Trip not found' });
+        }
+
+        // Propagate to pending ride requests (waiting/accepted)
+        try {
+            await pool.query(
+                `UPDATE pending_ride_requests
+                 SET pickup_lat = $1,
+                     pickup_lng = $2,
+                     pickup_accuracy = $3,
+                     pickup_timestamp = $4,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE trip_id = $5 AND status IN ('waiting', 'accepted')`,
+                [pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, id]
+            );
+        } catch (err) {
+            console.warn('⚠️ Failed to propagate pickup update to pending_ride_requests:', err.message);
+        }
+
+        res.json({ success: true, data: tripResult.rows[0] });
+    } catch (err) {
+        console.error('Error updating trip pickup location:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -2727,6 +2845,8 @@ app.post('/api/pending-rides', async (req, res) => {
             dropoff_location,
             pickup_lat,
             pickup_lng,
+            pickup_accuracy,
+            pickup_timestamp,
             dropoff_lat,
             dropoff_lng,
             car_type,
@@ -2747,20 +2867,43 @@ app.post('/api/pending-rides', async (req, res) => {
         const request_id = `REQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         const expires_at = new Date(Date.now() + 20 * 60 * 1000); // expires in 20 minutes
 
+        const pickupLat = pickup_lat !== undefined && pickup_lat !== null ? Number(pickup_lat) : null;
+        const pickupLng = pickup_lng !== undefined && pickup_lng !== null ? Number(pickup_lng) : null;
+        const pickupAccuracy = pickup_accuracy !== undefined && pickup_accuracy !== null ? Number(pickup_accuracy) : null;
+        const pickupTimestamp = pickup_timestamp !== undefined && pickup_timestamp !== null ? Number(pickup_timestamp) : null;
+        const dropoffLat = dropoff_lat !== undefined && dropoff_lat !== null ? Number(dropoff_lat) : null;
+        const dropoffLng = dropoff_lng !== undefined && dropoff_lng !== null ? Number(dropoff_lng) : null;
+
+        if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) {
+            return res.status(400).json({ success: false, error: 'Invalid coordinates.' });
+        }
+
+        console.log('📥 Pending ride create received pickup coords:', {
+            request_id,
+            user_id,
+            raw: { pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp },
+            parsed: {
+                pickup_lat: pickupLat,
+                pickup_lng: pickupLng,
+                pickup_accuracy: pickupAccuracy,
+                pickup_timestamp: pickupTimestamp
+            }
+        });
+
         const result = await pool.query(`
             INSERT INTO pending_ride_requests (
                 request_id, user_id, passenger_name, passenger_phone,
                 pickup_location, dropoff_location,
-                pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp, dropoff_lat, dropoff_lng,
                 car_type, estimated_cost, estimated_distance, estimated_duration,
                 payment_method, status, expires_at, notes
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'waiting', $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'waiting', $18, $19)
             RETURNING *
         `, [
             request_id, user_id, passenger_name, passenger_phone,
             pickup_location, dropoff_location,
-            pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+            pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
             car_type || 'economy', estimated_cost, estimated_distance, estimated_duration,
             payment_method || 'cash', expires_at, notes
         ]);
@@ -3176,6 +3319,7 @@ ensureDefaultAdmins()
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
     .then(() => ensureTripSourceColumn())
+    .then(() => ensurePickupMetaColumns())
     .then(() => ensurePendingRideColumns())
     .then(() => ensureDriverLocationColumns())
     .then(() => {

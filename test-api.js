@@ -68,6 +68,8 @@ async function testAPI() {
             dropoff_location: 'العليا مول',
             pickup_lat: 24.7136,
             pickup_lng: 46.6753,
+            pickup_accuracy: 8.5,
+            pickup_timestamp: Date.now(),
             dropoff_lat: 24.6917,
             dropoff_lng: 46.6853,
             car_type: 'economy',
@@ -87,6 +89,23 @@ async function testAPI() {
         console.log('✅ Created trip:', data.data.id);
         
         const createdTripId = data.data.id;
+
+        // Test 8️⃣b: Update pickup location (GPS live update)
+        console.log('\n8️⃣b Testing pickup live update endpoint...');
+        const pickupUpdate = {
+            pickup_lat: 24.71361,
+            pickup_lng: 46.67531,
+            pickup_accuracy: 6.2,
+            pickup_timestamp: Date.now(),
+            source: 'test-api'
+        };
+        response = await fetch(`${baseURL}/trips/${createdTripId}/pickup`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pickupUpdate)
+        });
+        data = await response.json();
+        console.log('✅ Pickup updated:', data.data);
 
         // Test 9: Get next pending trip (nearest by driver location)
         console.log('\n9️⃣ Testing get next pending trip...');
