@@ -7,78 +7,13 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>تطبيق تاكسي أكوادرا</title>
-        <!-- Fallback stub to avoid selectRole undefined before main script loads.
-             Also provides minimal modal opening so role cards remain clickable even if script.js fails to load. -->
+        <!-- Fallback stub to avoid selectRole undefined before main script loads -->
         <script>
-            window.__pendingRoleQueue = window.__pendingRoleQueue || [];
-
-            function __showModal(id) {
-                var modal = document.getElementById(id);
-                if (!modal) return;
-                modal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
-                modal.classList.add('opacity-100');
-            }
-
-            function __hideModal(id) {
-                var modal = document.getElementById(id);
-                if (!modal) return;
-                modal.classList.add('opacity-0', 'pointer-events-none');
-                setTimeout(function () {
-                    modal.classList.add('hidden');
-                }, 250);
-            }
-
-            function __hideRoleSelection() {
-                var roleModal = document.getElementById('role-selection-modal');
-                if (!roleModal) return;
-                roleModal.classList.add('opacity-0', 'pointer-events-none');
-                setTimeout(function () {
-                    roleModal.classList.add('hidden');
-                }, 250);
-            }
-
-            function __showRoleSelection() {
-                var roleModal = document.getElementById('role-selection-modal');
-                if (!roleModal) return;
-                roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
-            }
-
-            window.closeAuthModal = window.closeAuthModal || function () {
-                __hideModal('auth-modal');
-                __showRoleSelection();
-            };
-
-            window.closeRoleLoginModal = window.closeRoleLoginModal || function () {
-                __hideModal('role-login-modal');
-                __showRoleSelection();
-            };
-
+            window.__pendingRoleQueue = [];
             window.selectRole = function(role) {
-                try {
-                    window.__pendingRoleQueue.push(role);
-                } catch (e) {}
-
-                // Fallback UI behavior
-                __hideRoleSelection();
-                if (role === 'passenger') {
-                    __showModal('auth-modal');
-                } else {
-                    var modal = document.getElementById('role-login-modal');
-                    if (modal) modal.dataset.role = role;
-                    __showModal('role-login-modal');
-                }
+                window.__pendingRoleQueue.push(role);
+                console.warn('selectRole not ready yet; queued:', role);
             };
-
-            // Defensive: ensure buttons work even if inline onclick is blocked by some environments
-            document.addEventListener('DOMContentLoaded', function () {
-                var buttons = document.querySelectorAll('[data-role]');
-                buttons.forEach(function (btn) {
-                    btn.addEventListener('click', function () {
-                        var role = btn.getAttribute('data-role');
-                        if (typeof window.selectRole === 'function') window.selectRole(role);
-                    });
-                });
-            });
         </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Leaflet Map (OSM) -->
@@ -1890,14 +1825,6 @@
                         </div>
                     </div>
 
-                    <!-- Trip Log -->
-                    <div class="mb-4 pb-4 border-b border-gray-200">
-                        <p class="text-xs text-gray-500 font-bold mb-2">سجل الرحلة</p>
-                        <div id="trip-detail-log" class="space-y-2 text-sm text-gray-700">
-                            <p class="text-xs text-gray-500">—</p>
-                        </div>
-                    </div>
-
                     <!-- Your Rating -->
                     <div>
                         <p class="text-xs text-gray-500 font-bold mb-2">تقييمك للرحلة</p>
@@ -2323,4 +2250,5 @@
     <script src="api-service.js?v=20260205-1"></script>
     <script src="script.js?v=20260205-1"></script>
 </body>
+</html>
 </html>

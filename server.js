@@ -247,38 +247,6 @@ async function ensureTripSourceColumn() {
 
 async function ensurePendingRideColumns() {
     try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS pending_ride_requests (
-                id SERIAL PRIMARY KEY,
-                request_id VARCHAR(50) UNIQUE NOT NULL,
-                trip_id VARCHAR(50),
-                source VARCHAR(40) DEFAULT 'manual',
-                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                passenger_name VARCHAR(100),
-                passenger_phone VARCHAR(20),
-                pickup_location VARCHAR(255) NOT NULL,
-                dropoff_location VARCHAR(255) NOT NULL,
-                pickup_lat DECIMAL(10, 8),
-                pickup_lng DECIMAL(11, 8),
-                dropoff_lat DECIMAL(10, 8),
-                dropoff_lng DECIMAL(11, 8),
-                car_type VARCHAR(50) DEFAULT 'economy',
-                estimated_cost DECIMAL(10, 2),
-                estimated_distance DECIMAL(10, 2),
-                estimated_duration INTEGER,
-                payment_method VARCHAR(20) DEFAULT 'cash',
-                status VARCHAR(20) DEFAULT 'waiting',
-                assigned_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
-                assigned_at TIMESTAMP,
-                rejected_by INTEGER[] DEFAULT ARRAY[]::INTEGER[],
-                rejection_count INTEGER DEFAULT 0,
-                expires_at TIMESTAMP,
-                notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-
         await pool.query(`ALTER TABLE pending_ride_requests ADD COLUMN IF NOT EXISTS trip_id VARCHAR(50);`);
         await pool.query(`ALTER TABLE pending_ride_requests ADD COLUMN IF NOT EXISTS source VARCHAR(40) DEFAULT 'manual';`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_pending_rides_trip_id ON pending_ride_requests(trip_id);`);
@@ -306,122 +274,6 @@ async function ensureDriverLocationColumns() {
     } catch (err) {
         console.error('❌ Failed to ensure driver location columns:', err.message);
     }
-}
-
-function haversineKm(lat1, lng1, lat2, lng2) {
-    const R = 6371;
-    const toRad = (d) => (d * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-        Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return Math.max(0, R * c);
-}
-
-function computePriceSar(carType, distanceKm) {
-    const base = { economy: 10, family: 15, luxury: 25, delivery: 8 };
-    const perKm = { economy: 4, family: 6, luxury: 9, delivery: 3 };
-    const b = base[carType] ?? 10;
-    const p = perKm[carType] ?? 4;
-    const val = b + p * Math.max(0, Number(distanceKm) || 0);
-    return Math.round(val * 10) / 10;
-}
-
-async function ensureTripLiveTrackingSchema() {
-    try {
-        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS end_lat DECIMAL(10, 8);`);
-        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS end_lng DECIMAL(11, 8);`);
-        await pool.query(`ALTER TABLE trips ADD COLUMN IF NOT EXISTS end_location VARCHAR(255);`);
-
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS trip_location_updates (
-                id BIGSERIAL PRIMARY KEY,
-                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
-                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
-                lat DECIMAL(10, 8) NOT NULL,
-                lng DECIMAL(11, 8) NOT NULL,
-                accuracy_m INTEGER,
-                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_location_updates_trip_time ON trip_location_updates(trip_id, recorded_at ASC);');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_location_updates_driver_time ON trip_location_updates(driver_id, recorded_at DESC);');
-
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS trip_events (
-                id BIGSERIAL PRIMARY KEY,
-                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
-                event_type VARCHAR(30) NOT NULL,
-                actor_role VARCHAR(20),
-                actor_id INTEGER,
-                details JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_events_trip_time ON trip_events(trip_id, created_at ASC);');
-        await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_trip_events_unique ON trip_events(trip_id, event_type);');
-
-        console.log('✅ Trip live tracking schema ensured');
-    } catch (err) {
-        console.error('❌ Failed to ensure trip live tracking schema:', err.message);
-    }
-}
-
-async function insertTripEventOnce({ tripId, eventType, actorRole = null, actorId = null, details = null }) {
-    if (!tripId || !eventType) return;
-    try {
-        await pool.query(
-            `INSERT INTO trip_events (trip_id, event_type, actor_role, actor_id, details)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (trip_id, event_type) DO NOTHING`,
-            [tripId, eventType, actorRole, actorId, details]
-        );
-    } catch (err) {
-        console.error('⚠️ Failed to insert trip event:', err.message);
-    }
-}
-
-async function computeDistanceFromLocationUpdates({ tripId, startAt = null, endAt = null }) {
-    const params = [tripId];
-    let where = 'WHERE trip_id = $1';
-    if (startAt) {
-        params.push(startAt);
-        where += ` AND recorded_at >= $${params.length}`;
-    }
-    if (endAt) {
-        params.push(endAt);
-        where += ` AND recorded_at <= $${params.length}`;
-    }
-
-    const result = await pool.query(
-        `SELECT lat, lng, recorded_at
-         FROM trip_location_updates
-         ${where}
-         ORDER BY recorded_at ASC`,
-        params
-    );
-
-    const points = result.rows
-        .map((r) => ({ lat: Number(r.lat), lng: Number(r.lng), recorded_at: r.recorded_at }))
-        .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-
-    let distanceKm = 0;
-    for (let i = 1; i < points.length; i++) {
-        const prev = points[i - 1];
-        const cur = points[i];
-        const segKm = haversineKm(prev.lat, prev.lng, cur.lat, cur.lng);
-        if (segKm > 3) continue;
-        distanceKm += segKm;
-    }
-
-    return {
-        distanceKm: Math.round(distanceKm * 1000) / 1000,
-        pointsCount: points.length,
-        lastPoint: points.length ? points[points.length - 1] : null
-    };
 }
 
 async function findNearestAvailableDriver({ pickupLat, pickupLng, carType }) {
@@ -694,90 +546,6 @@ app.get('/api/trips/:id', async (req, res) => {
     }
 });
 
-// Trip log (events + summary + optional path)
-app.get('/api/trips/:id/log', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const includePath = req.query.include_path === '1' || req.query.include_path === 'true';
-
-        const tripResult = await pool.query('SELECT * FROM trips WHERE id = $1', [id]);
-        if (tripResult.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Trip not found' });
-        }
-        const trip = tripResult.rows[0];
-
-        const eventsResult = await pool.query(
-            `SELECT event_type, actor_role, actor_id, details, created_at
-             FROM trip_events
-             WHERE trip_id = $1
-             ORDER BY created_at ASC`,
-            [id]
-        );
-
-        const locationsCountResult = await pool.query(
-            'SELECT COUNT(*)::int AS count FROM trip_location_updates WHERE trip_id = $1',
-            [id]
-        );
-        const locationsCount = locationsCountResult.rows[0]?.count ?? 0;
-
-        let path = undefined;
-        if (includePath) {
-            const limit = 2000;
-            const locResult = await pool.query(
-                `SELECT lat, lng, recorded_at
-                 FROM trip_location_updates
-                 WHERE trip_id = $1
-                 ORDER BY recorded_at DESC
-                 LIMIT $2`,
-                [id, limit]
-            );
-
-            path = {
-                points: locResult.rows
-                    .reverse()
-                    .map((r) => ({ lat: Number(r.lat), lng: Number(r.lng), recorded_at: r.recorded_at })),
-                points_count: locationsCount,
-                truncated: locationsCount > limit
-            };
-        }
-
-        const startAt = trip.started_at || trip.created_at;
-        const durationMin = trip.duration !== null && trip.duration !== undefined ? Number(trip.duration) : null;
-        const distanceKm = trip.distance !== null && trip.distance !== undefined ? Number(trip.distance) : null;
-        const costSar = trip.cost !== null && trip.cost !== undefined ? Number(trip.cost) : null;
-
-        res.json({
-            success: true,
-            data: {
-                trip,
-                summary: {
-                    trip_id: trip.id,
-                    status: trip.status,
-                    user_id: trip.user_id,
-                    driver_id: trip.driver_id,
-                    pickup_location: trip.pickup_location,
-                    dropoff_location: trip.dropoff_location,
-                    pickup: { lat: trip.pickup_lat !== null ? Number(trip.pickup_lat) : null, lng: trip.pickup_lng !== null ? Number(trip.pickup_lng) : null },
-                    dropoff: { lat: trip.dropoff_lat !== null ? Number(trip.dropoff_lat) : null, lng: trip.dropoff_lng !== null ? Number(trip.dropoff_lng) : null },
-                    end: { lat: trip.end_lat !== null ? Number(trip.end_lat) : null, lng: trip.end_lng !== null ? Number(trip.end_lng) : null, location: trip.end_location || null },
-                    started_at: startAt,
-                    completed_at: trip.completed_at,
-                    cancelled_at: trip.cancelled_at,
-                    duration_min: durationMin,
-                    distance_km: distanceKm,
-                    cost_sar: costSar,
-                    paid_sar: costSar
-                },
-                events: eventsResult.rows,
-                path
-            }
-        });
-    } catch (err) {
-        console.error('Error fetching trip log:', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
 // Create new trip
 app.post('/api/trips', async (req, res) => {
     try {
@@ -930,51 +698,6 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             payment_method
         } = req.body;
 
-        const existingTripResult = await pool.query('SELECT * FROM trips WHERE id = $1', [id]);
-        if (existingTripResult.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'Trip not found' });
-        }
-        const existingTrip = existingTripResult.rows[0];
-
-        let computedCost;
-        let computedDistance;
-        let computedDuration;
-        let computedEndLat;
-        let computedEndLng;
-
-        if (status === 'completed') {
-            const startAt = existingTrip.started_at || existingTrip.created_at;
-            try {
-                const stats = await computeDistanceFromLocationUpdates({ tripId: id, startAt });
-                if (distance === undefined && stats.distanceKm > 0) {
-                    computedDistance = Math.round(stats.distanceKm * 100) / 100;
-                }
-                if (stats.lastPoint) {
-                    computedEndLat = stats.lastPoint.lat;
-                    computedEndLng = stats.lastPoint.lng;
-                }
-                if (cost === undefined) {
-                    const dKm = computedDistance !== undefined
-                        ? computedDistance
-                        : (existingTrip.distance !== null && existingTrip.distance !== undefined ? Number(existingTrip.distance) : 0);
-                    if (dKm > 0) {
-                        computedCost = computePriceSar(existingTrip.car_type, dKm);
-                    }
-                }
-            } catch (calcErr) {
-                console.error('⚠️ Failed to compute trip stats from live tracking:', calcErr.message);
-            }
-
-            if (duration === undefined) {
-                const startMs = startAt ? new Date(startAt).getTime() : Date.now();
-                computedDuration = Math.max(1, Math.round((Date.now() - startMs) / 60000));
-            }
-        }
-
-        const effectiveCost = cost !== undefined ? cost : computedCost;
-        const effectiveDistance = distance !== undefined ? distance : computedDistance;
-        const effectiveDuration = duration !== undefined ? duration : computedDuration;
-
         const effectivePassengerRating = passenger_rating !== undefined ? passenger_rating : rating;
         const effectivePassengerReview = passenger_review !== undefined ? passenger_review : review;
         
@@ -990,37 +713,24 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             query += ', started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END';
         }
 
-        if (effectiveCost !== undefined) {
+        if (cost !== undefined) {
             paramCount++;
             query += `, cost = $${paramCount}`;
-            params.push(effectiveCost);
+            params.push(cost);
         }
 
-        if (effectiveDistance !== undefined) {
+        if (distance !== undefined) {
             paramCount++;
             query += `, distance = $${paramCount}`;
-            params.push(effectiveDistance);
+            params.push(distance);
         }
 
-        if (effectiveDuration !== undefined) {
+        if (duration !== undefined) {
             paramCount++;
             query += `, duration = $${paramCount}`;
-            params.push(effectiveDuration);
+            params.push(duration);
         } else if (status === 'completed') {
             query += `, duration = COALESCE(duration, GREATEST(1, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(started_at, created_at))) / 60)))`;
-        }
-
-        if (status === 'completed') {
-            if (computedEndLat !== undefined && computedEndLng !== undefined) {
-                paramCount++;
-                query += `, end_lat = $${paramCount}`;
-                params.push(computedEndLat);
-
-                paramCount++;
-                query += `, end_lng = $${paramCount}`;
-                params.push(computedEndLng);
-            }
-            query += `, end_location = COALESCE(end_location, dropoff_location)`;
         }
 
         if (payment_method !== undefined) {
@@ -1070,47 +780,12 @@ app.patch('/api/trips/:id/status', async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Trip not found' });
         }
-
-        if (status === 'ongoing') {
-            await insertTripEventOnce({
-                tripId: id,
-                eventType: 'started',
-                actorRole: 'system',
-                actorId: null,
-                details: { status: 'ongoing' }
-            });
-        }
-
-        if (status === 'completed') {
-            await insertTripEventOnce({
-                tripId: id,
-                eventType: 'completed',
-                actorRole: 'system',
-                actorId: null,
-                details: {
-                    distance_km: effectiveDistance !== undefined ? Number(effectiveDistance) : null,
-                    duration_min: effectiveDuration !== undefined ? Number(effectiveDuration) : null,
-                    cost_sar: effectiveCost !== undefined ? Number(effectiveCost) : null
-                }
-            });
-        }
-
-        if (status === 'cancelled') {
-            await insertTripEventOnce({
-                tripId: id,
-                eventType: 'cancelled',
-                actorRole: 'system',
-                actorId: null,
-                details: { status: 'cancelled' }
-            });
-        }
         
         // Update driver earnings if trip completed
-        const finalCost = result.rows[0].cost !== null && result.rows[0].cost !== undefined ? Number(result.rows[0].cost) : null;
-        if (status === 'completed' && result.rows[0].driver_id && Number.isFinite(finalCost) && finalCost > 0) {
+        if (status === 'completed' && result.rows[0].driver_id && cost) {
             try {
                 const driverId = result.rows[0].driver_id;
-                const tripCost = finalCost;
+                const tripCost = parseFloat(cost);
                 
                 // Update drivers table
                 await pool.query(`
@@ -1165,65 +840,47 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             if (status === 'assigned' && result.rows[0].driver_id) {
                 // عند تعيين سائق، نحدث الحالة إلى accepted
                 await pool.query(`
-                    WITH latest AS (
-                        SELECT id
-                        FROM pending_ride_requests
-                        WHERE user_id = $2
-                            AND status = 'waiting'
-                            AND pickup_lat = $3
-                            AND pickup_lng = $4
-                            AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                    )
-                    UPDATE pending_ride_requests pr
+                    UPDATE pending_ride_requests
                     SET status = 'accepted',
                         assigned_driver_id = $1,
                         assigned_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    FROM latest
-                    WHERE pr.id = latest.id
-                `, [result.rows[0].driver_id, result.rows[0].user_id,
+                    WHERE user_id = $2
+                        AND status = 'waiting'
+                        AND pickup_lat = $3
+                        AND pickup_lng = $4
+                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, [result.rows[0].driver_id, result.rows[0].user_id, 
                     result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
             } else if (status === 'cancelled') {
                 // عند إلغاء الرحلة، نحدث الحالة إلى cancelled
                 await pool.query(`
-                    WITH latest AS (
-                        SELECT id
-                        FROM pending_ride_requests
-                        WHERE user_id = $1
-                            AND status = 'waiting'
-                            AND pickup_lat = $2
-                            AND pickup_lng = $3
-                            AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                    )
-                    UPDATE pending_ride_requests pr
+                    UPDATE pending_ride_requests
                     SET status = 'cancelled',
                         updated_at = CURRENT_TIMESTAMP
-                    FROM latest
-                    WHERE pr.id = latest.id
+                    WHERE user_id = $1
+                        AND status = 'waiting'
+                        AND pickup_lat = $2
+                        AND pickup_lng = $3
+                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
                 `, [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
             } else if (status === 'completed') {
                 // عند إكمال الرحلة، يمكن تحديث الحالة أو تركها كما هي
                 await pool.query(`
-                    WITH latest AS (
-                        SELECT id
-                        FROM pending_ride_requests
-                        WHERE user_id = $1
-                            AND status = 'accepted'
-                            AND pickup_lat = $2
-                            AND pickup_lng = $3
-                            AND created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours'
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                    )
-                    UPDATE pending_ride_requests pr
+                    UPDATE pending_ride_requests
                     SET status = 'completed',
                         updated_at = CURRENT_TIMESTAMP
-                    FROM latest
-                    WHERE pr.id = latest.id
+                    WHERE user_id = $1
+                        AND status = 'accepted'
+                        AND pickup_lat = $2
+                        AND pickup_lng = $3
+                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours'
+                    ORDER BY created_at DESC
+                    LIMIT 1
                 `, [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
             }
         } catch (pendingUpdateErr) {
@@ -1429,14 +1086,6 @@ app.patch('/api/trips/:id/assign', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Trip not found or already assigned' });
         }
 
-        await insertTripEventOnce({
-            tripId: id,
-            eventType: 'assigned',
-            actorRole: 'driver',
-            actorId: driver_id,
-            details: { driver_id, driver_name: driver_name || null }
-        });
-
         res.json({ success: true, data: result.rows[0] });
     } catch (err) {
         console.error('Error assigning driver:', err);
@@ -1612,7 +1261,7 @@ app.get('/api/drivers', async (req, res) => {
 app.patch('/api/drivers/:id/location', async (req, res) => {
     try {
         const { id } = req.params;
-        const { lat, lng, accuracy_m } = req.body;
+        const { lat, lng } = req.body;
 
         const latitude = lat !== undefined && lat !== null ? Number(lat) : null;
         const longitude = lng !== undefined && lng !== null ? Number(lng) : null;
@@ -1631,29 +1280,6 @@ app.patch('/api/drivers/:id/location', async (req, res) => {
 
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Driver not found' });
-        }
-
-        // If driver has an active trip, record location update for trip tracking
-        try {
-            const activeTrip = await pool.query(
-                `SELECT id
-                 FROM trips
-                 WHERE driver_id = $1 AND status IN ('assigned', 'ongoing')
-                 ORDER BY created_at DESC
-                 LIMIT 1`,
-                [id]
-            );
-            if (activeTrip.rows.length > 0) {
-                const tripId = activeTrip.rows[0].id;
-                const accuracy = accuracy_m !== undefined && accuracy_m !== null ? Number(accuracy_m) : null;
-                await pool.query(
-                    `INSERT INTO trip_location_updates (trip_id, driver_id, lat, lng, accuracy_m)
-                     VALUES ($1, $2, $3, $4, $5)`,
-                    [tripId, id, latitude, longitude, Number.isFinite(accuracy) ? Math.round(accuracy) : null]
-                );
-            }
-        } catch (trackErr) {
-            console.error('⚠️ Failed to record trip location update:', trackErr.message);
         }
 
         res.json({ success: true, data: result.rows[0] });
@@ -3254,14 +2880,6 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
                     WHERE id = $3
                 `, [driver_id, driverName, tripId]);
 
-                await insertTripEventOnce({
-                    tripId,
-                    eventType: 'assigned',
-                    actorRole: 'driver',
-                    actorId: driver_id,
-                    details: { request_id, driver_id, driver_name: driverName }
-                });
-
                 console.log(`✅ تم تحديث الرحلة ${tripId} بتعيين السائق ${driver_id}`);
             } else {
                 // إنشاء رحلة جديدة إذا لم توجد
@@ -3289,14 +2907,6 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
                     pendingRequest.estimated_distance, pendingRequest.estimated_duration,
                     pendingRequest.payment_method
                 ]);
-
-                await insertTripEventOnce({
-                    tripId,
-                    eventType: 'assigned',
-                    actorRole: 'driver',
-                    actorId: driver_id,
-                    details: { request_id, driver_id, driver_name: driverName }
-                });
 
                 console.log(`✅ تم إنشاء رحلة جديدة ${tripId} للطلب ${request_id}`);
             }
@@ -3514,7 +3124,6 @@ ensureDefaultAdmins()
     .then(() => ensureTripSourceColumn())
     .then(() => ensurePendingRideColumns())
     .then(() => ensureDriverLocationColumns())
-    .then(() => ensureTripLiveTrackingSchema())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');
         return driverSync.initializeSyncSystem();

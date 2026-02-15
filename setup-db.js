@@ -126,39 +126,10 @@ async function setupDatabase() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 started_at TIMESTAMP,
                 completed_at TIMESTAMP,
-                cancelled_at TIMESTAMP,
-                end_lat DECIMAL(10, 8),
-                end_lng DECIMAL(11, 8),
-                end_location VARCHAR(255)
+                cancelled_at TIMESTAMP
             );
         `);
         console.log('✅ Trips table created');
-
-        // Create trip live tracking tables
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS trip_location_updates (
-                id BIGSERIAL PRIMARY KEY,
-                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
-                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
-                lat DECIMAL(10, 8) NOT NULL,
-                lng DECIMAL(11, 8) NOT NULL,
-                accuracy_m INTEGER,
-                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS trip_events (
-                id BIGSERIAL PRIMARY KEY,
-                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
-                event_type VARCHAR(30) NOT NULL,
-                actor_role VARCHAR(20),
-                actor_id INTEGER,
-                details JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-        console.log('✅ Trip tracking tables created');
         
         // Create indexes for better performance
         try {
