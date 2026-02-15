@@ -1244,6 +1244,64 @@ app.patch('/api/trips/:id/status', async (req, res) => {
     }
 });
 
+// Rate driver (Passenger -> Driver)
+// Required by rider completion flow: POST /rate-driver { trip_id, rating, comment }
+async function rateDriverHandler(req, res) {
+    try {
+        const { trip_id, rating, comment } = req.body || {};
+
+        const tripId = trip_id ? String(trip_id) : '';
+        const normalizedRating = Number(rating);
+        const normalizedComment = comment !== undefined && comment !== null ? String(comment) : '';
+
+        if (!tripId) {
+            return res.status(400).json({ success: false, error: 'trip_id is required' });
+        }
+        if (!Number.isFinite(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
+            return res.status(400).json({ success: false, error: 'rating must be between 1 and 5' });
+        }
+
+        const before = await pool.query('SELECT trip_status FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const beforeTripStatus = before.rows.length ? (before.rows[0].trip_status || null) : null;
+
+        const result = await pool.query(
+            `UPDATE trips
+             SET passenger_rating = $1,
+                 rating = $1,
+                 passenger_review = NULLIF($2, ''),
+                 review = NULLIF($2, ''),
+                 trip_status = 'rated'::trip_status_enum,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3
+             RETURNING *`,
+            [Math.trunc(normalizedRating), normalizedComment, tripId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Trip not found' });
+        }
+
+        try {
+            if (beforeTripStatus !== 'rated') {
+                io.to(tripRoom(tripId)).emit('trip_rated', {
+                    trip_id: String(tripId),
+                    trip_status: 'rated'
+                });
+            }
+        } catch (err) {
+            console.warn('⚠️ Failed to emit trip_rated:', err.message);
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error rating driver:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+app.post('/rate-driver', rateDriverHandler);
+app.post('/api/rate-driver', rateDriverHandler);
+
 // Get next pending trip (optionally by car type)
 app.get('/api/trips/pending/next', async (req, res) => {
     try {

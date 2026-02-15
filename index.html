@@ -1465,55 +1465,74 @@
                 </button>
             </div>
 
-            <!-- State 6.7: Payment Success Confirmation -->
-            <div id="state-payment-success" class="hidden p-8 text-center bg-white">
-                <div class="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 text-emerald-600">
-                    <i class="fas fa-check-circle text-4xl"></i>
-                </div>
-                <h2 class="text-2xl font-extrabold text-gray-800 mb-2">تم تأكيد الدفع</h2>
-                <p class="text-gray-500 mb-6">تم إنهاء رحلتك بنجاح</p>
+            <!-- State 6.7: Trip Completion (Payment + Rating) -->
+            <div id="state-payment-success" class="hidden bg-white">
+                <!-- Scrollable content (inside main panel scroll) -->
+                <div class="px-6 pt-6 pb-28 text-right">
+                    <div class="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 text-emerald-600">
+                        <i class="fas fa-check-circle text-4xl"></i>
+                    </div>
+                    <h2 class="text-2xl font-extrabold text-gray-800 mb-2 text-center">تم تأكيد الدفع</h2>
+                    <p class="text-gray-500 mb-6 text-center">تم إنهاء رحلتك بنجاح</p>
 
-                <div class="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 mb-6 text-right">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-gray-600 font-bold">المبلغ المدفوع</span>
-                        <span class="text-xl font-extrabold text-emerald-600" id="payment-success-amount">-- ر.س</span>
+                    <div class="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 mb-6">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-gray-600 font-bold">المبلغ المدفوع</span>
+                            <span class="text-xl font-extrabold text-emerald-600" id="payment-success-amount">-- ر.س</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 font-bold">طريقة الدفع</span>
+                            <span class="text-gray-800 font-bold" id="payment-success-method">--</span>
+                        </div>
+                        <div class="flex justify-between items-center mt-2">
+                            <span class="text-gray-600 font-bold">وقت الدفع</span>
+                            <span class="text-gray-800 font-bold" id="payment-success-time">--</span>
+                        </div>
                     </div>
-                    <div class="flex justify-between items-center">
-                        <span class="text-gray-600 font-bold">طريقة الدفع</span>
-                        <span class="text-gray-800 font-bold" id="payment-success-method">--</span>
+
+                    <div class="bg-white border border-gray-200 rounded-2xl p-5 mb-6">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-gray-600 font-bold">رقم الرحلة</span>
+                            <span class="font-bold text-gray-800" id="payment-success-trip-id">--</span>
+                        </div>
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-gray-600 font-bold">من</span>
+                            <span class="font-bold text-gray-800" id="payment-success-pickup">--</span>
+                        </div>
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-gray-600 font-bold">إلى</span>
+                            <span class="font-bold text-gray-800" id="payment-success-dropoff">--</span>
+                        </div>
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-gray-600 font-bold">المسافة</span>
+                            <span class="font-bold text-gray-800" id="payment-success-distance">-- كم</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 font-bold">المدة</span>
+                            <span class="font-bold text-gray-800" id="payment-success-duration">-- دقيقة</span>
+                        </div>
                     </div>
-                    <div class="flex justify-between items-center mt-2">
-                        <span class="text-gray-600 font-bold">وقت الدفع</span>
-                        <span class="text-gray-800 font-bold" id="payment-success-time">--</span>
+
+                    <!-- Driver rating section -->
+                    <div class="bg-white border border-gray-200 rounded-2xl p-5">
+                        <h3 class="text-lg font-extrabold text-gray-800 mb-3">قيّم السائق</h3>
+                        <div class="flex justify-center gap-2 mb-4 dir-ltr" data-rating-scope="passenger">
+                            <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="1" aria-label="تقييم 1"><i class="fas fa-star"></i></button>
+                            <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="2" aria-label="تقييم 2"><i class="fas fa-star"></i></button>
+                            <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="3" aria-label="تقييم 3"><i class="fas fa-star"></i></button>
+                            <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="4" aria-label="تقييم 4"><i class="fas fa-star"></i></button>
+                            <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="5" aria-label="تقييم 5"><i class="fas fa-star"></i></button>
+                        </div>
+
+                        <textarea id="payment-success-rating-comment" rows="3" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300" placeholder="اكتب تعليقك (اختياري)"></textarea>
                     </div>
                 </div>
 
-                <div class="bg-white border border-gray-200 rounded-2xl p-5 mb-6 text-right">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-gray-600 font-bold">رقم الرحلة</span>
-                        <span class="font-bold text-gray-800" id="payment-success-trip-id">--</span>
-                    </div>
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-gray-600 font-bold">من</span>
-                        <span class="font-bold text-gray-800" id="payment-success-pickup">--</span>
-                    </div>
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-gray-600 font-bold">إلى</span>
-                        <span class="font-bold text-gray-800" id="payment-success-dropoff">--</span>
-                    </div>
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-gray-600 font-bold">المسافة</span>
-                        <span class="font-bold text-gray-800" id="payment-success-distance">-- كم</span>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span class="text-gray-600 font-bold">المدة</span>
-                        <span class="font-bold text-gray-800" id="payment-success-duration">-- دقيقة</span>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="window.showLastTripDetails()" class="bg-emerald-50 text-emerald-700 py-3 rounded-xl font-bold hover:bg-emerald-100 transition-colors">تفاصيل الرحلة</button>
-                    <button onclick="window.switchSection('rating')" class="bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">تابع للتقييم</button>
+                <!-- Sticky bottom action -->
+                <div class="sticky bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-6 py-4">
+                    <button type="button" onclick="submitTripCompletionDone()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-green-200 hover:shadow-xl transform hover:scale-[1.02] transition-all">
+                        تم
+                    </button>
                 </div>
             </div>
 
@@ -1525,7 +1544,7 @@
                 <h2 class="text-3xl font-extrabold text-gray-800 mb-2">وصلت بسلامة!</h2>
                 <p class="text-gray-500 mb-8">كيف كانت رحلتك مع الكابتن أحمد؟</p>
                 
-                <div class="flex justify-center gap-2 mb-8 dir-ltr">
+                <div class="flex justify-center gap-2 mb-8 dir-ltr" data-rating-scope="passenger">
                     <button class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="1"><i class="fas fa-star"></i></button>
                     <button class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="2"><i class="fas fa-star"></i></button>
                     <button class="star-btn text-gray-300 hover:text-yellow-400 hover:scale-125 transition-all text-4xl" data-rating="3"><i class="fas fa-star"></i></button>

@@ -2896,6 +2896,12 @@ window.switchSection = function(name) {
         target.classList.add('slide-up-enter-active');
         target.classList.remove('slide-up-enter');
     }
+
+    try {
+        configurePassengerMainPanelForSection(name);
+    } catch (e) {
+        // ignore
+    }
     
     if(name === 'profile') {
         updateUIWithUserData();
@@ -5642,7 +5648,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => {
             const rating = parseInt(btn.dataset.rating);
             passengerRatingValue = rating;
-            document.querySelectorAll('.star-btn').forEach(b => {
+
+            const scope = btn.closest('[data-rating-scope]') || document;
+            scope.querySelectorAll('.star-btn').forEach(b => {
                 if (parseInt(b.dataset.rating) <= rating) {
                     b.classList.add('text-yellow-400');
                     b.classList.remove('text-gray-300');
@@ -5716,6 +5724,72 @@ window.submitPassengerRating = async function() {
 
         resetApp();
     }
+};
+
+window.submitTripCompletionDone = async function() {
+    if (!passengerRatingValue) {
+        showToast('يرجى اختيار تقييم أولاً');
+        return;
+    }
+
+    const tripId = lastCompletedTrip?.id || activePassengerTripId;
+    if (!tripId) {
+        showToast('تعذر تحديد الرحلة للتقييم');
+        resetApp();
+        return;
+    }
+
+    const commentInput = document.getElementById('payment-success-rating-comment');
+    const comment = commentInput ? commentInput.value.trim() : '';
+
+    const btn = document.querySelector('#state-payment-success button[onclick="submitTripCompletionDone()"]');
+    if (btn) btn.disabled = true;
+
+    try {
+        const resp = await fetch('/rate-driver', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                trip_id: String(tripId),
+                rating: Number(passengerRatingValue),
+                comment: comment || ''
+            })
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data?.success) {
+            throw new Error(data?.error || 'Request failed');
+        }
+
+        showToast('شكراً لتقييمك!');
+    } catch (error) {
+        console.error('Failed to rate driver:', error);
+        showToast('تعذر إرسال التقييم حالياً');
+        if (btn) btn.disabled = false;
+        return;
+    } finally {
+        passengerRatingValue = 0;
+        if (commentInput) commentInput.value = '';
+
+        try {
+            document.querySelectorAll('[data-rating-scope="passenger"] .star-btn').forEach(b => {
+                b.classList.remove('text-yellow-400');
+                b.classList.add('text-gray-300');
+            });
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    if (activePassengerTripId) {
+        unsubscribeTripRealtime(activePassengerTripId);
+    }
+    activePassengerTripId = null;
+    passengerRealtimeActive = false;
+    lastCompletedTrip = null;
+
+    if (btn) btn.disabled = false;
+    resetApp();
 };
 
 window.submitDriverPassengerRating = async function() {
@@ -6117,12 +6191,6 @@ window.proceedToPayment = function() {
             window.driverEndTrip();
         }
 
-        if (lastCompletedTrip?.id) {
-            setTimeout(() => {
-                window.showTripDetails(lastCompletedTrip.id);
-            }, 1200);
-        }
-        
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';
     }, 2000);
@@ -6163,6 +6231,52 @@ let panelDragStartY = 0;
 let panelCurrentHeight = 85; // in vh
 let isDraggingPanel = false;
 
+let panelMinHeight = 10;
+let panelMidHeight = 50;
+let panelMaxHeight = 85;
+let panelDragPreset = 'default';
+
+function applyPanelHeightVh(vh, animate = true) {
+    const panel = document.getElementById('main-panel');
+    if (!panel) return;
+    panel.style.transition = animate ? 'max-height 0.3s ease-in-out' : 'none';
+    panel.style.maxHeight = `${vh}vh`;
+    panelCurrentHeight = vh;
+}
+
+function setPanelDragPreset(preset) {
+    if (preset === 'trip-completion') {
+        panelDragPreset = 'trip-completion';
+        panelMinHeight = 60;
+        panelMidHeight = 60;
+        panelMaxHeight = 95;
+        applyPanelHeightVh(60, true);
+        return;
+    }
+
+    panelDragPreset = 'default';
+    panelMinHeight = 10;
+    panelMidHeight = 50;
+    panelMaxHeight = 85;
+
+    const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMaxHeight));
+    applyPanelHeightVh(next, true);
+}
+
+function configurePassengerMainPanelForSection(name) {
+    const panel = document.getElementById('main-panel');
+    if (!panel) return;
+
+    if (name === 'payment-success') {
+        setPanelDragPreset('trip-completion');
+        return;
+    }
+
+    if (panelDragPreset === 'trip-completion') {
+        setPanelDragPreset('default');
+    }
+}
+
 window.startDragPanel = function(e) {
     isDraggingPanel = true;
     panelDragStartY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
@@ -6191,8 +6305,8 @@ function dragPanel(e) {
     const newHeightPx = (panelCurrentHeight / 100 * windowHeight) - deltaY;
     const newHeightVh = (newHeightPx / windowHeight) * 100;
     
-    // Constrain between 10vh and 85vh
-    const constrainedHeight = Math.max(10, Math.min(85, newHeightVh));
+    // Constrain based on current preset
+    const constrainedHeight = Math.max(panelMinHeight, Math.min(panelMaxHeight, newHeightVh));
     panel.style.maxHeight = constrainedHeight + 'vh';
 }
 
@@ -6209,18 +6323,26 @@ function endDragPanel(e) {
         const currentMaxHeight = parseFloat(panel.style.maxHeight);
         
         // Snap to position based on current height
-        if (currentMaxHeight < 30) {
-            // Minimize to 10vh
-            panel.style.maxHeight = '10vh';
-            panelCurrentHeight = 10;
-        } else if (currentMaxHeight < 60) {
-            // Medium size 50vh
-            panel.style.maxHeight = '50vh';
-            panelCurrentHeight = 50;
+        if (panelDragPreset === 'trip-completion') {
+            const midpoint = (panelMinHeight + panelMaxHeight) / 2;
+            if (currentMaxHeight < midpoint) {
+                panel.style.maxHeight = `${panelMinHeight}vh`;
+                panelCurrentHeight = panelMinHeight;
+            } else {
+                panel.style.maxHeight = `${panelMaxHeight}vh`;
+                panelCurrentHeight = panelMaxHeight;
+            }
         } else {
-            // Maximize to 85vh
-            panel.style.maxHeight = '85vh';
-            panelCurrentHeight = 85;
+            if (currentMaxHeight < 30) {
+                panel.style.maxHeight = `${panelMinHeight}vh`;
+                panelCurrentHeight = panelMinHeight;
+            } else if (currentMaxHeight < 60) {
+                panel.style.maxHeight = `${panelMidHeight}vh`;
+                panelCurrentHeight = panelMidHeight;
+            } else {
+                panel.style.maxHeight = `${panelMaxHeight}vh`;
+                panelCurrentHeight = panelMaxHeight;
+            }
         }
     }
     

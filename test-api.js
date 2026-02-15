@@ -1,5 +1,6 @@
 // Test script for API endpoints
 const baseURL = process.env.API_BASE_URL || 'http://localhost:3000/api';
+const originURL = baseURL.endsWith('/api') ? baseURL.slice(0, -4) : baseURL;
 
 async function testAPI() {
     console.log('🧪 Testing Akwadra API Endpoints\n');
@@ -148,15 +149,20 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Trip completed:', data.data.status, 'trip_status:', data.data.trip_status);
 
-        // Rate trip
-        console.log('\n1️⃣1️⃣c Testing rate trip (trip_status=rated)...');
-        response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
-            method: 'PATCH',
+        // Rate driver (new endpoint)
+        console.log('\n1️⃣1️⃣c Testing POST /rate-driver ...');
+        response = await fetch(`${originURL}/rate-driver`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'completed', passenger_rating: 5, trip_status: 'rated' })
+            body: JSON.stringify({ trip_id: createdTripId, rating: 5, comment: 'اختبار تقييم السائق' })
         });
         data = await response.json();
-        console.log('✅ Trip rated:', data.data.status, 'trip_status:', data.data.trip_status, 'passenger_rating:', data.data.passenger_rating);
+        console.log('✅ Rate driver:', {
+            status: data.data?.status,
+            trip_status: data.data?.trip_status,
+            passenger_rating: data.data?.passenger_rating,
+            passenger_review: data.data?.passenger_review
+        });
 
         // Test 1️⃣2️⃣: Get single trip
         console.log('\n1️⃣2️⃣ Testing get single trip...');
