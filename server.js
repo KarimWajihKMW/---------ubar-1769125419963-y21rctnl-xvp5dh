@@ -865,54 +865,77 @@ app.patch('/api/trips/:id/status', async (req, res) => {
 
         // ✨ تحديث حالة الطلب في pending_ride_requests
         try {
-            const tripId = result.rows[0].id;
-            
             // تحديث حالة الطلب بناءً على حالة الرحلة
             if (status === 'assigned' && result.rows[0].driver_id) {
                 // عند تعيين سائق، نحدث الحالة إلى accepted
-                await pool.query(`
-                    UPDATE pending_ride_requests
+                await pool.query(
+                    `WITH target AS (
+                        SELECT id
+                        FROM pending_ride_requests
+                        WHERE user_id = $2
+                          AND status = 'waiting'
+                          AND pickup_lat = $3
+                          AND pickup_lng = $4
+                          AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    )
+                    UPDATE pending_ride_requests pr
                     SET status = 'accepted',
                         assigned_driver_id = $1,
                         assigned_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE user_id = $2
-                        AND status = 'waiting'
-                        AND pickup_lat = $3
-                        AND pickup_lng = $4
-                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                `, [result.rows[0].driver_id, result.rows[0].user_id, 
-                    result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
+                    FROM target
+                    WHERE pr.id = target.id`,
+                    [
+                        result.rows[0].driver_id,
+                        result.rows[0].user_id,
+                        result.rows[0].pickup_lat,
+                        result.rows[0].pickup_lng
+                    ]
+                );
             } else if (status === 'cancelled') {
                 // عند إلغاء الرحلة، نحدث الحالة إلى cancelled
-                await pool.query(`
-                    UPDATE pending_ride_requests
+                await pool.query(
+                    `WITH target AS (
+                        SELECT id
+                        FROM pending_ride_requests
+                        WHERE user_id = $1
+                          AND status = 'waiting'
+                          AND pickup_lat = $2
+                          AND pickup_lng = $3
+                          AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    )
+                    UPDATE pending_ride_requests pr
                     SET status = 'cancelled',
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE user_id = $1
-                        AND status = 'waiting'
-                        AND pickup_lat = $2
-                        AND pickup_lng = $3
-                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 minutes'
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                `, [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
+                    FROM target
+                    WHERE pr.id = target.id`,
+                    [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]
+                );
             } else if (status === 'completed') {
                 // عند إكمال الرحلة، يمكن تحديث الحالة أو تركها كما هي
-                await pool.query(`
-                    UPDATE pending_ride_requests
+                await pool.query(
+                    `WITH target AS (
+                        SELECT id
+                        FROM pending_ride_requests
+                        WHERE user_id = $1
+                          AND status = 'accepted'
+                          AND pickup_lat = $2
+                          AND pickup_lng = $3
+                          AND created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    )
+                    UPDATE pending_ride_requests pr
                     SET status = 'completed',
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE user_id = $1
-                        AND status = 'accepted'
-                        AND pickup_lat = $2
-                        AND pickup_lng = $3
-                        AND created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours'
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                `, [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]);
+                    FROM target
+                    WHERE pr.id = target.id`,
+                    [result.rows[0].user_id, result.rows[0].pickup_lat, result.rows[0].pickup_lng]
+                );
             }
         } catch (pendingUpdateErr) {
             console.error('⚠️ خطأ في تحديث pending_ride_requests:', pendingUpdateErr.message);
