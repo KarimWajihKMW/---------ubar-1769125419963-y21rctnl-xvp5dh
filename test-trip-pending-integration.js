@@ -202,7 +202,7 @@ async function testIntegratedSystem() {
 }
 
 console.log('⚠️  تأكد من تشغيل السيرفر على port 3000');
-console.log('   Run: DATABASE_URL="postgresql://postgres:gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ@trolley.proxy.rlwy.net:47888/railway" npm start\n');
+console.log('   Run: DATABASE_URL="<YOUR_DATABASE_URL>" npm start\n');
 
 setTimeout(() => {
     testIntegratedSystem()

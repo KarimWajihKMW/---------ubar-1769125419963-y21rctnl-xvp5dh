@@ -155,7 +155,7 @@ node test-driver-earnings.js
 
 **اتصال قاعدة البيانات:**
 ```
-postgresql://postgres:gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ@trolley.proxy.rlwy.net:47888/railway
+postgresql://USER:PASSWORD@HOST:PORT/DB
 ```
 
 ## المتطلبات المستقبلية

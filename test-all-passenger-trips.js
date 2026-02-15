@@ -1,7 +1,6 @@
 const axios = require('axios');
 
 const BASE_URL = 'http://localhost:3000/api';
-const DB_URL = 'postgresql://postgres:gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ@trolley.proxy.rlwy.net:47888/railway';
 
 async function testAllPassengerTrips() {
     console.log('🧪 اختبار شامل: كل طلبات الراكب تظهر في pending_ride_requests\n');

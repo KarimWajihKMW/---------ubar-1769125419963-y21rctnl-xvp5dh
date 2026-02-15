@@ -160,7 +160,7 @@ async function runTests() {
 
 // Make sure server is running
 console.log('⚠️  Make sure the server is running on port 3000');
-console.log('   Run: DATABASE_URL="postgresql://postgres:gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ@trolley.proxy.rlwy.net:47888/railway" npm start\n');
+console.log('   Run: DATABASE_URL="<YOUR_DATABASE_URL>" npm start\n');
 
 setTimeout(() => {
     runTests().then(() => process.exit(0)).catch(err => {

@@ -78,7 +78,7 @@ curl -X POST http://localhost:3000/api/users/login \
 يمكنك التحقق من أن الاسم محفوظ في PostgreSQL:
 
 ```bash
-psql "postgresql://postgres:gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ@trolley.proxy.rlwy.net:47888/railway" \
+psql "$DATABASE_URL" \
   -c "SELECT id, name, phone FROM users WHERE id = 1;"
 ```
 

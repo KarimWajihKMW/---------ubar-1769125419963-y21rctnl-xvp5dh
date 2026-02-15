@@ -58,6 +58,11 @@ const ApiService = {
         async getById(id) {
             return ApiService.request(`/trips/${id}`);
         },
+
+        // Get live trip snapshot (trip + driver last location)
+        async getLive(id) {
+            return ApiService.request(`/trips/${id}/live`);
+        },
         
         // Create new trip
         async create(tripData) {

@@ -489,6 +489,37 @@ app.get('/api/trips/completed', async (req, res) => {
     }
 });
 
+// Get live trip snapshot (trip + driver's last known location)
+app.get('/api/trips/:id/live', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const result = await pool.query(
+            `SELECT
+                t.*,
+                d.last_lat AS driver_last_lat,
+                d.last_lng AS driver_last_lng,
+                d.last_location_at AS driver_last_location_at,
+                d.name AS driver_live_name,
+                d.status AS driver_live_status
+             FROM trips t
+             LEFT JOIN drivers d ON d.id = t.driver_id
+             WHERE t.id = $1
+             LIMIT 1`,
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Trip not found' });
+        }
+
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error('Error fetching live trip:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // Get cancelled trips
 app.get('/api/trips/cancelled', async (req, res) => {
     try {

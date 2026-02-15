@@ -1,11 +1,32 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+    console.error('❌ DATABASE_URL is not set.');
+}
+
+const sslExplicit = process.env.DATABASE_SSL;
+const shouldUseSsl = sslExplicit === '1' || sslExplicit === 'true'
+    ? true
+    : sslExplicit === '0' || sslExplicit === 'false'
+        ? false
+        : (() => {
+            if (!connectionString) return false;
+            // Default: SSL for non-local hosts, no SSL for localhost
+            return !/localhost|127\.0\.0\.1/i.test(connectionString);
+        })();
+
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false
-    }
+    connectionString,
+    ...(shouldUseSsl
+        ? {
+            ssl: {
+                rejectUnauthorized: false
+            }
+        }
+        : {})
 });
 
 // Test connection

@@ -120,6 +120,18 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Trip details:', data.data);
 
+        // Test 1️⃣2️⃣b: Get live trip snapshot
+        console.log('\n1️⃣2️⃣b Testing get live trip snapshot...');
+        response = await fetch(`${baseURL}/trips/${createdTripId}/live`);
+        data = await response.json();
+        console.log('✅ Live trip snapshot:', {
+            id: data.data?.id,
+            status: data.data?.status,
+            driver_id: data.data?.driver_id,
+            driver_last_lat: data.data?.driver_last_lat,
+            driver_last_lng: data.data?.driver_last_lng
+        });
+
         // Test 1️⃣3️⃣: Reject pending trip
         console.log('\n1️⃣3️⃣ Testing reject pending trip...');
         const rejectTrip = {

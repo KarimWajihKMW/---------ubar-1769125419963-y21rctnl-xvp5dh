@@ -6,18 +6,15 @@ echo "╚═══════════════════════�
 echo ""
 
 # Database connection details
-DB_HOST="trolley.proxy.rlwy.net"
-DB_PORT="47888"
-DB_NAME="railway"
-DB_USER="postgres"
-DB_PASS="gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ"
+# Required: export DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DB"
+: "${DATABASE_URL:?❌ Please export DATABASE_URL before running this script}"
 
 echo "📊 المثال 1: تحديث أرباح السائق ID=1"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 echo "1️⃣  عرض البيانات الحالية:"
-PGPASSWORD=$DB_PASS psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "
+psql "$DATABASE_URL" -c "
 SELECT id, name, today_earnings, today_trips_count, balance, total_trips 
 FROM drivers 
 WHERE id = 1;"
@@ -28,7 +25,7 @@ echo "   - أرباح اليوم: 750.50 ر.س"
 echo "   - رحلات اليوم: 20 رحلة"
 echo ""
 
-PGPASSWORD=$DB_PASS psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "
+psql "$DATABASE_URL" -c "
 UPDATE drivers 
 SET 
     today_earnings = 750.50,

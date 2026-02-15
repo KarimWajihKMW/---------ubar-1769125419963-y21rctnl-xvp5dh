@@ -1,8 +1,14 @@
 // Test script to verify users/passengers count
 const { Pool } = require('pg');
 
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+    console.error('❌ DATABASE_URL is not set. Export DATABASE_URL then re-run.');
+    process.exit(1);
+}
+
 const pool = new Pool({
-    connectionString: 'postgresql://postgres:gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ@trolley.proxy.rlwy.net:47888/railway',
+    connectionString,
     ssl: false
 });
 

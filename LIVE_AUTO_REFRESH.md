@@ -169,9 +169,7 @@ node test-live-update.js
 1. افتح صفحة الاختبار
 2. افتح قاعدة البيانات في terminal آخر:
    ```bash
-   PGPASSWORD='gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ' \
-   psql -h trolley.proxy.rlwy.net -p 47888 \
-   -U postgres -d railway
+    psql "$DATABASE_URL"
    ```
 
 3. عدّل البيانات:
