@@ -123,15 +123,40 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Assigned trip status:', data.data.status);
 
-        // Test 1️⃣1️⃣: Update trip status to completed
-        console.log('\n1️⃣1️⃣ Testing update trip to completed...');
+        // Test 1️⃣1️⃣: Start trip (status=ongoing + trip_status=started)
+        console.log('\n1️⃣1️⃣ Testing start trip (ongoing/started)...');
         response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'completed', rating: 5 })
+            body: JSON.stringify({ status: 'ongoing', trip_status: 'started' })
         });
         data = await response.json();
-        console.log('✅ Updated trip status:', data.data.status);
+        console.log('✅ Updated trip status:', data.data.status, 'trip_status:', data.data.trip_status);
+
+        // Verify started
+        response = await fetch(`${baseURL}/trips/${createdTripId}`);
+        data = await response.json();
+        console.log('✅ Trip after start:', { status: data.data.status, trip_status: data.data.trip_status });
+
+        // Complete trip
+        console.log('\n1️⃣1️⃣b Testing complete trip (completed/completed)...');
+        response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed', trip_status: 'completed' })
+        });
+        data = await response.json();
+        console.log('✅ Trip completed:', data.data.status, 'trip_status:', data.data.trip_status);
+
+        // Rate trip
+        console.log('\n1️⃣1️⃣c Testing rate trip (trip_status=rated)...');
+        response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed', passenger_rating: 5, trip_status: 'rated' })
+        });
+        data = await response.json();
+        console.log('✅ Trip rated:', data.data.status, 'trip_status:', data.data.trip_status, 'passenger_rating:', data.data.passenger_rating);
 
         // Test 1️⃣2️⃣: Get single trip
         console.log('\n1️⃣2️⃣ Testing get single trip...');

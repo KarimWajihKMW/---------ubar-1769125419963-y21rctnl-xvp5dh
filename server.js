@@ -4,6 +4,8 @@ const pool = require('./db');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const { Server: SocketIOServer } = require('socket.io');
 require('dotenv').config();
 
 // Import driver sync system
@@ -16,6 +18,75 @@ const MAX_ASSIGN_DISTANCE_KM = 30;
 const PENDING_TRIP_TTL_MINUTES = 20;
 const ASSIGNED_TRIP_TTL_MINUTES = 120;
 const AUTO_ASSIGN_TRIPS = false;
+
+// ------------------------------
+// Realtime (Socket.io)
+// ------------------------------
+const httpServer = http.createServer(app);
+const io = new SocketIOServer(httpServer, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE']
+    }
+});
+
+function tripRoom(tripId) {
+    return `trip:${String(tripId)}`;
+}
+
+const lastTripDriverWriteAt = new Map();
+
+io.on('connection', (socket) => {
+    socket.on('subscribe_trip', (payload) => {
+        const tripId = payload?.trip_id;
+        if (!tripId) return;
+        socket.join(tripRoom(tripId));
+        socket.emit('subscribed_trip', { trip_id: String(tripId) });
+    });
+
+    socket.on('unsubscribe_trip', (payload) => {
+        const tripId = payload?.trip_id;
+        if (!tripId) return;
+        socket.leave(tripRoom(tripId));
+        socket.emit('unsubscribed_trip', { trip_id: String(tripId) });
+    });
+
+    // Driver sends live GPS during trip
+    socket.on('driver_location_update', async (payload) => {
+        try {
+            const tripId = payload?.trip_id;
+            const lat = payload?.driver_lat !== undefined && payload?.driver_lat !== null ? Number(payload.driver_lat) : null;
+            const lng = payload?.driver_lng !== undefined && payload?.driver_lng !== null ? Number(payload.driver_lng) : null;
+            if (!tripId || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+            io.to(tripRoom(tripId)).emit('driver_live_location', {
+                trip_id: String(tripId),
+                driver_lat: lat,
+                driver_lng: lng,
+                timestamp: payload?.timestamp || Date.now()
+            });
+
+            // Optional: persist to drivers.last_lat/last_lng (throttled)
+            const now = Date.now();
+            const key = String(tripId);
+            const last = lastTripDriverWriteAt.get(key) || 0;
+            if (now - last < 5000) return;
+            lastTripDriverWriteAt.set(key, now);
+
+            const tripRes = await pool.query('SELECT driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+            const driverId = tripRes.rows?.[0]?.driver_id || null;
+            if (!driverId) return;
+            await pool.query(
+                `UPDATE drivers
+                 SET last_lat = $1, last_lng = $2, last_location_at = CURRENT_TIMESTAMP
+                 WHERE id = $3`,
+                [lat, lng, driverId]
+            );
+        } catch (err) {
+            console.warn('⚠️ driver_location_update failed:', err.message);
+        }
+    });
+});
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -233,6 +304,44 @@ async function ensureTripTimeColumns() {
         console.log('✅ Trip time columns ensured');
     } catch (err) {
         console.error('❌ Failed to ensure trip time columns:', err.message);
+    }
+}
+
+async function ensureTripStatusColumn() {
+    try {
+        // Create enum type once (Postgres has no CREATE TYPE IF NOT EXISTS for all versions)
+        await pool.query(`
+            DO $$
+            BEGIN
+                CREATE TYPE trip_status_enum AS ENUM ('pending', 'accepted', 'arrived', 'started', 'completed', 'rated');
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+        `);
+
+        await pool.query(`
+            ALTER TABLE trips
+            ADD COLUMN IF NOT EXISTS trip_status trip_status_enum DEFAULT 'pending';
+        `);
+
+        // Backfill for existing rows
+        await pool.query(`
+            UPDATE trips
+            SET trip_status = CASE
+                WHEN status = 'pending' THEN 'pending'::trip_status_enum
+                WHEN status = 'assigned' THEN 'accepted'::trip_status_enum
+                WHEN status = 'ongoing' THEN 'started'::trip_status_enum
+                WHEN status = 'completed' AND COALESCE(passenger_rating, rating) IS NOT NULL THEN 'rated'::trip_status_enum
+                WHEN status = 'completed' THEN 'completed'::trip_status_enum
+                ELSE 'pending'::trip_status_enum
+            END
+            WHERE trip_status IS NULL
+               OR (trip_status = 'pending'::trip_status_enum AND status IS NOT NULL AND status <> 'pending');
+        `);
+
+        console.log('✅ Trip trip_status column ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure trip_status column:', err.message);
     }
 }
 
@@ -835,6 +944,7 @@ app.patch('/api/trips/:id/status', async (req, res) => {
         const { id } = req.params;
         const {
             status,
+            trip_status,
             rating,
             review,
             passenger_rating,
@@ -847,12 +957,45 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             payment_method
         } = req.body;
 
+        // Fetch current status for state-machine transition checks + event dedupe
+        let beforeTripStatus = null;
+        let beforeStatus = null;
+        try {
+            const before = await pool.query('SELECT status, trip_status FROM trips WHERE id = $1 LIMIT 1', [id]);
+            if (before.rows.length > 0) {
+                beforeStatus = before.rows[0].status || null;
+                beforeTripStatus = before.rows[0].trip_status || null;
+            }
+        } catch (err) {
+            // Non-blocking
+            beforeTripStatus = null;
+            beforeStatus = null;
+        }
+
         const effectivePassengerRating = passenger_rating !== undefined ? passenger_rating : rating;
         const effectivePassengerReview = passenger_review !== undefined ? passenger_review : review;
+
+        // Compute next trip_status (shared state machine) while keeping legacy `status`
+        let nextTripStatus = trip_status || null;
+        if (!nextTripStatus && effectivePassengerRating !== undefined) {
+            nextTripStatus = 'rated';
+        }
+        if (!nextTripStatus && status === 'ongoing') {
+            nextTripStatus = 'started';
+        }
+        if (!nextTripStatus && status === 'completed') {
+            nextTripStatus = 'completed';
+        }
         
         let query = 'UPDATE trips SET status = $1, updated_at = CURRENT_TIMESTAMP';
         const params = [status];
         let paramCount = 1;
+
+        if (nextTripStatus) {
+            paramCount++;
+            query += `, trip_status = $${paramCount}::trip_status_enum`;
+            params.push(nextTripStatus);
+        }
         
         if (status === 'completed') {
             query += ', completed_at = CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END';
@@ -928,6 +1071,38 @@ app.patch('/api/trips/:id/status', async (req, res) => {
         
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Trip not found' });
+        }
+
+        // Realtime events
+        try {
+            const updatedTrip = result.rows[0];
+            const updatedTripStatus = updatedTrip.trip_status || nextTripStatus || null;
+
+            if (updatedTripStatus === 'started' && beforeTripStatus !== 'started') {
+                io.to(tripRoom(id)).emit('trip_started', {
+                    trip_id: String(id),
+                    trip_status: 'started'
+                });
+            }
+
+            if (updatedTripStatus === 'completed' && beforeTripStatus !== 'completed') {
+                io.to(tripRoom(id)).emit('trip_completed', {
+                    trip_id: String(id),
+                    trip_status: 'completed',
+                    duration: updatedTrip.duration !== undefined && updatedTrip.duration !== null ? Number(updatedTrip.duration) : null,
+                    distance: updatedTrip.distance !== undefined && updatedTrip.distance !== null ? Number(updatedTrip.distance) : null,
+                    price: updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null
+                });
+            }
+
+            if (updatedTripStatus === 'rated' && beforeTripStatus !== 'rated') {
+                io.to(tripRoom(id)).emit('trip_rated', {
+                    trip_id: String(id),
+                    trip_status: 'rated'
+                });
+            }
+        } catch (err) {
+            console.warn('⚠️ Failed to emit trip realtime event:', err.message);
         }
         
         // Update driver earnings if trip completed
@@ -3318,6 +3493,7 @@ ensureDefaultAdmins()
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
+    .then(() => ensureTripStatusColumn())
     .then(() => ensureTripSourceColumn())
     .then(() => ensurePickupMetaColumns())
     .then(() => ensurePendingRideColumns())
@@ -3334,7 +3510,7 @@ ensureDefaultAdmins()
         console.log('⏭️  Server will continue without sync system');
     })
     .finally(() => {
-        app.listen(PORT, () => {
+        httpServer.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📍 API available at http://localhost:${PORT}/api`);
         });

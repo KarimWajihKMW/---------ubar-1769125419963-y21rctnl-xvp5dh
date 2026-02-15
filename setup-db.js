@@ -8,9 +8,15 @@ async function setupDatabase() {
         
         // Drop existing tables to start fresh
         console.log('🗑️ Dropping existing tables...');
+        await client.query(`DROP TABLE IF EXISTS pending_ride_requests CASCADE;`);
+        await client.query(`DROP TABLE IF EXISTS driver_earnings CASCADE;`);
+        await client.query(`DROP TABLE IF EXISTS offers CASCADE;`);
         await client.query(`DROP TABLE IF EXISTS trips CASCADE;`);
         await client.query(`DROP TABLE IF EXISTS drivers CASCADE;`);
         await client.query(`DROP TABLE IF EXISTS users CASCADE;`);
+
+        // Drop enum types created by the app (optional)
+        await client.query(`DROP TYPE IF EXISTS trip_status_enum CASCADE;`);
         
         // Create users table
         await client.query(`

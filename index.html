@@ -1540,7 +1540,7 @@
 
                 <div class="flex gap-4">
                     <button onclick="resetApp()" class="flex-1 bg-gray-100 text-gray-800 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">تخطي</button>
-                    <button onclick="submitPassengerRating()" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">إرسال</button>
+                    <button onclick="submitPassengerRating()" class="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">إنهاء الرحلة</button>
                 </div>
             </div>
 
@@ -2247,6 +2247,7 @@
     </div>
     
     <!-- Script loaded at the end -->
+    <script src="/socket.io/socket.io.js"></script>
     <script src="api-service.js?v=20260205-1"></script>
     <script src="script.js?v=20260205-1"></script>
 </body>
