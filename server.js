@@ -555,6 +555,26 @@ async function ensurePassengerFeatureTables() {
         await pool.query('CREATE INDEX IF NOT EXISTS idx_pickup_hubs_active ON pickup_hubs(is_active);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_pickup_hubs_coords ON pickup_hubs(lat, lng);');
 
+        // Seed a few default hubs (only if empty)
+        try {
+            const existing = await pool.query('SELECT COUNT(*)::int AS count FROM pickup_hubs');
+            const count = existing.rows?.[0]?.count || 0;
+            if (count === 0) {
+                await pool.query(`
+                    INSERT INTO pickup_hubs (title, category, lat, lng, is_active)
+                    VALUES
+                        ('محطة الرمل (نقطة تجمع)', 'مترو/محطة', 31.1999, 29.9183, true),
+                        ('مكتبة الإسكندرية (بوابة)', 'معلم', 31.2089, 29.9092, true),
+                        ('محطة سيدي جابر (مخرج رئيسي)', 'مترو/محطة', 31.2165, 29.9420, true),
+                        ('مول سان ستيفانو (المدخل)', 'مول', 31.2453, 29.9675, true),
+                        ('كورنيش الإسكندرية (نقطة واضحة)', 'كورنيش', 31.2156, 29.9553, true)
+                `);
+                console.log('✅ Default pickup hubs inserted');
+            }
+        } catch (e) {
+            // non-blocking
+        }
+
         // Link trip -> hub
         await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_hub_id INTEGER REFERENCES pickup_hubs(id) ON DELETE SET NULL;');
 
@@ -957,7 +977,7 @@ async function getTodayWalletDebitsTotal(client, { owner_type, owner_id, referen
 
 // --- Smart Pickup Hubs ---
 
-app.get('/api/pickup-hubs/suggest', requireAuth, async (req, res) => {
+app.get('/api/pickup-hubs/suggest', async (req, res) => {
     try {
         const lat = req.query.lat !== undefined ? Number(req.query.lat) : null;
         const lng = req.query.lng !== undefined ? Number(req.query.lng) : null;

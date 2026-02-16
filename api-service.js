@@ -1,6 +1,10 @@
 // API Service for Akwadra Taxi App
-const API_BASE_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:3000/api' 
+const API_BASE_URL = (
+    window.location.hostname === 'localhost' ||
+    window.location.protocol === 'file:' ||
+    !window.location.hostname
+)
+    ? 'http://localhost:3000/api'
     : '/api';
 
 const ApiService = {
