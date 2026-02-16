@@ -382,7 +382,7 @@ const ApiService = {
             if (!response.ok) throw new Error(data.error || 'Request failed');
             return data;
         }
-    }
+    },
 
     // Pending rides endpoints (real-time nearest requests for drivers)
     pendingRides: {
