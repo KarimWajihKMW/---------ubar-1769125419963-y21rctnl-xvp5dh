@@ -58,7 +58,8 @@ const ApiService = {
                     try { window.openAuthModal && window.openAuthModal(); } catch (e) {}
                 }
 
-                throw new Error(data.error || 'Request failed');
+                const msg = (data && data.error) ? String(data.error) : (response.statusText || 'Request failed');
+                throw new Error(`HTTP ${response.status}: ${msg}`);
             }
 
             return data;

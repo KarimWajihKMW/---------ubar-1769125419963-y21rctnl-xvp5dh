@@ -611,7 +611,8 @@ window.addFamilyMemberFromUI = async function() {
         await window.refreshFamilyUI();
     } catch (e) {
         console.error('Add family member failed:', e);
-        showToast('❌ تعذر إضافة فرد');
+        const msg = e && e.message ? String(e.message) : '';
+        showToast(`❌ تعذر إضافة فرد${msg ? `: ${msg}` : ''}`);
     }
 };
 
