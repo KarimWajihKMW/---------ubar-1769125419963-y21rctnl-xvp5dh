@@ -220,6 +220,142 @@ let passengerDriverAnimDuration = 650;
 // Trip ETA cache (driver-updated ETA + delay reason)
 const tripEtaCache = new Map();
 
+// Pickup suggestion cache (latest pending suggestion per trip)
+const tripPickupSuggestionCache = new Map();
+
+function normalizeSuggestionRow(row) {
+    if (!row) return null;
+    const s = { ...row };
+    s.id = s.id !== undefined && s.id !== null ? Number(s.id) : s.id;
+    s.hub_id = s.hub_id !== undefined && s.hub_id !== null ? Number(s.hub_id) : s.hub_id;
+    s.suggested_lat = s.suggested_lat !== undefined && s.suggested_lat !== null ? Number(s.suggested_lat) : s.suggested_lat;
+    s.suggested_lng = s.suggested_lng !== undefined && s.suggested_lng !== null ? Number(s.suggested_lng) : s.suggested_lng;
+    s.status = s.status ? String(s.status) : s.status;
+    s.suggested_title = s.suggested_title ? String(s.suggested_title) : s.suggested_title;
+    return s;
+}
+
+function setTripPickupSuggestion(tripId, suggestion) {
+    if (!tripId) return;
+    const key = String(tripId);
+    const s = normalizeSuggestionRow(suggestion);
+    if (!s) return;
+    tripPickupSuggestionCache.set(key, s);
+}
+
+function getTripPickupSuggestion(tripId) {
+    if (!tripId) return null;
+    return tripPickupSuggestionCache.get(String(tripId)) || null;
+}
+
+function renderPassengerPickupSuggestionCard() {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) return;
+
+    const card = document.getElementById('passenger-pickup-suggestion-card');
+    if (!card) return;
+
+    const suggestion = getTripPickupSuggestion(activePassengerTripId);
+    const isPending = suggestion && String(suggestion.status || '').toLowerCase() === 'pending';
+
+    card.classList.toggle('hidden', !isPending);
+    if (!isPending) return;
+
+    const titleEl = document.getElementById('passenger-pickup-suggestion-title');
+    const metaEl = document.getElementById('passenger-pickup-suggestion-meta');
+    const statusEl = document.getElementById('passenger-pickup-suggestion-status');
+    const acceptBtn = document.getElementById('passenger-pickup-suggestion-accept');
+    const rejectBtn = document.getElementById('passenger-pickup-suggestion-reject');
+
+    const title = suggestion.suggested_title || suggestion.hub_title || 'نقطة تجمع مقترحة';
+    if (titleEl) titleEl.textContent = title;
+    if (metaEl) {
+        const parts = [];
+        if (suggestion.hub_category) parts.push(String(suggestion.hub_category));
+        if (Number.isFinite(suggestion.suggested_lat) && Number.isFinite(suggestion.suggested_lng)) {
+            parts.push(`${suggestion.suggested_lat.toFixed(5)}, ${suggestion.suggested_lng.toFixed(5)}`);
+        }
+        metaEl.textContent = parts.join(' • ');
+    }
+    if (statusEl) statusEl.textContent = 'هل توافق على تعديل نقطة الالتقاط؟';
+
+    if (acceptBtn) acceptBtn.disabled = false;
+    if (rejectBtn) rejectBtn.disabled = false;
+}
+
+function renderDriverPickupSuggestionStatus() {
+    if (currentUserRole !== 'driver') return;
+    if (!activeDriverTripId) return;
+
+    const el = document.getElementById('driver-pickup-suggestion-current');
+    if (!el) return;
+
+    const s = getTripPickupSuggestion(activeDriverTripId);
+    if (!s) {
+        el.textContent = '';
+        return;
+    }
+
+    const title = s.suggested_title || s.hub_title || 'اقتراح';
+    const status = String(s.status || '').toLowerCase();
+    if (status === 'pending') {
+        el.textContent = `آخر اقتراح: ${title} • في انتظار رد الراكب`;
+        return;
+    }
+    if (status === 'accepted') {
+        el.textContent = `آخر اقتراح: ${title} • تم القبول`;
+        return;
+    }
+    if (status === 'rejected') {
+        el.textContent = `آخر اقتراح: ${title} • تم الرفض`;
+        return;
+    }
+    el.textContent = `آخر اقتراح: ${title}`;
+}
+
+async function loadTripPickupSuggestions(tripId) {
+    if (!tripId) return;
+    try {
+        const res = await ApiService.trips.getPickupSuggestions(tripId);
+        const rows = Array.isArray(res?.data) ? res.data : [];
+        const pending = rows.find((r) => String(r?.status || '').toLowerCase() === 'pending') || null;
+        if (pending) {
+            setTripPickupSuggestion(tripId, pending);
+        }
+
+        if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+            renderPassengerPickupSuggestionCard();
+        }
+        if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+            renderDriverPickupSuggestionStatus();
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
+function applyPickupFromTripUpdate(trip) {
+    if (!trip) return;
+    const lat = trip.pickup_lat !== undefined && trip.pickup_lat !== null ? Number(trip.pickup_lat) : null;
+    const lng = trip.pickup_lng !== undefined && trip.pickup_lng !== null ? Number(trip.pickup_lng) : null;
+    const label = trip.pickup_location ? String(trip.pickup_location) : null;
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    try {
+        // Update local state used by passenger live tracking + routing
+        setPickup({ lat, lng }, label || 'نقطة الالتقاط');
+        if (trip.pickup_hub_id !== undefined && trip.pickup_hub_id !== null) {
+            currentPickupHubId = Number(trip.pickup_hub_id);
+        }
+        if (leafletMap) {
+            leafletMap.panTo([lat, lng]);
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
 function setTripEtaCache(tripId, etaMinutes, etaReason, etaUpdatedAt) {
     if (!tripId) return;
     const key = String(tripId);
@@ -372,12 +508,203 @@ function initRealtimeSocket() {
                 renderDriverEtaMeta();
             }
         });
+
+        realtimeSocket.on('pickup_suggestion_created', (payload) => {
+            const tripId = payload?.trip_id;
+            const suggestion = payload?.suggestion;
+            if (!tripId || !suggestion) return;
+
+            setTripPickupSuggestion(String(tripId), suggestion);
+
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                renderPassengerPickupSuggestionCard();
+                showToast('📍 السائق اقترح نقطة تجمع جديدة');
+            }
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                renderDriverPickupSuggestionStatus();
+                showToast('✅ تم إرسال اقتراح نقطة التجمع');
+            }
+        });
+
+        realtimeSocket.on('pickup_suggestion_decided', (payload) => {
+            const tripId = payload?.trip_id;
+            const decision = String(payload?.decision || '').toLowerCase();
+            const trip = payload?.trip;
+            if (!tripId) return;
+
+            const existing = getTripPickupSuggestion(tripId);
+            if (existing) {
+                setTripPickupSuggestion(tripId, { ...existing, status: decision });
+            }
+
+            if (decision === 'accepted' && trip) {
+                applyPickupFromTripUpdate(trip);
+            }
+
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                const card = document.getElementById('passenger-pickup-suggestion-card');
+                if (card) card.classList.add('hidden');
+                showToast(decision === 'accepted' ? '✅ تم قبول نقطة التجمع' : 'تم رفض نقطة التجمع');
+            }
+
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                renderDriverPickupSuggestionStatus();
+                showToast(decision === 'accepted' ? '✅ الراكب وافق على نقطة التجمع' : '❌ الراكب رفض نقطة التجمع');
+            }
+        });
     } catch (err) {
         console.warn('⚠️ Realtime socket init failed:', err.message || err);
         realtimeSocket = null;
         realtimeConnected = false;
     }
 }
+
+window.hidePassengerPickupSuggestion = function() {
+    const card = document.getElementById('passenger-pickup-suggestion-card');
+    if (card) card.classList.add('hidden');
+};
+
+async function passengerDecidePickupSuggestion(decision) {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) {
+        showToast('لا توجد رحلة نشطة');
+        return;
+    }
+
+    const suggestion = getTripPickupSuggestion(activePassengerTripId);
+    if (!suggestion || !suggestion.id) {
+        showToast('لا يوجد اقتراح صالح');
+        return;
+    }
+
+    const acceptBtn = document.getElementById('passenger-pickup-suggestion-accept');
+    const rejectBtn = document.getElementById('passenger-pickup-suggestion-reject');
+    if (acceptBtn) acceptBtn.disabled = true;
+    if (rejectBtn) rejectBtn.disabled = true;
+
+    try {
+        const res = await ApiService.trips.decidePickupSuggestion(activePassengerTripId, suggestion.id, decision);
+        const updatedSug = res?.data || null;
+        const updatedTrip = res?.trip || null;
+
+        if (updatedSug) {
+            setTripPickupSuggestion(activePassengerTripId, updatedSug);
+        } else {
+            setTripPickupSuggestion(activePassengerTripId, { ...suggestion, status: decision });
+        }
+
+        if (decision === 'accepted' && updatedTrip) {
+            applyPickupFromTripUpdate(updatedTrip);
+        }
+
+        const card = document.getElementById('passenger-pickup-suggestion-card');
+        if (card) card.classList.add('hidden');
+        showToast(decision === 'accepted' ? '✅ تم قبول نقطة التجمع' : 'تم رفض نقطة التجمع');
+    } catch (e) {
+        console.error('Pickup suggestion decision failed:', e);
+        showToast('❌ تعذر إرسال قرارك');
+    } finally {
+        if (acceptBtn) acceptBtn.disabled = false;
+        if (rejectBtn) rejectBtn.disabled = false;
+    }
+}
+
+window.passengerAcceptPickupSuggestion = function() {
+    passengerDecidePickupSuggestion('accepted');
+};
+
+window.passengerRejectPickupSuggestion = function() {
+    passengerDecidePickupSuggestion('rejected');
+};
+
+window.driverFetchPickupHubsForSuggestion = async function() {
+    if (currentUserRole !== 'driver') {
+        showToast('هذه الميزة للسائق فقط');
+        return;
+    }
+    if (!activeDriverTripId) {
+        showToast('لا توجد رحلة نشطة');
+        return;
+    }
+
+    const selectEl = document.getElementById('driver-pickup-hub-select');
+    if (!selectEl) return;
+
+    const base = passengerPickup && Number.isFinite(Number(passengerPickup.lat)) && Number.isFinite(Number(passengerPickup.lng))
+        ? { lat: Number(passengerPickup.lat), lng: Number(passengerPickup.lng) }
+        : (currentIncomingTrip && Number.isFinite(Number(currentIncomingTrip.pickup_lat)) && Number.isFinite(Number(currentIncomingTrip.pickup_lng))
+            ? { lat: Number(currentIncomingTrip.pickup_lat), lng: Number(currentIncomingTrip.pickup_lng) }
+            : null);
+
+    if (!base) {
+        showToast('❌ لا توجد إحداثيات لموقع الراكب');
+        return;
+    }
+
+    try {
+        selectEl.innerHTML = '<option value="">جاري التحميل...</option>';
+        const res = await ApiService.pickupHubs.suggest(base.lat, base.lng, 8);
+        const hubs = Array.isArray(res?.data) ? res.data : [];
+        if (!hubs.length) {
+            selectEl.innerHTML = '<option value="">لا توجد نقاط قريبة</option>';
+            return;
+        }
+        selectEl.innerHTML = hubs
+            .map((h) => {
+                const id = h.id;
+                const title = h.title || 'نقطة تجمع';
+                const km = h.distance_km !== undefined && h.distance_km !== null ? Number(h.distance_km) : null;
+                const label = Number.isFinite(km) ? `${title} • ${(km).toFixed(1)} كم` : title;
+                return `<option value="${String(id)}">${escapeHtml(label)}</option>`;
+            })
+            .join('');
+        showToast('✅ تم تحميل نقاط التجمع');
+    } catch (e) {
+        console.error('Fetch pickup hubs failed:', e);
+        selectEl.innerHTML = '<option value="">تعذر تحميل النقاط</option>';
+        showToast('❌ تعذر تحميل نقاط التجمع');
+    }
+};
+
+window.driverSendPickupSuggestion = async function() {
+    if (currentUserRole !== 'driver') {
+        showToast('هذه الميزة للسائق فقط');
+        return;
+    }
+    if (!activeDriverTripId) {
+        showToast('لا توجد رحلة نشطة');
+        return;
+    }
+
+    const btn = document.getElementById('driver-pickup-suggest-btn');
+    const selectEl = document.getElementById('driver-pickup-hub-select');
+    if (!btn || !selectEl) return;
+
+    const hubId = selectEl.value ? Number(selectEl.value) : null;
+    if (!Number.isFinite(hubId) || hubId <= 0) {
+        showToast('اختر نقطة تجمع أولاً');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.classList.add('opacity-70', 'cursor-not-allowed');
+
+    try {
+        const res = await ApiService.trips.createPickupSuggestion(activeDriverTripId, { hub_id: hubId });
+        const suggestion = res?.data || null;
+        if (suggestion) {
+            setTripPickupSuggestion(activeDriverTripId, suggestion);
+            renderDriverPickupSuggestionStatus();
+        }
+        showToast('✅ تم إرسال الاقتراح للراكب');
+    } catch (e) {
+        console.error('Send pickup suggestion failed:', e);
+        showToast('❌ تعذر إرسال الاقتراح');
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-70', 'cursor-not-allowed');
+    }
+};
 
 window.driverEtaReasonChanged = function() {
     const reasonEl = document.getElementById('driver-eta-reason');
@@ -3394,6 +3721,7 @@ window.driverAcceptRequest = async function() {
         if (activeDriverTripId) {
             subscribeTripRealtime(activeDriverTripId);
             loadTripEtaMeta(activeDriverTripId);
+            loadTripPickupSuggestions(activeDriverTripId);
         }
 
         const waiting = document.getElementById('driver-status-waiting');
@@ -3881,6 +4209,7 @@ async function handlePassengerAssignedTrip(trip) {
     if (activePassengerTripId) {
         subscribeTripRealtime(activePassengerTripId);
         loadTripEtaMeta(activePassengerTripId);
+        loadTripPickupSuggestions(activePassengerTripId);
         passengerRealtimeActive = true;
         passengerLastTripStatus = 'assigned';
         passengerTripCenteredOnce = false;

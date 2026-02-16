@@ -1232,6 +1232,29 @@
                         </div>
                     </div>
 
+                    <!-- Pickup Suggestion (Passenger decision) -->
+                    <div id="passenger-pickup-suggestion-card" class="hidden mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="text-xs text-amber-700 font-extrabold">📍 اقتراح نقطة تجمع من السائق</p>
+                                <p class="text-sm text-gray-800 font-bold mt-1" id="passenger-pickup-suggestion-title">--</p>
+                                <p class="text-[11px] text-gray-600 mt-1" id="passenger-pickup-suggestion-meta"></p>
+                            </div>
+                            <button type="button" class="text-amber-700/70 hover:text-amber-800" onclick="hidePassengerPickupSuggestion()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 mt-4">
+                            <button id="passenger-pickup-suggestion-reject" type="button" onclick="passengerRejectPickupSuggestion()" class="py-3 rounded-xl bg-white text-red-600 font-extrabold border border-red-200 hover:bg-red-50 transition-colors">
+                                رفض
+                            </button>
+                            <button id="passenger-pickup-suggestion-accept" type="button" onclick="passengerAcceptPickupSuggestion()" class="py-3 rounded-xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-700 transition-colors">
+                                قبول
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-3" id="passenger-pickup-suggestion-status"></p>
+                    </div>
+
                     <!-- Action Buttons -->
                     <div class="grid grid-cols-2 gap-3 mb-4">
                         <button onclick="callDriver()" class="bg-green-500 text-white py-3 sm:py-3.5 rounded-xl font-bold hover:bg-green-600 transition-all shadow-lg shadow-green-200 hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
@@ -2019,6 +2042,24 @@
                  <div class="flex gap-4 mb-6">
                      <button onclick="driverOpenNavigation()" class="flex-1 py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold">الملاحة</button>
                      <button onclick="driverCallPassenger()" class="flex-1 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold">اتصال</button>
+                 </div>
+
+                 <!-- Pickup Suggestion (Driver) -->
+                 <div class="mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                     <div class="flex items-center justify-between mb-3">
+                         <p class="text-sm font-extrabold text-gray-800">📍 اقتراح نقطة تجمع</p>
+                         <button type="button" onclick="driverFetchPickupHubsForSuggestion()" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-700">
+                             جلب نقاط قريبة
+                         </button>
+                     </div>
+                     <label class="block text-[11px] font-bold text-gray-500 mb-1">اختر نقطة تجمع قريبة من الراكب</label>
+                     <select id="driver-pickup-hub-select" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none focus:ring-2 ring-indigo-500/30">
+                         <option value="">(اضغط "جلب نقاط قريبة")</option>
+                     </select>
+                     <button id="driver-pickup-suggest-btn" type="button" onclick="driverSendPickupSuggestion()" class="mt-4 w-full py-3 rounded-xl bg-indigo-600 text-white font-extrabold hover:bg-indigo-700 transition-colors">
+                         إرسال الاقتراح للراكب
+                     </button>
+                     <p class="text-[11px] text-gray-500 mt-2" id="driver-pickup-suggestion-current"></p>
                  </div>
 
                  <!-- ETA Update (Driver) -->
