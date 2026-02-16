@@ -8,6 +8,16 @@ const http = require('http');
 const { Server: SocketIOServer } = require('socket.io');
 require('dotenv').config();
 
+const {
+    looksLikeBcryptHash,
+    hashPassword,
+    verifyPassword,
+    signAccessToken,
+    authMiddleware,
+    requireAuth,
+    requireRole
+} = require('./auth');
+
 // Import driver sync system
 const driverSync = require('./driver-sync-system');
 
@@ -195,6 +205,9 @@ app.use(express.json());
 app.use(express.static('.'));
 app.use('/uploads', express.static(uploadsDir));
 
+// Attach decoded JWT (if present) to req.auth for all routes (including non-/api aliases)
+app.use(authMiddleware);
+
 const DEFAULT_ADMIN_USERS = [
     {
         phone: '0555678901',
@@ -215,13 +228,14 @@ const DEFAULT_ADMIN_USERS = [
 async function ensureDefaultAdmins() {
     try {
         for (const admin of DEFAULT_ADMIN_USERS) {
-            const existing = await pool.query('SELECT id FROM users WHERE email = $1', [admin.email]);
+            const existing = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1', [String(admin.email).trim().toLowerCase()]);
             if (existing.rows.length > 0) continue;
 
+            const hashed = await hashPassword(admin.password);
             await pool.query(
                 `INSERT INTO users (phone, name, email, password, role)
                  VALUES ($1, $2, $3, $4, $5)`,
-                [admin.phone, admin.name, admin.email, admin.password, admin.role]
+                [admin.phone, admin.name, String(admin.email).trim().toLowerCase(), hashed, admin.role]
             );
         }
         console.log('✅ Default admin users ensured');
@@ -253,6 +267,35 @@ async function ensureOffersTable() {
         console.log('✅ Offers table ensured');
     } catch (err) {
         console.error('❌ Failed to ensure offers table:', err.message);
+    }
+}
+
+async function ensureWalletTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS wallet_transactions (
+                id BIGSERIAL PRIMARY KEY,
+                owner_type VARCHAR(10) NOT NULL,
+                owner_id INTEGER NOT NULL,
+                amount DECIMAL(12, 2) NOT NULL,
+                currency VARCHAR(8) NOT NULL DEFAULT 'SAR',
+                reason TEXT,
+                reference_type VARCHAR(40),
+                reference_id VARCHAR(80),
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by_role VARCHAR(20),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_wallet_tx_owner_created
+            ON wallet_transactions(owner_type, owner_id, created_at DESC);
+        `);
+
+        console.log('✅ Wallet tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure wallet tables:', err.message);
     }
 }
 
@@ -592,9 +635,20 @@ app.get('/api/offers/validate', async (req, res) => {
 // ==================== TRIPS ENDPOINTS ====================
 
 // Get all trips with filtering
-app.get('/api/trips', async (req, res) => {
+app.get('/api/trips', requireAuth, async (req, res) => {
     try {
         const { status, user_id, source, limit = 50, offset = 0 } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+
+        const effectiveUserId = authRole === 'passenger' ? authUserId : user_id;
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : null;
+
+        if (authRole === 'driver' && !effectiveDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
         
         let query = 'SELECT * FROM trips WHERE 1=1';
         const params = [];
@@ -606,10 +660,16 @@ app.get('/api/trips', async (req, res) => {
             params.push(status);
         }
         
-        if (user_id) {
+        if (effectiveUserId) {
             paramCount++;
             query += ` AND user_id = $${paramCount}`;
-            params.push(user_id);
+            params.push(effectiveUserId);
+        }
+
+        if (effectiveDriverId) {
+            paramCount++;
+            query += ` AND driver_id = $${paramCount}`;
+            params.push(effectiveDriverId);
         }
 
         if (source && source !== 'all') {
@@ -641,10 +701,16 @@ app.get('/api/trips', async (req, res) => {
             countParams.push(status);
         }
         
-        if (user_id) {
+        if (effectiveUserId) {
             countParamIndex++;
             countQuery += ` AND user_id = $${countParamIndex}`;
-            countParams.push(user_id);
+            countParams.push(effectiveUserId);
+        }
+
+        if (effectiveDriverId) {
+            countParamIndex++;
+            countQuery += ` AND driver_id = $${countParamIndex}`;
+            countParams.push(effectiveDriverId);
         }
 
         if (source && source !== 'all') {
@@ -670,9 +736,20 @@ app.get('/api/trips', async (req, res) => {
 });
 
 // Get completed trips
-app.get('/api/trips/completed', async (req, res) => {
+app.get('/api/trips/completed', requireAuth, async (req, res) => {
     try {
         const { user_id, source, limit = 50, offset = 0 } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+
+        const effectiveUserId = authRole === 'passenger' ? authUserId : user_id;
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : null;
+
+        if (authRole === 'driver' && !effectiveDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
         
         let query = `
             SELECT * FROM trips 
@@ -680,9 +757,14 @@ app.get('/api/trips/completed', async (req, res) => {
         `;
         const params = [];
         
-        if (user_id) {
+        if (effectiveUserId) {
             query += ' AND user_id = $1';
-            params.push(user_id);
+            params.push(effectiveUserId);
+        }
+
+        if (effectiveDriverId) {
+            query += ` AND driver_id = $${params.length + 1}`;
+            params.push(effectiveDriverId);
         }
 
         if (source && source !== 'all') {
@@ -707,7 +789,7 @@ app.get('/api/trips/completed', async (req, res) => {
 });
 
 // Get live trip snapshot (trip + driver's last known location)
-app.get('/api/trips/:id/live', async (req, res) => {
+app.get('/api/trips/:id/live', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -730,7 +812,22 @@ app.get('/api/trips/:id/live', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Trip not found' });
         }
 
-        res.json({ success: true, data: result.rows[0] });
+        const trip = result.rows[0];
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+
+        if (authRole === 'passenger' && String(trip.user_id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(trip.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        res.json({ success: true, data: trip });
     } catch (err) {
         console.error('Error fetching live trip:', err);
         res.status(500).json({ success: false, error: err.message });
@@ -738,9 +835,20 @@ app.get('/api/trips/:id/live', async (req, res) => {
 });
 
 // Get cancelled trips
-app.get('/api/trips/cancelled', async (req, res) => {
+app.get('/api/trips/cancelled', requireAuth, async (req, res) => {
     try {
         const { user_id, source, limit = 50, offset = 0 } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+
+        const effectiveUserId = authRole === 'passenger' ? authUserId : user_id;
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : null;
+
+        if (authRole === 'driver' && !effectiveDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
         
         let query = `
             SELECT * FROM trips 
@@ -748,9 +856,14 @@ app.get('/api/trips/cancelled', async (req, res) => {
         `;
         const params = [];
         
-        if (user_id) {
+        if (effectiveUserId) {
             query += ' AND user_id = $1';
-            params.push(user_id);
+            params.push(effectiveUserId);
+        }
+
+        if (effectiveDriverId) {
+            query += ` AND driver_id = $${params.length + 1}`;
+            params.push(effectiveDriverId);
         }
 
         if (source && source !== 'all') {
@@ -775,7 +888,7 @@ app.get('/api/trips/cancelled', async (req, res) => {
 });
 
 // Get single trip by ID
-app.get('/api/trips/:id', async (req, res) => {
+app.get('/api/trips/:id', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query('SELECT * FROM trips WHERE id = $1', [id]);
@@ -784,10 +897,22 @@ app.get('/api/trips/:id', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Trip not found' });
         }
         
-        res.json({
-            success: true,
-            data: result.rows[0]
-        });
+        const trip = result.rows[0];
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+
+        if (authRole === 'passenger' && String(trip.user_id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(trip.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        res.json({ success: true, data: trip });
     } catch (err) {
         console.error('Error fetching trip:', err);
         res.status(500).json({ success: false, error: err.message });
@@ -795,7 +920,7 @@ app.get('/api/trips/:id', async (req, res) => {
 });
 
 // Create new trip
-app.post('/api/trips', async (req, res) => {
+app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const {
             id,
@@ -823,7 +948,17 @@ app.post('/api/trips', async (req, res) => {
             source = 'passenger_app'
         } = req.body;
 
-        const effectiveRiderId = rider_id || user_id;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+
+        if (authRole === 'passenger') {
+            // Prevent creating trips on behalf of another user
+            if (user_id && String(user_id) !== String(authUserId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        const effectiveRiderId = authRole === 'passenger' ? authUserId : (rider_id || user_id);
         const effectiveCost = price !== undefined && price !== null ? price : cost;
 
         // Validation: Require core trip fields
@@ -909,7 +1044,7 @@ app.post('/api/trips', async (req, res) => {
         if (createdTrip.status === 'pending' && !createdTrip.driver_id) {
             try {
                 // الحصول على معلومات الراكب
-                const userResult = await pool.query('SELECT name, phone FROM users WHERE id = $1', [user_id]);
+                const userResult = await pool.query('SELECT name, phone FROM users WHERE id = $1', [effectiveRiderId]);
                 const user = userResult.rows[0];
                 
                 const requestId = `REQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -927,7 +1062,7 @@ app.post('/api/trips', async (req, res) => {
                     VALUES ($1, 'passenger_app', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'waiting', $19)
                 `, [
                     tripId,
-                    requestId, user_id, user?.name || 'راكب', user?.phone || '',
+                    requestId, effectiveRiderId, user?.name || 'راكب', user?.phone || '',
                     pickup_location, dropoff_location,
                     pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
                     car_type, cost, distance, duration,
@@ -977,10 +1112,22 @@ app.post('/api/trips', async (req, res) => {
 });
 
 // Update pickup location for a trip (GPS coordinates are the source of truth)
-app.patch('/api/trips/:id/pickup', async (req, res) => {
+app.patch('/api/trips/:id/pickup', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const { id } = req.params;
         const { pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp, source } = req.body || {};
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        if (authRole === 'passenger') {
+            const ownerCheck = await pool.query('SELECT user_id FROM trips WHERE id = $1 LIMIT 1', [id]);
+            if (ownerCheck.rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Trip not found' });
+            }
+            if (String(ownerCheck.rows[0].user_id) !== String(authUserId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
 
         const pickupLat = pickup_lat !== undefined && pickup_lat !== null ? Number(pickup_lat) : null;
         const pickupLng = pickup_lng !== undefined && pickup_lng !== null ? Number(pickup_lng) : null;
@@ -1051,7 +1198,7 @@ app.patch('/api/trips/:id/pickup', async (req, res) => {
 });
 
 // Update trip status
-app.patch('/api/trips/:id/status', async (req, res) => {
+app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const {
@@ -1068,6 +1215,10 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             duration,
             payment_method
         } = req.body;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
 
         // Fetch current status for state-machine transition checks + event dedupe
         // Also load trip coords/timestamps for completion calculations.
@@ -1106,6 +1257,32 @@ app.patch('/api/trips/:id/status', async (req, res) => {
             beforeTripStatus = null;
             beforeStatus = null;
             beforeTripRow = null;
+        }
+
+        if (!beforeTripRow) {
+            return res.status(404).json({ success: false, error: 'Trip not found' });
+        }
+
+        if (authRole === 'passenger') {
+            if (String(beforeTripRow.user_id) !== String(authUserId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+            if (status !== 'cancelled') {
+                return res.status(403).json({ success: false, error: 'Passengers can only cancel their trips' });
+            }
+        }
+
+        if (authRole === 'driver') {
+            if (!authDriverId) {
+                return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            }
+            if (String(beforeTripRow.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+            const allowed = new Set(['assigned', 'ongoing', 'completed', 'cancelled']);
+            if (!allowed.has(String(status || '').toLowerCase())) {
+                return res.status(403).json({ success: false, error: 'Drivers cannot set this status' });
+            }
         }
 
         const effectivePassengerRating = passenger_rating !== undefined ? passenger_rating : rating;
@@ -1716,14 +1893,17 @@ async function endTripHandler(req, res) {
     }
 }
 
-app.post('/trips/end', endTripHandler);
-app.post('/api/trips/end', endTripHandler);
+app.post('/trips/end', requireRole('driver', 'admin'), endTripHandler);
+app.post('/api/trips/end', requireRole('driver', 'admin'), endTripHandler);
 
 // Rate driver (Passenger -> Driver)
 // Required by rider completion flow: POST /rate-driver { trip_id, rating, comment }
 async function rateDriverHandler(req, res) {
     try {
         const { trip_id, rating, comment } = req.body || {};
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
 
         const tripId = trip_id ? String(trip_id) : '';
         const normalizedRating = Number(rating);
@@ -1736,8 +1916,16 @@ async function rateDriverHandler(req, res) {
             return res.status(400).json({ success: false, error: 'rating must be between 1 and 5' });
         }
 
-        const before = await pool.query('SELECT trip_status FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const before = await pool.query('SELECT trip_status, user_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
         const beforeTripStatus = before.rows.length ? (before.rows[0].trip_status || null) : null;
+
+        if (before.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Trip not found' });
+        }
+
+        if (authRole === 'passenger' && String(before.rows[0].user_id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
 
         const result = await pool.query(
             `UPDATE trips
@@ -1774,8 +1962,8 @@ async function rateDriverHandler(req, res) {
     }
 }
 
-app.post('/rate-driver', rateDriverHandler);
-app.post('/api/rate-driver', rateDriverHandler);
+app.post('/rate-driver', requireRole('passenger', 'admin'), rateDriverHandler);
+app.post('/api/rate-driver', requireRole('passenger', 'admin'), rateDriverHandler);
 
 // Rider trip history
 async function riderTripsHandler(req, res) {
@@ -1783,6 +1971,16 @@ async function riderTripsHandler(req, res) {
         const riderId = req.query.rider_id || req.query.user_id;
         if (!riderId) {
             return res.status(400).json({ success: false, error: 'rider_id is required' });
+        }
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+
+        if (authRole === 'passenger' && String(riderId) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (authRole === 'driver') {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
         }
 
         const result = await pool.query(
@@ -1812,6 +2010,19 @@ async function driverTripsHandler(req, res) {
             return res.status(400).json({ success: false, error: 'driver_id is required' });
         }
 
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(driverId) !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+        if (authRole === 'passenger') {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
         const result = await pool.query(
             `SELECT
                 t.*,
@@ -1832,15 +2043,23 @@ async function driverTripsHandler(req, res) {
     }
 }
 
-app.get('/rider/trips', riderTripsHandler);
-app.get('/api/rider/trips', riderTripsHandler);
-app.get('/driver/trips', driverTripsHandler);
-app.get('/api/driver/trips', driverTripsHandler);
+app.get('/rider/trips', requireAuth, riderTripsHandler);
+app.get('/api/rider/trips', requireAuth, riderTripsHandler);
+app.get('/driver/trips', requireAuth, driverTripsHandler);
+app.get('/api/driver/trips', requireAuth, driverTripsHandler);
 
 // Get next pending trip (optionally by car type)
-app.get('/api/trips/pending/next', async (req, res) => {
+app.get('/api/trips/pending/next', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { car_type, driver_id, lat, lng, limit } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : driver_id;
+        if (authRole === 'driver' && !effectiveDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
 
         const requestedLimit = Number(limit);
         const listLimit = Number.isFinite(requestedLimit)
@@ -1857,7 +2076,7 @@ app.get('/api/trips/pending/next', async (req, res) => {
             [PENDING_TRIP_TTL_MINUTES]
         );
 
-        if (driver_id) {
+        if (effectiveDriverId) {
             const assignedResult = await pool.query(
                 `SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone
                  FROM trips t
@@ -1869,7 +2088,7 @@ app.get('/api/trips/pending/next', async (req, res) => {
                    AND t.created_at >= NOW() - ($2 * INTERVAL '1 minute')
                  ORDER BY t.created_at DESC
                  LIMIT 1`,
-                [driver_id, ASSIGNED_TRIP_TTL_MINUTES]
+                [effectiveDriverId, ASSIGNED_TRIP_TTL_MINUTES]
             );
 
             if (assignedResult.rows.length > 0) {
@@ -1895,12 +2114,12 @@ app.get('/api/trips/pending/next', async (req, res) => {
         if (Number.isFinite(latVal) && Number.isFinite(lngVal)) {
             driverLat = latVal;
             driverLng = lngVal;
-        } else if (driver_id) {
+        } else if (effectiveDriverId) {
             const driverResult = await pool.query(
                 `SELECT last_lat, last_lng
                  FROM drivers
                  WHERE id = $1`,
-                [driver_id]
+                [effectiveDriverId]
             );
             if (driverResult.rows.length > 0) {
                 const row = driverResult.rows[0];
@@ -2005,13 +2224,25 @@ app.get('/api/trips/pending/next', async (req, res) => {
 });
 
 // Assign driver to trip
-app.patch('/api/trips/:id/assign', async (req, res) => {
+app.patch('/api/trips/:id/assign', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { id } = req.params;
         const { driver_id, driver_name } = req.body;
 
-        if (!driver_id) {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        if (authRole === 'driver' && !authDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
+
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : driver_id;
+        if (!effectiveDriverId) {
             return res.status(400).json({ success: false, error: 'driver_id is required' });
+        }
+
+        if (authRole === 'driver' && String(driver_id || effectiveDriverId) !== String(effectiveDriverId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
         }
 
         const result = await pool.query(
@@ -2019,7 +2250,7 @@ app.patch('/api/trips/:id/assign', async (req, res) => {
              SET driver_id = $1, driver_name = $2, status = 'assigned', updated_at = CURRENT_TIMESTAMP
              WHERE id = $3 AND (status = 'pending' OR (status = 'assigned' AND driver_id = $1))
              RETURNING *`,
-            [driver_id, driver_name || null, id]
+            [effectiveDriverId, driver_name || null, id]
         );
 
         if (result.rows.length === 0) {
@@ -2034,18 +2265,34 @@ app.patch('/api/trips/:id/assign', async (req, res) => {
 });
 
 // Reject trip (driver rejects)
-app.patch('/api/trips/:id/reject', async (req, res) => {
+app.patch('/api/trips/:id/reject', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await pool.query(
-            `UPDATE trips
-             SET status = 'pending', driver_id = NULL, driver_name = NULL,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND status IN ('pending', 'assigned')
-             RETURNING *`,
-            [id]
-        );
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        if (authRole === 'driver' && !authDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
+
+        const result = authRole === 'driver'
+            ? await pool.query(
+                `UPDATE trips
+                 SET status = 'pending', driver_id = NULL, driver_name = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND status IN ('pending', 'assigned') AND driver_id = $2
+                 RETURNING *`,
+                [id, authDriverId]
+            )
+            : await pool.query(
+                `UPDATE trips
+                 SET status = 'pending', driver_id = NULL, driver_name = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND status IN ('pending', 'assigned')
+                 RETURNING *`,
+                [id]
+            );
 
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, error: 'Trip not found or not pending' });
@@ -2059,16 +2306,33 @@ app.patch('/api/trips/:id/reject', async (req, res) => {
 });
 
 // Get trip statistics
-app.get('/api/trips/stats/summary', async (req, res) => {
+app.get('/api/trips/stats/summary', requireAuth, async (req, res) => {
     try {
         const { user_id, source } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+
+        const effectiveUserId = authRole === 'passenger' ? authUserId : user_id;
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : null;
+
+        if (authRole === 'driver' && !effectiveDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
         
         let whereClause = '';
         const params = [];
         
-        if (user_id) {
+        if (effectiveUserId) {
             whereClause = 'WHERE user_id = $1';
-            params.push(user_id);
+            params.push(effectiveUserId);
+        }
+
+        if (effectiveDriverId) {
+            const conjunction = whereClause ? ' AND' : 'WHERE';
+            params.push(effectiveDriverId);
+            whereClause += `${conjunction} driver_id = $${params.length}`;
         }
 
         if (source && source !== 'all') {
@@ -2100,7 +2364,7 @@ app.get('/api/trips/stats/summary', async (req, res) => {
 });
 
 // Get admin dashboard statistics
-app.get('/api/admin/dashboard/stats', async (req, res) => {
+app.get('/api/admin/dashboard/stats', requireRole('admin'), async (req, res) => {
     try {
         const now = new Date();
         const monthKey = monthKeyFromDate(now);
@@ -2203,7 +2467,7 @@ app.get('/api/admin/dashboard/stats', async (req, res) => {
 // ==================== DRIVERS ENDPOINTS ====================
 
 // Get all available drivers
-app.get('/api/drivers', async (req, res) => {
+app.get('/api/drivers', requireAuth, async (req, res) => {
     try {
         // Add no-cache headers to always get fresh data
         res.set({
@@ -2238,10 +2502,22 @@ app.get('/api/drivers', async (req, res) => {
 });
 
 // Update driver live location
-app.patch('/api/drivers/:id/location', async (req, res) => {
+app.patch('/api/drivers/:id/location', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { id } = req.params;
         const { lat, lng } = req.body;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        if (authRole === 'driver') {
+            if (!authDriverId) {
+                return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            }
+            if (String(id) !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
 
         const latitude = lat !== undefined && lat !== null ? Number(lat) : null;
         const longitude = lng !== undefined && lng !== null ? Number(lng) : null;
@@ -2270,7 +2546,7 @@ app.patch('/api/drivers/:id/location', async (req, res) => {
 });
 
 // Get driver last known location
-app.get('/api/drivers/:id/location', async (req, res) => {
+app.get('/api/drivers/:id/location', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query(
@@ -2292,7 +2568,7 @@ app.get('/api/drivers/:id/location', async (req, res) => {
 });
 
 // Get nearest driver by coordinates
-app.get('/api/drivers/nearest', async (req, res) => {
+app.get('/api/drivers/nearest', requireAuth, async (req, res) => {
     try {
         const { lat, lng, car_type } = req.query;
         const latitude = lat !== undefined && lat !== null ? Number(lat) : null;
@@ -2335,7 +2611,7 @@ app.get('/api/drivers/nearest', async (req, res) => {
 });
 
 // Resolve driver profile by email or phone
-app.get('/api/drivers/resolve', async (req, res) => {
+app.get('/api/drivers/resolve', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { email, phone, auto_create } = req.query;
 
@@ -2439,6 +2715,8 @@ app.post('/api/drivers/register', upload.fields([
         const id_card_photo = `/uploads/${req.files.id_card_photo[0].filename}`;
         const drivers_license = `/uploads/${req.files.drivers_license[0].filename}`;
         const vehicle_license = `/uploads/${req.files.vehicle_license[0].filename}`;
+
+        const hashedPassword = await hashPassword(password);
         
         // Insert new driver
         const result = await pool.query(`
@@ -2450,7 +2728,7 @@ app.post('/api/drivers/register', upload.fields([
             RETURNING id, name, phone, email, car_type, car_plate, 
                       id_card_photo, drivers_license, vehicle_license,
                       approval_status, created_at
-        `, [name, phone, email, password, car_type || 'economy', car_plate || '',
+        `, [name, phone, email, hashedPassword, car_type || 'economy', car_plate || '',
             id_card_photo, drivers_license, vehicle_license]);
         
         res.status(201).json({
@@ -2494,7 +2772,7 @@ app.get('/api/drivers/status/:phone', async (req, res) => {
 });
 
 // Get pending driver registrations (admin only)
-app.get('/api/drivers/pending', async (req, res) => {
+app.get('/api/drivers/pending', requireRole('admin'), async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT id, name, phone, email, car_type, car_plate,
@@ -2516,7 +2794,7 @@ app.get('/api/drivers/pending', async (req, res) => {
 });
 
 // Approve or reject driver registration (admin only)
-app.patch('/api/drivers/:id/approval', async (req, res) => {
+app.patch('/api/drivers/:id/approval', requireRole('admin'), async (req, res) => {
     try {
         const { id } = req.params;
         const { approval_status, rejection_reason, approved_by } = req.body;
@@ -2565,12 +2843,17 @@ app.patch('/api/drivers/:id/approval', async (req, res) => {
         // Also create/update user account if approved
         if (approval_status === 'approved') {
             const driver = result.rows[0];
+
+            const passwordToStore = looksLikeBcryptHash(driver.password)
+                ? driver.password
+                : await hashPassword(driver.password || '12345678');
+
             await pool.query(`
                 INSERT INTO users (phone, name, email, password, role)
                 VALUES ($1, $2, $3, $4, 'driver')
                 ON CONFLICT (phone) DO UPDATE 
                 SET role = 'driver', email = $3, name = $2
-            `, [driver.phone, driver.name, driver.email, driver.password]);
+            `, [driver.phone, driver.name, driver.email, passwordToStore]);
         }
         
         res.json({
@@ -2585,9 +2868,20 @@ app.patch('/api/drivers/:id/approval', async (req, res) => {
 });
 
 // Get driver statistics (earnings, trips, etc.)
-app.get('/api/drivers/:id/stats', async (req, res) => {
+app.get('/api/drivers/:id/stats', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { id } = req.params;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) {
+                return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            }
+            if (String(id) !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
         
         // Add no-cache headers to ensure fresh data
         res.set({
@@ -2671,10 +2965,21 @@ app.get('/api/drivers/:id/stats', async (req, res) => {
 });
 
 // Get driver earnings history from driver_earnings table
-app.get('/api/drivers/:id/earnings', async (req, res) => {
+app.get('/api/drivers/:id/earnings', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { id } = req.params;
         const { days = 30 } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) {
+                return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            }
+            if (String(id) !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
         
         // Get earnings history
         const earningsResult = await pool.query(`
@@ -2703,7 +3008,7 @@ app.get('/api/drivers/:id/earnings', async (req, res) => {
 });
 
 // Update driver earnings (Admin)
-app.put('/api/drivers/:id/earnings/update', async (req, res) => {
+app.put('/api/drivers/:id/earnings/update', requireRole('admin'), async (req, res) => {
     try {
         const { id } = req.params;
         const { today_trips_count, today_earnings, total_trips, total_earnings, balance } = req.body;
@@ -2791,7 +3096,7 @@ app.put('/api/drivers/:id/earnings/update', async (req, res) => {
 });
 
 // Update driver profile (comprehensive update with sync)
-app.put('/api/drivers/:id/update', async (req, res) => {
+app.put('/api/drivers/:id/update', requireRole('admin'), async (req, res) => {
     try {
         const { id } = req.params;
         const updates = req.body;
@@ -2867,7 +3172,7 @@ app.post('/api/drivers/sync-all', async (req, res) => {
 // ==================== USERS ENDPOINTS ====================
 
 // Get users with optional filtering
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', requireRole('admin'), async (req, res) => {
     try {
         const { role, limit = 50, offset = 0 } = req.query;
 
@@ -2919,9 +3224,15 @@ app.get('/api/users', async (req, res) => {
 });
 
 // Get single user by ID
-app.get('/api/users/:id', async (req, res) => {
+app.get('/api/users/:id', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        if (authRole !== 'admin' && String(id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
 
         const result = await pool.query(
             'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, driver_id FROM users WHERE id = $1',
@@ -2995,10 +3306,16 @@ app.get('/api/users/:id', async (req, res) => {
 });
 
 // Update user by ID
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const { phone, name, email, password, car_type, car_plate, balance, points, rating, status, avatar } = req.body;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        if (authRole !== 'admin' && String(id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
 
         // Check if user exists
         const existing = await pool.query(
@@ -3079,9 +3396,10 @@ app.put('/api/users/:id', async (req, res) => {
         }
 
         if (password !== undefined && String(password).trim()) {
+            const hashed = await hashPassword(String(password).trim());
             paramCount++;
             updates.push(`password = $${paramCount}`);
-            params.push(String(password).trim());
+            params.push(hashed);
         }
 
         if (updates.length === 0) {
@@ -3118,7 +3436,7 @@ app.put('/api/users/:id', async (req, res) => {
 // ==================== PASSENGERS ENDPOINTS ====================
 
 // Get all passengers with filtering and search
-app.get('/api/passengers', async (req, res) => {
+app.get('/api/passengers', requireRole('admin'), async (req, res) => {
     try {
         const { search, limit = 50, offset = 0 } = req.query;
 
@@ -3170,9 +3488,18 @@ app.get('/api/passengers', async (req, res) => {
 });
 
 // Get single passenger by ID
-app.get('/api/passengers/:id', async (req, res) => {
+app.get('/api/passengers/:id', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        if (authRole === 'driver') {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (authRole !== 'admin' && String(id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
 
         const result = await pool.query(
             'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at FROM users WHERE id = $1 AND role = $2',
@@ -3214,7 +3541,7 @@ app.get('/api/passengers/:id', async (req, res) => {
 });
 
 // Create new passenger
-app.post('/api/passengers', async (req, res) => {
+app.post('/api/passengers', requireRole('admin'), async (req, res) => {
     try {
         const { phone, name, email, password } = req.body;
 
@@ -3230,9 +3557,10 @@ app.post('/api/passengers', async (req, res) => {
         const normalizedEmail = email && String(email).trim() 
             ? String(email).trim().toLowerCase() 
             : `passenger_${normalizedPhone.replace(/\D/g, '') || Date.now()}@ubar.sa`;
-        const normalizedPassword = password && String(password).trim() 
-            ? String(password).trim() 
+        const normalizedPassword = password && String(password).trim()
+            ? String(password).trim()
             : '12345678';
+        const hashedPassword = await hashPassword(normalizedPassword);
 
         // Check if phone already exists
         const existingPhone = await pool.query(
@@ -3264,7 +3592,7 @@ app.post('/api/passengers', async (req, res) => {
             `INSERT INTO users (phone, name, email, password, role, updated_at)
              VALUES ($1, $2, $3, $4, 'passenger', CURRENT_TIMESTAMP)
              RETURNING id, phone, name, email, role, created_at, updated_at`,
-            [normalizedPhone, normalizedName, normalizedEmail, normalizedPassword]
+            [normalizedPhone, normalizedName, normalizedEmail, hashedPassword]
         );
 
         res.status(201).json({
@@ -3278,10 +3606,19 @@ app.post('/api/passengers', async (req, res) => {
 });
 
 // Update passenger
-app.put('/api/passengers/:id', async (req, res) => {
+app.put('/api/passengers/:id', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const { phone, name, email, password, car_type, car_plate, balance, points, rating, status, avatar } = req.body;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        if (authRole === 'driver') {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (authRole !== 'admin' && String(id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
 
         // Check if passenger exists
         const existing = await pool.query(
@@ -3362,9 +3699,10 @@ app.put('/api/passengers/:id', async (req, res) => {
         }
 
         if (password !== undefined && String(password).trim()) {
+            const hashed = await hashPassword(String(password).trim());
             paramCount++;
             updates.push(`password = $${paramCount}`);
-            params.push(String(password).trim());
+            params.push(hashed);
         }
 
         if (updates.length === 0) {
@@ -3399,7 +3737,7 @@ app.put('/api/passengers/:id', async (req, res) => {
 });
 
 // Delete passenger
-app.delete('/api/passengers/:id', async (req, res) => {
+app.delete('/api/passengers/:id', requireRole('admin'), async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -3446,10 +3784,19 @@ app.delete('/api/passengers/:id', async (req, res) => {
 });
 
 // Get passenger trips
-app.get('/api/passengers/:id/trips', async (req, res) => {
+app.get('/api/passengers/:id/trips', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const { status, limit = 50, offset = 0 } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        if (authRole === 'driver') {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (authRole !== 'admin' && String(id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
 
         // Check if passenger exists
         const passengerCheck = await pool.query(
@@ -3527,21 +3874,13 @@ app.post('/api/auth/login', async (req, res) => {
         const trimmedPassword = String(password).trim();
         const requestedRole = role ? String(role).trim().toLowerCase() : null;
         
-        // Check if user exists with email and password
+        // Load user by email and verify password (supports legacy plaintext and bcrypt hashes)
         const result = await pool.query(
-            'SELECT id, phone, name, email, role, created_at FROM users WHERE email = $1 AND password = $2',
-            [trimmedEmail, trimmedPassword]
+            'SELECT id, phone, name, email, role, password, created_at FROM users WHERE LOWER(email) = $1 LIMIT 1',
+            [trimmedEmail]
         );
         
         if (result.rows.length === 0) {
-            const emailCheck = await pool.query('SELECT id, role FROM users WHERE email = $1', [trimmedEmail]);
-            if (emailCheck.rows.length > 0) {
-                return res.status(401).json({ 
-                    success: false, 
-                    error: 'Invalid email or password' 
-                });
-            }
-
             if (requestedRole === 'passenger') {
                 const baseName = name && String(name).trim() ? String(name).trim() : 'راكب جديد';
                 const rawPhone = phone ? String(phone) : '';
@@ -3553,6 +3892,8 @@ app.post('/api/auth/login', async (req, res) => {
                     return `9${stamp}${rand}`;
                 };
 
+                const hashed = await hashPassword(trimmedPassword);
+
                 let createdUser = null;
                 for (let attempt = 0; attempt < 3; attempt++) {
                     const guestPhone = buildGuestPhone();
@@ -3561,7 +3902,7 @@ app.post('/api/auth/login', async (req, res) => {
                          VALUES ($1, $2, $3, $4, 'passenger')
                          ON CONFLICT (phone) DO NOTHING
                          RETURNING id, phone, name, email, role, created_at`,
-                        [guestPhone, baseName, trimmedEmail, trimmedPassword]
+                        [guestPhone, baseName, trimmedEmail, hashed]
                     );
                     if (insert.rows.length > 0) {
                         createdUser = insert.rows[0];
@@ -3570,29 +3911,75 @@ app.post('/api/auth/login', async (req, res) => {
                 }
 
                 if (!createdUser) {
-                    return res.status(500).json({
-                        success: false,
-                        error: 'Failed to create passenger account'
-                    });
+                    return res.status(500).json({ success: false, error: 'Failed to create passenger account' });
                 }
 
-                return res.json({
-                    success: true,
-                    data: createdUser,
-                    created: true
+                const token = signAccessToken({
+                    sub: String(createdUser.id),
+                    uid: createdUser.id,
+                    role: createdUser.role,
+                    email: createdUser.email,
+                    phone: createdUser.phone,
+                    name: createdUser.name
                 });
+
+                return res.json({ success: true, data: createdUser, token, created: true });
             }
 
-            return res.status(401).json({ 
-                success: false, 
-                error: 'Invalid email or password' 
-            });
+            return res.status(401).json({ success: false, error: 'Invalid email or password' });
         }
-        
-        res.json({
-            success: true,
-            data: result.rows[0]
-        });
+
+        const user = result.rows[0];
+        const ok = await verifyPassword(user.password, trimmedPassword);
+        if (!ok) {
+            return res.status(401).json({ success: false, error: 'Invalid email or password' });
+        }
+
+        // Upgrade legacy plaintext passwords to bcrypt on successful login
+        if (!looksLikeBcryptHash(user.password)) {
+            try {
+                const upgraded = await hashPassword(trimmedPassword);
+                await pool.query('UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [upgraded, user.id]);
+            } catch (e) {
+                // non-blocking
+            }
+        }
+
+        const safeUser = {
+            id: user.id,
+            phone: user.phone,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            created_at: user.created_at
+        };
+
+        let driverId = null;
+        if (String(user.role).toLowerCase() === 'driver') {
+            try {
+                const driverRes = await pool.query(
+                    `SELECT id FROM drivers WHERE (email IS NOT NULL AND LOWER(email) = $1) OR (phone IS NOT NULL AND phone = $2) LIMIT 1`,
+                    [String(user.email || '').toLowerCase(), String(user.phone || '').trim()]
+                );
+                driverId = driverRes.rows[0]?.id || null;
+            } catch (e) {
+                driverId = null;
+            }
+        }
+
+        const tokenClaims = {
+            sub: String(user.id),
+            uid: user.id,
+            role: user.role,
+            email: user.email,
+            phone: user.phone,
+            name: user.name,
+            ...(driverId ? { driver_id: driverId } : {})
+        };
+
+        const token = signAccessToken(tokenClaims);
+
+        res.json({ success: true, data: safeUser, token });
     } catch (err) {
         console.error('Error logging in:', err);
         res.status(500).json({ success: false, error: err.message });
@@ -3617,23 +4004,202 @@ app.post('/api/users/login', async (req, res) => {
         const phoneCandidates = normalizePhoneCandidates(phone);
 
         // Check if user exists
-        let result = await pool.query('SELECT * FROM users WHERE phone = ANY($1)', [phoneCandidates]);
+        let result = await pool.query('SELECT id, phone, name, email, role, password, created_at, updated_at FROM users WHERE phone = ANY($1) LIMIT 1', [phoneCandidates]);
         
         if (result.rows.length === 0) {
             // Create new user
+            const hashed = await hashPassword('12345678');
             result = await pool.query(`
                 INSERT INTO users (phone, name, email, password, role)
-                VALUES ($1, $2, $3, '12345678', 'passenger')
-                RETURNING *
-            `, [normalizedPhone, normalizedName, normalizedEmail]);
+                VALUES ($1, $2, $3, $4, 'passenger')
+                RETURNING id, phone, name, email, role, created_at, updated_at
+            `, [normalizedPhone, normalizedName, normalizedEmail, hashed]);
         }
+
+        const user = result.rows[0];
+
+        // Optional: upgrade legacy default password if it's still plaintext "12345678"
+        if (user && user.password && !looksLikeBcryptHash(user.password) && String(user.password) === '12345678') {
+            try {
+                const upgraded = await hashPassword('12345678');
+                await pool.query('UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [upgraded, user.id]);
+            } catch (e) {
+                // non-blocking
+            }
+        }
+
+        const token = signAccessToken({
+            sub: String(user.id),
+            uid: user.id,
+            role: user.role,
+            email: user.email,
+            phone: user.phone,
+            name: user.name
+        });
         
         res.json({
             success: true,
-            data: result.rows[0]
+            data: {
+                id: user.id,
+                phone: user.phone,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                created_at: user.created_at,
+                updated_at: user.updated_at
+            },
+            token
         });
     } catch (err) {
         console.error('Error logging in user:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Return current user from JWT
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+    try {
+        const userId = req.auth?.uid;
+        const result = await pool.query('SELECT id, phone, name, email, role, created_at, updated_at FROM users WHERE id = $1 LIMIT 1', [userId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+        res.json({ success: true, data: result.rows[0], auth: req.auth });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== WALLET (LEDGER) ENDPOINTS ====================
+
+function walletOwnerFromAuth(req) {
+    const role = String(req.auth?.role || '').toLowerCase();
+    if (role === 'passenger') {
+        return { owner_type: 'user', owner_id: req.auth?.uid };
+    }
+    if (role === 'driver') {
+        return { owner_type: 'driver', owner_id: req.auth?.driver_id };
+    }
+    return null;
+}
+
+app.get('/api/wallet/me/balance', requireAuth, async (req, res) => {
+    try {
+        const owner = walletOwnerFromAuth(req);
+        if (!owner || !owner.owner_id) {
+            return res.status(400).json({ success: false, error: 'Wallet owner not available for this role' });
+        }
+
+        const sum = await pool.query(
+            `SELECT COALESCE(SUM(amount), 0) AS balance
+             FROM wallet_transactions
+             WHERE owner_type = $1 AND owner_id = $2`,
+            [owner.owner_type, owner.owner_id]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                owner_type: owner.owner_type,
+                owner_id: owner.owner_id,
+                balance: Number(sum.rows[0]?.balance || 0)
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/wallet/me/transactions', requireAuth, async (req, res) => {
+    try {
+        const owner = walletOwnerFromAuth(req);
+        if (!owner || !owner.owner_id) {
+            return res.status(400).json({ success: false, error: 'Wallet owner not available for this role' });
+        }
+
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 100) : 50;
+        const offset = Number.isFinite(Number(req.query.offset)) ? Math.max(Number(req.query.offset), 0) : 0;
+
+        const result = await pool.query(
+            `SELECT id, owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_by_user_id, created_by_role, created_at
+             FROM wallet_transactions
+             WHERE owner_type = $1 AND owner_id = $2
+             ORDER BY created_at DESC
+             LIMIT $3 OFFSET $4`,
+            [owner.owner_type, owner.owner_id, limit, offset]
+        );
+
+        res.json({ success: true, data: result.rows, limit, offset, count: result.rows.length });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Admin creates wallet ledger entry (credit/debit)
+app.post('/api/admin/wallet/transaction', requireRole('admin'), async (req, res) => {
+    try {
+        const {
+            owner_type,
+            owner_id,
+            amount,
+            currency = 'SAR',
+            reason,
+            reference_type,
+            reference_id
+        } = req.body || {};
+
+        const normalizedOwnerType = String(owner_type || '').toLowerCase();
+        const normalizedOwnerId = Number.parseInt(owner_id, 10);
+        const normalizedAmount = Number(amount);
+
+        if (!['user', 'driver'].includes(normalizedOwnerType)) {
+            return res.status(400).json({ success: false, error: 'owner_type must be user or driver' });
+        }
+        if (!Number.isFinite(normalizedOwnerId) || normalizedOwnerId <= 0) {
+            return res.status(400).json({ success: false, error: 'owner_id is required' });
+        }
+        if (!Number.isFinite(normalizedAmount) || normalizedAmount === 0) {
+            return res.status(400).json({ success: false, error: 'amount must be a non-zero number' });
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO wallet_transactions (
+                owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_by_user_id, created_by_role
+             ) VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8, $9)
+             RETURNING *`,
+            [
+                normalizedOwnerType,
+                normalizedOwnerId,
+                normalizedAmount,
+                String(currency || 'SAR').toUpperCase(),
+                reason !== undefined && reason !== null ? String(reason) : '',
+                reference_type !== undefined && reference_type !== null ? String(reference_type) : '',
+                reference_id !== undefined && reference_id !== null ? String(reference_id) : '',
+                req.auth?.uid || null,
+                String(req.auth?.role || 'admin')
+            ]
+        );
+
+        // Update cached balances for backward compatibility
+        try {
+            if (normalizedOwnerType === 'user') {
+                await pool.query(
+                    `UPDATE users SET balance = COALESCE(balance, 0) + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                    [normalizedAmount, normalizedOwnerId]
+                );
+            }
+            if (normalizedOwnerType === 'driver') {
+                await pool.query(
+                    `UPDATE drivers SET balance = COALESCE(balance, 0) + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                    [normalizedAmount, normalizedOwnerId]
+                );
+            }
+        } catch (e) {
+            // non-blocking
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -3643,7 +4209,7 @@ app.post('/api/users/login', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 
 // Create new ride request
-app.post('/api/pending-rides', async (req, res) => {
+app.post('/api/pending-rides', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const {
             user_id,
@@ -3664,6 +4230,14 @@ app.post('/api/pending-rides', async (req, res) => {
             payment_method,
             notes
         } = req.body;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const effectiveUserId = authRole === 'passenger' ? authUserId : user_id;
+
+        if (!effectiveUserId) {
+            return res.status(400).json({ success: false, error: 'user_id is required' });
+        }
 
         if (!pickup_location || !dropoff_location) {
             return res.status(400).json({
@@ -3688,7 +4262,7 @@ app.post('/api/pending-rides', async (req, res) => {
 
         console.log('📥 Pending ride create received pickup coords:', {
             request_id,
-            user_id,
+            user_id: effectiveUserId,
             raw: { pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp },
             parsed: {
                 pickup_lat: pickupLat,
@@ -3709,7 +4283,7 @@ app.post('/api/pending-rides', async (req, res) => {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'waiting', $18, $19)
             RETURNING *
         `, [
-            request_id, user_id, passenger_name, passenger_phone,
+            request_id, effectiveUserId, passenger_name, passenger_phone,
             pickup_location, dropoff_location,
             pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
             car_type || 'economy', estimated_cost, estimated_distance, estimated_duration,
@@ -3728,7 +4302,7 @@ app.post('/api/pending-rides', async (req, res) => {
 });
 
 // Get all pending ride requests
-app.get('/api/pending-rides', async (req, res) => {
+app.get('/api/pending-rides', requireRole('admin'), async (req, res) => {
     try {
         const { status, car_type, limit } = req.query;
         
@@ -3781,7 +4355,7 @@ app.get('/api/pending-rides', async (req, res) => {
 });
 
 // Get pending ride request by ID
-app.get('/api/pending-rides/:request_id', async (req, res) => {
+app.get('/api/pending-rides/:request_id', requireAuth, async (req, res) => {
     try {
         const { request_id } = req.params;
 
@@ -3805,10 +4379,23 @@ app.get('/api/pending-rides/:request_id', async (req, res) => {
             });
         }
 
-        res.json({
-            success: true,
-            data: result.rows[0]
-        });
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+
+        const row = result.rows[0];
+        if (authRole === 'passenger' && String(row.user_id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            // Driver can see a request if it is accepted by them or still waiting (in their feed). We allow both.
+            if (row.assigned_driver_id && String(row.assigned_driver_id) !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        res.json({ success: true, data: row });
     } catch (err) {
         console.error('Error fetching ride request:', err);
         res.status(500).json({ success: false, error: err.message });
@@ -3816,12 +4403,20 @@ app.get('/api/pending-rides/:request_id', async (req, res) => {
 });
 
 // Driver accepts ride request
-app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
+app.post('/api/pending-rides/:request_id/accept', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { request_id } = req.params;
         const { driver_id } = req.body;
 
-        if (!driver_id) {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : driver_id;
+
+        if (authRole === 'driver' && !effectiveDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
+
+        if (!effectiveDriverId) {
             return res.status(400).json({
                 success: false,
                 error: 'Driver ID is required'
@@ -3850,7 +4445,7 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
                 updated_at = CURRENT_TIMESTAMP
             WHERE request_id = $2
             RETURNING *
-        `, [driver_id, request_id]);
+        `, [effectiveDriverId, request_id]);
 
         const pendingRequest = result.rows[0];
 
@@ -3873,7 +4468,7 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
                 const tripId = existingTripResult.rows[0].id;
                 
                 // الحصول على معلومات السائق
-                const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [driver_id]);
+                const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [effectiveDriverId]);
                 const driverName = driverResult.rows[0]?.name || null;
 
                 await pool.query(`
@@ -3885,13 +4480,13 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
                     WHERE id = $3
                 `, [driver_id, driverName, tripId]);
 
-                console.log(`✅ تم تحديث الرحلة ${tripId} بتعيين السائق ${driver_id}`);
+                console.log(`✅ تم تحديث الرحلة ${tripId} بتعيين السائق ${effectiveDriverId}`);
             } else {
                 // إنشاء رحلة جديدة إذا لم توجد
                 const tripId = 'TR-' + Date.now();
                 
                 // الحصول على معلومات السائق
-                const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [driver_id]);
+                const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [effectiveDriverId]);
                 const driverName = driverResult.rows[0]?.name || null;
 
                 await pool.query(`
@@ -3904,7 +4499,7 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
                     )
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'assigned', 'pending_rides')
                 `, [
-                    tripId, pendingRequest.user_id, driver_id, driverName,
+                    tripId, pendingRequest.user_id, effectiveDriverId, driverName,
                     pendingRequest.pickup_location, pendingRequest.dropoff_location,
                     pendingRequest.pickup_lat, pendingRequest.pickup_lng,
                     pendingRequest.dropoff_lat, pendingRequest.dropoff_lng,
@@ -3931,12 +4526,20 @@ app.post('/api/pending-rides/:request_id/accept', async (req, res) => {
 });
 
 // Driver rejects ride request
-app.post('/api/pending-rides/:request_id/reject', async (req, res) => {
+app.post('/api/pending-rides/:request_id/reject', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { request_id } = req.params;
         const { driver_id } = req.body;
 
-        if (!driver_id) {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        const effectiveDriverId = authRole === 'driver' ? authDriverId : driver_id;
+
+        if (authRole === 'driver' && !effectiveDriverId) {
+            return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        }
+
+        if (!effectiveDriverId) {
             return res.status(400).json({
                 success: false,
                 error: 'Driver ID is required'
@@ -3964,7 +4567,7 @@ app.post('/api/pending-rides/:request_id/reject', async (req, res) => {
                 updated_at = CURRENT_TIMESTAMP
             WHERE request_id = $2
             RETURNING *
-        `, [driver_id, request_id]);
+        `, [effectiveDriverId, request_id]);
 
         res.json({
             success: true,
@@ -3978,17 +4581,28 @@ app.post('/api/pending-rides/:request_id/reject', async (req, res) => {
 });
 
 // Cancel ride request
-app.post('/api/pending-rides/:request_id/cancel', async (req, res) => {
+app.post('/api/pending-rides/:request_id/cancel', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const { request_id } = req.params;
 
-        const result = await pool.query(`
-            UPDATE pending_ride_requests
-            SET status = 'cancelled',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE request_id = $1 AND status = 'waiting'
-            RETURNING *
-        `, [request_id]);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+
+        const result = authRole === 'passenger'
+            ? await pool.query(`
+                UPDATE pending_ride_requests
+                SET status = 'cancelled',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE request_id = $1 AND status = 'waiting' AND user_id = $2
+                RETURNING *
+            `, [request_id, authUserId])
+            : await pool.query(`
+                UPDATE pending_ride_requests
+                SET status = 'cancelled',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE request_id = $1 AND status = 'waiting'
+                RETURNING *
+            `, [request_id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({
@@ -4009,10 +4623,19 @@ app.post('/api/pending-rides/:request_id/cancel', async (req, res) => {
 });
 
 // Get pending rides for a specific driver (based on location and car type)
-app.get('/api/drivers/:driver_id/pending-rides', async (req, res) => {
+app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const { driver_id } = req.params;
         const { max_distance } = req.query;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(driver_id) !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
 
         // Get driver info
         const driverResult = await pool.query(`
@@ -4097,7 +4720,7 @@ app.get('/api/drivers/:driver_id/pending-rides', async (req, res) => {
 });
 
 // Cleanup expired ride requests (can be called periodically)
-app.post('/api/pending-rides/cleanup', async (req, res) => {
+app.post('/api/pending-rides/cleanup', requireRole('admin'), async (req, res) => {
     try {
         const result = await pool.query(`
             UPDATE pending_ride_requests
@@ -4123,6 +4746,7 @@ app.post('/api/pending-rides/cleanup', async (req, res) => {
 // Start server
 ensureDefaultAdmins()
     .then(() => ensureDefaultOffers())
+    .then(() => ensureWalletTables())
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())

@@ -98,6 +98,21 @@ const SafeStorage = {
     }
 };
 
+// --- Auth Token Storage (JWT) ---
+window.Auth = {
+    keyToken: 'akwadra_token',
+    getToken() {
+        return SafeStorage.getItem(this.keyToken);
+    },
+    setToken(token) {
+        if (!token) return;
+        SafeStorage.setItem(this.keyToken, String(token));
+    },
+    clearToken() {
+        SafeStorage.removeItem(this.keyToken);
+    }
+};
+
 // --- Dark Mode ---
 const DARK_MODE_KEY = 'akwadra_dark_mode';
 
@@ -2512,6 +2527,10 @@ window.submitRoleLogin = async function() {
         
         // Reset attempts on successful login
         loginAttempts = 0;
+
+        if (result.token) {
+            window.Auth.setToken(result.token);
+        }
         
         // Save user data
         DB.currentUser = userData;
@@ -2631,6 +2650,10 @@ window.verifyOTP = async function() {
             return;
         }
 
+        if (result.token) {
+            window.Auth.setToken(result.token);
+        }
+
         DB.currentUser = result.data;
         DB.setUser(result.data);
         loginSuccess();
@@ -2715,6 +2738,10 @@ window.loginWithEmail = async function() {
         }
         
         const userData = result.data;
+
+        if (result.token) {
+            window.Auth.setToken(result.token);
+        }
 
         // Reset attempts on successful login
         loginAttempts = 0;
@@ -3457,6 +3484,9 @@ window.logoutUser = function() {
     driverLocation = null;
     nearestDriverPreview = null;
     DB.clearSession();
+    if (window.Auth && typeof window.Auth.clearToken === 'function') {
+        window.Auth.clearToken();
+    }
     window.location.reload();
 };
 

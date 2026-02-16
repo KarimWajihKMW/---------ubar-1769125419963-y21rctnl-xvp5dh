@@ -4,12 +4,31 @@ const API_BASE_URL = window.location.hostname === 'localhost'
     : '/api';
 
 const ApiService = {
+    getToken() {
+        try {
+            if (window.Auth && typeof window.Auth.getToken === 'function') {
+                return window.Auth.getToken();
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        try {
+            return window.localStorage.getItem('akwadra_token');
+        } catch (e) {
+            return null;
+        }
+    },
+
     // Helper function for making requests
     async request(endpoint, options = {}) {
         try {
+            const token = ApiService.getToken();
+            const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
             const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 headers: {
                     'Content-Type': 'application/json',
+                    ...authHeader,
                     ...options.headers
                 },
                 ...options
@@ -27,7 +46,19 @@ const ApiService = {
             throw error;
         }
     },
-    
+
+    // Wallet endpoints
+    wallet: {
+        async getMyBalance() {
+            return ApiService.request('/wallet/me/balance');
+        },
+
+        async getMyTransactions(params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/wallet/me/transactions${queryString ? `?${queryString}` : ''}`);
+        }
+    },
+
     // Trips endpoints
     trips: {
         // Get all trips with optional filtering
@@ -290,6 +321,13 @@ const ApiService = {
         // Get dashboard statistics
         async getDashboardStats() {
             return ApiService.request('/admin/dashboard/stats');
+        },
+
+        async createWalletTransaction(payload) {
+            return ApiService.request('/admin/wallet/transaction', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
         }
     }
 };

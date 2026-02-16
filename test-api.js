@@ -2,10 +2,73 @@
 const baseURL = process.env.API_BASE_URL || 'http://localhost:3000/api';
 const originURL = baseURL.endsWith('/api') ? baseURL.slice(0, -4) : baseURL;
 
+async function jsonFetch(url, options = {}) {
+    const res = await fetch(url, options);
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+}
+
+async function loginAdmin() {
+    const candidates = [];
+
+    if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+        candidates.push({ email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD });
+    }
+
+    // Common defaults in this repo / demo DBs
+    candidates.push(
+        { email: 'admin@ubar.sa', password: '12345678' },
+        { email: 'admin2@ubar.sa', password: '12345678' },
+        { email: 'admin@ubar.sa', password: '11111111' }
+    );
+
+    for (const c of candidates) {
+        const { res, data } = await jsonFetch(`${baseURL}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: c.email, password: c.password, role: 'admin' })
+        });
+
+        if (res.ok && data.success && data.token) {
+            console.log(`✅ Admin login OK: ${c.email}`);
+            return { token: data.token, user: data.data };
+        }
+    }
+
+    throw new Error('Admin login failed: Invalid email or password');
+}
+
+async function loginPassengerPhone() {
+    const phone = `+9665${Math.floor(Math.random() * 90000000 + 10000000)}`;
+    const { res, data } = await jsonFetch(`${baseURL}/users/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, name: 'Test Passenger', email: `p_${Date.now()}@ubar.sa` })
+    });
+
+    if (!res.ok || !data.success || !data.token) {
+        throw new Error(`Passenger login failed: ${data.error || res.status}`);
+    }
+
+    return { token: data.token, user: data.data };
+}
+
 async function testAPI() {
     console.log('🧪 Testing Akwadra API Endpoints\n');
     
     try {
+        const adminAuth = await loginAdmin();
+        const adminHeaders = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${adminAuth.token}`
+        };
+
+        const passengerAuth = await loginPassengerPhone();
+        const passengerHeaders = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${passengerAuth.token}`
+        };
+
         // Test 1: Health check
         console.log('1️⃣ Testing health endpoint...');
         let response = await fetch(`${baseURL}/health`);
@@ -32,39 +95,39 @@ async function testAPI() {
 
         // Test 3: Get all trips
         console.log('\n3️⃣ Testing get all trips...');
-        response = await fetch(`${baseURL}/trips`);
+        response = await fetch(`${baseURL}/trips`, { headers: adminHeaders });
         data = await response.json();
         console.log(`✅ Total trips: ${data.total}`);
         console.log(`   First trip:`, data.data[0]);
 
         // Test 4: Get completed trips
         console.log('\n4️⃣ Testing get completed trips...');
-        response = await fetch(`${baseURL}/trips/completed`);
+        response = await fetch(`${baseURL}/trips/completed`, { headers: adminHeaders });
         data = await response.json();
         console.log(`✅ Completed trips: ${data.count}`);
 
         // Test 5: Get cancelled trips
         console.log('\n5️⃣ Testing get cancelled trips...');
-        response = await fetch(`${baseURL}/trips/cancelled`);
+        response = await fetch(`${baseURL}/trips/cancelled`, { headers: adminHeaders });
         data = await response.json();
         console.log(`✅ Cancelled trips: ${data.count}`);
 
         // Test 6: Get trip statistics
         console.log('\n6️⃣ Testing trip statistics...');
-        response = await fetch(`${baseURL}/trips/stats/summary?source=passenger_app`);
+        response = await fetch(`${baseURL}/trips/stats/summary?source=passenger_app`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Stats:', data.data);
 
         // Test 7: Get users
         console.log('\n7️⃣ Testing get users...');
-        response = await fetch(`${baseURL}/users`);
+        response = await fetch(`${baseURL}/users`, { headers: adminHeaders });
         data = await response.json();
         console.log(`✅ Total users: ${data.total}`);
 
         // Test 8: Create a new trip
         console.log('\n8️⃣ Testing create new trip...');
         const newTrip = {
-            user_id: 3,
+            user_id: passengerAuth.user.id,
             pickup_location: 'شارع التحلية، الرياض',
             dropoff_location: 'العليا مول',
             pickup_lat: 24.7136,
@@ -83,7 +146,7 @@ async function testAPI() {
         
         response = await fetch(`${baseURL}/trips`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify(newTrip)
         });
         data = await response.json();
@@ -102,7 +165,7 @@ async function testAPI() {
         };
         response = await fetch(`${baseURL}/trips/${createdTripId}/pickup`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify(pickupUpdate)
         });
         data = await response.json();
@@ -110,7 +173,7 @@ async function testAPI() {
 
         // Test 9: Get next pending trip (nearest by driver location)
         console.log('\n9️⃣ Testing get next pending trip...');
-        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy&lat=24.7136&lng=46.6753`);
+        response = await fetch(`${baseURL}/trips/pending/next?car_type=economy&lat=24.7136&lng=46.6753`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Pending trip:', data.data?.id || 'none');
 
@@ -118,7 +181,7 @@ async function testAPI() {
         console.log('\n1️⃣0️⃣ Testing assign driver to trip...');
         response = await fetch(`${baseURL}/trips/${createdTripId}/assign`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify({ driver_id: 1, driver_name: 'أحمد عبدالله المالكي' })
         });
         data = await response.json();
@@ -128,14 +191,14 @@ async function testAPI() {
         console.log('\n1️⃣1️⃣ Testing start trip (ongoing/started)...');
         response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify({ status: 'ongoing', trip_status: 'started' })
         });
         data = await response.json();
         console.log('✅ Updated trip status:', data.data.status, 'trip_status:', data.data.trip_status);
 
         // Verify started
-        response = await fetch(`${baseURL}/trips/${createdTripId}`);
+        response = await fetch(`${baseURL}/trips/${createdTripId}`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Trip after start:', { status: data.data.status, trip_status: data.data.trip_status });
 
@@ -143,7 +206,7 @@ async function testAPI() {
         console.log('\n1️⃣1️⃣b Testing complete trip (completed/completed)...');
         response = await fetch(`${baseURL}/trips/${createdTripId}/status`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify({ status: 'completed', trip_status: 'completed' })
         });
         data = await response.json();
@@ -153,7 +216,7 @@ async function testAPI() {
         console.log('\n1️⃣1️⃣c Testing POST /rate-driver ...');
         response = await fetch(`${originURL}/rate-driver`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify({ trip_id: createdTripId, rating: 5, comment: 'اختبار تقييم السائق' })
         });
         data = await response.json();
@@ -166,7 +229,7 @@ async function testAPI() {
 
         // Verify rider trip history includes the trip
         console.log('\n1️⃣1️⃣d Testing GET /rider/trips ...');
-        response = await fetch(`${baseURL}/rider/trips?rider_id=3`);
+        response = await fetch(`${baseURL}/rider/trips?rider_id=${passengerAuth.user.id}`, { headers: adminHeaders });
         data = await response.json();
         const riderTrips = Array.isArray(data.data) ? data.data : [];
         console.log('✅ Rider trips fetched:', riderTrips.length);
@@ -175,7 +238,7 @@ async function testAPI() {
 
         // Verify driver trip history includes the trip
         console.log('\n1️⃣1️⃣e Testing GET /driver/trips ...');
-        response = await fetch(`${baseURL}/driver/trips?driver_id=1`);
+        response = await fetch(`${baseURL}/driver/trips?driver_id=1`, { headers: adminHeaders });
         data = await response.json();
         const driverTrips = Array.isArray(data.data) ? data.data : [];
         console.log('✅ Driver trips fetched:', driverTrips.length);
@@ -184,7 +247,7 @@ async function testAPI() {
 
         // Verify admin dashboard metrics
         console.log('\n1️⃣1️⃣f Testing admin dashboard metrics ...');
-        response = await fetch(`${baseURL}/admin/dashboard/stats`);
+        response = await fetch(`${baseURL}/admin/dashboard/stats`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Admin stats keys:', Object.keys(data.data || {}).slice(0, 12));
         console.log('   total_trips:', data.data?.total_trips);
@@ -196,13 +259,13 @@ async function testAPI() {
 
         // Test 1️⃣2️⃣: Get single trip
         console.log('\n1️⃣2️⃣ Testing get single trip...');
-        response = await fetch(`${baseURL}/trips/${createdTripId}`);
+        response = await fetch(`${baseURL}/trips/${createdTripId}`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Trip details:', data.data);
 
         // Test 1️⃣2️⃣b: Get live trip snapshot
         console.log('\n1️⃣2️⃣b Testing get live trip snapshot...');
-        response = await fetch(`${baseURL}/trips/${createdTripId}/live`);
+        response = await fetch(`${baseURL}/trips/${createdTripId}/live`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Live trip snapshot:', {
             id: data.data?.id,
@@ -232,26 +295,26 @@ async function testAPI() {
 
         response = await fetch(`${baseURL}/trips`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify(rejectTrip)
         });
         data = await response.json();
         const rejectTripId = data.data.id;
 
-        response = await fetch(`${baseURL}/trips/${rejectTripId}/reject`, { method: 'PATCH' });
+        response = await fetch(`${baseURL}/trips/${rejectTripId}/reject`, { method: 'PATCH', headers: adminHeaders });
         data = await response.json();
         console.log('✅ Rejected trip status:', data.data.status);
 
         // Test 1️⃣4️⃣: Resolve driver profile (auto create)
         console.log('\n1️⃣4️⃣ Testing resolve driver profile (auto create)...');
-        response = await fetch(`${baseURL}/drivers/resolve?email=driver1@ubar.sa&auto_create=1`);
+        response = await fetch(`${baseURL}/drivers/resolve?email=driver1@ubar.sa&auto_create=1`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Resolved driver:', data.data?.id, data.data?.name);
 
         // Test 1️⃣4️⃣b: Auto-create driver profile for new email
         console.log('\n1️⃣4️⃣b Testing auto-create driver profile for new email...');
         const autoEmail = `autodriver_${Date.now()}@ubar.sa`;
-        response = await fetch(`${baseURL}/drivers/resolve?email=${encodeURIComponent(autoEmail)}&auto_create=1`);
+        response = await fetch(`${baseURL}/drivers/resolve?email=${encodeURIComponent(autoEmail)}&auto_create=1`, { headers: adminHeaders });
         data = await response.json();
         const autoDriverId = data.data?.id;
         console.log('✅ Auto-created driver:', autoDriverId, data.data?.email);
@@ -260,7 +323,7 @@ async function testAPI() {
         console.log('\n1️⃣4️⃣c Testing update driver location...');
         response = await fetch(`${baseURL}/drivers/${autoDriverId}/location`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: adminHeaders,
             body: JSON.stringify({ lat: 24.7136, lng: 46.6753 })
         });
         data = await response.json();
@@ -268,21 +331,39 @@ async function testAPI() {
 
         // Test 1️⃣4️⃣d: Get driver location
         console.log('\n1️⃣4️⃣d Testing get driver location...');
-        response = await fetch(`${baseURL}/drivers/${autoDriverId}/location`);
+        response = await fetch(`${baseURL}/drivers/${autoDriverId}/location`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Driver location fetched:', data.data?.last_lat, data.data?.last_lng);
 
         // Test 1️⃣4️⃣e: Get nearest driver
         console.log('\n1️⃣4️⃣e Testing get nearest driver...');
-        response = await fetch(`${baseURL}/drivers/nearest?lat=24.7136&lng=46.6753`);
+        response = await fetch(`${baseURL}/drivers/nearest?lat=24.7136&lng=46.6753`, { headers: adminHeaders });
         data = await response.json();
         console.log('✅ Nearest driver:', data.data?.id || 'none');
 
         // Test 1️⃣5️⃣: Get available drivers
         console.log('\n1️⃣5️⃣ Testing get available drivers...');
-        response = await fetch(`${baseURL}/drivers`);
+        response = await fetch(`${baseURL}/drivers`, { headers: adminHeaders });
         data = await response.json();
         console.log(`✅ Available drivers: ${data.data.length}`);
+
+        // Wallet ledger tests
+        console.log('\n1️⃣6️⃣ Testing wallet ledger endpoints...');
+        response = await fetch(`${baseURL}/wallet/me/balance`, { headers: passengerHeaders });
+        data = await response.json();
+        console.log('✅ Passenger wallet balance (before):', data.data?.balance);
+
+        response = await fetch(`${baseURL}/admin/wallet/transaction`, {
+            method: 'POST',
+            headers: adminHeaders,
+            body: JSON.stringify({ owner_type: 'user', owner_id: passengerAuth.user.id, amount: 25, reason: 'test credit', reference_type: 'test-api' })
+        });
+        data = await response.json();
+        console.log('✅ Admin wallet tx created:', data.data?.id);
+
+        response = await fetch(`${baseURL}/wallet/me/balance`, { headers: passengerHeaders });
+        data = await response.json();
+        console.log('✅ Passenger wallet balance (after):', data.data?.balance);
         
         console.log('\n🎉 All tests passed!');
         

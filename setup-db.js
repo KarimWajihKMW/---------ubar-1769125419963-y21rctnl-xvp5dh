@@ -8,6 +8,7 @@ async function setupDatabase() {
         
         // Drop existing tables to start fresh
         console.log('🗑️ Dropping existing tables...');
+        await client.query(`DROP TABLE IF EXISTS wallet_transactions CASCADE;`);
         await client.query(`DROP TABLE IF EXISTS pending_ride_requests CASCADE;`);
         await client.query(`DROP TABLE IF EXISTS driver_earnings CASCADE;`);
         await client.query(`DROP TABLE IF EXISTS offers CASCADE;`);
@@ -112,6 +113,25 @@ async function setupDatabase() {
             );
         `);
         console.log('✅ Offers table created');
+
+        // Create wallet ledger table
+        await client.query(`
+            CREATE TABLE wallet_transactions (
+                id BIGSERIAL PRIMARY KEY,
+                owner_type VARCHAR(10) NOT NULL,
+                owner_id INTEGER NOT NULL,
+                amount DECIMAL(12, 2) NOT NULL,
+                currency VARCHAR(8) NOT NULL DEFAULT 'SAR',
+                reason TEXT,
+                reference_type VARCHAR(40),
+                reference_id VARCHAR(80),
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by_role VARCHAR(20),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX idx_wallet_tx_owner_created ON wallet_transactions(owner_type, owner_id, created_at DESC);`);
+        console.log('✅ Wallet transactions table created');
 
         // Create trips table with all necessary fields
         await client.query(`
