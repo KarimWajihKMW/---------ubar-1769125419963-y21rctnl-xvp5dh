@@ -203,6 +203,29 @@ function normalizePhoneForStore(input) {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Prevent stale frontend assets in production (Railway/Chrome can keep old JS and mask fixes)
+app.use((req, res, next) => {
+    try {
+        if (req.method === 'GET') {
+            const p = String(req.path || '');
+            if (
+                p === '/' ||
+                p.endsWith('.html') ||
+                p.endsWith('.js') ||
+                p.endsWith('.css')
+            ) {
+                res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+                res.setHeader('Pragma', 'no-cache');
+                res.setHeader('Expires', '0');
+            }
+        }
+    } catch (e) {
+        // ignore
+    }
+    next();
+});
+
 app.use(express.static('.'));
 app.use('/uploads', express.static(uploadsDir));
 
