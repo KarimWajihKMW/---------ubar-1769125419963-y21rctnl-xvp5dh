@@ -17,6 +17,11 @@ node setup-db.js
 npm start
 ```
 
+بديل (يقرأ `.env` تلقائيًا):
+```bash
+./scripts/run-dev.sh
+```
+
 ### 4️⃣ فتح التطبيق
 افتح المتصفح على: **http://localhost:3000**
 
@@ -74,6 +79,30 @@ node setup-db.js
 ✅ قاعدة البيانات على Railway  
 ✅ البيانات التجريبية متاحة للاختبار  
 ✅ يدعم الوضع المزدوج (API + LocalStorage)  
+
+---
+
+## 🔐 Security + JWT + Wallet (حسب الخطة)
+
+### Environment Variables
+- `DATABASE_URL` مطلوب
+- `JWT_SECRET` مهم جدًا عشان التوكن يفضل ثابت بعد إعادة تشغيل السيرفر
+- `JWT_ACCESS_TTL_SECONDS` اختياري (افتراضي 86400)
+
+### Token Usage (Web)
+- التوكن بيتخزن في `SafeStorage` بالمفتاح `akwadra_token`
+- كل طلبات الـ API بتتبعت بـ `Authorization: Bearer <token>`
+
+### Wallet endpoints
+- `GET /api/wallet/me/balance`
+- `GET /api/wallet/me/transactions?limit=&offset=`
+- `POST /api/admin/wallet/transaction` (admin فقط)
+
+### Tests (قبل أي commit)
+```bash
+npm test
+npm run build
+```
 
 ---
 
