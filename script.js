@@ -223,6 +223,486 @@ const tripEtaCache = new Map();
 // Pickup suggestion cache (latest pending suggestion per trip)
 const tripPickupSuggestionCache = new Map();
 
+// Ride options (Passenger)
+let activePriceLock = null; // { id, price, expires_at }
+
+function isPriceLockValid(lock) {
+    if (!lock || !lock.expires_at) return false;
+    const t = new Date(lock.expires_at).getTime();
+    return Number.isFinite(t) && t > Date.now();
+}
+
+function getPriceLockPrice(lock) {
+    if (!lock) return null;
+    const p = lock.price !== undefined && lock.price !== null ? Number(lock.price) : null;
+    return Number.isFinite(p) ? p : null;
+}
+
+function updatePriceLockUI() {
+    const btn = document.getElementById('price-lock-btn');
+    const statusEl = document.getElementById('price-lock-status');
+
+    const canLock = currentUserRole === 'passenger' && !!currentCarType && !!currentPickup && !!currentDestination;
+    if (btn) btn.disabled = !canLock;
+
+    if (!statusEl) return;
+    if (activePriceLock && isPriceLockValid(activePriceLock)) {
+        const price = getPriceLockPrice(activePriceLock);
+        const exp = new Date(activePriceLock.expires_at);
+        const expText = Number.isFinite(exp.getTime())
+            ? exp.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+            : '';
+        statusEl.textContent = price !== null
+            ? `✅ تم تثبيت السعر: ${price} ر.س (حتى ${expText})`
+            : '✅ تم تثبيت السعر';
+    } else {
+        statusEl.textContent = '';
+    }
+}
+
+function refreshRideSelectPriceUI() {
+    if (currentUserRole !== 'passenger') return;
+    if (!currentCarType) {
+        updatePriceLockUI();
+        return;
+    }
+
+    const est = computeTripEstimates();
+    let nextPrice = computePrice(currentCarType, est.distanceKm);
+    if (activePriceLock && isPriceLockValid(activePriceLock)) {
+        const locked = getPriceLockPrice(activePriceLock);
+        if (locked !== null) nextPrice = locked;
+    }
+    currentTripPrice = nextPrice;
+
+    const priceSummary = document.getElementById('ride-price-summary');
+    if (priceSummary) {
+        priceSummary.classList.remove('hidden');
+        priceSummary.innerText = `السعر: ${currentTripPrice} ر.س`;
+    }
+
+    const selectedEl = document.querySelector('.car-select.selected');
+    if (selectedEl) {
+        const priceEl = selectedEl.querySelector('.text-xl');
+        if (priceEl) priceEl.innerText = `${currentTripPrice} ر.س`;
+    }
+
+    const reqBtn = document.getElementById('request-btn');
+    if (reqBtn) {
+        const names = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
+        reqBtn.querySelector('span').innerText = `اطلب ${names[currentCarType] || 'سيارة'} — ${currentTripPrice} ر.س`;
+    }
+
+    updatePriceLockUI();
+}
+
+window.createPriceLock = async function() {
+    if (currentUserRole !== 'passenger') {
+        showToast('الميزة للراكب فقط');
+        return;
+    }
+    if (!currentPickup || !currentDestination || !currentCarType) {
+        showToast('اختر الالتقاط والوجهة ونوع السيارة أولاً');
+        return;
+    }
+
+    const btn = document.getElementById('price-lock-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-70', 'cursor-not-allowed');
+    }
+
+    try {
+        const res = await ApiService.pricing.lock({
+            pickup_lat: Number(currentPickup.lat),
+            pickup_lng: Number(currentPickup.lng),
+            dropoff_lat: Number(currentDestination.lat),
+            dropoff_lng: Number(currentDestination.lng),
+            car_type: String(currentCarType),
+            ttl_seconds: 120
+        });
+
+        const d = res?.data || null;
+        if (!d?.id) throw new Error('Invalid price lock response');
+
+        activePriceLock = {
+            id: Number(d.id),
+            price: Number(d.price),
+            expires_at: d.expires_at
+        };
+
+        showToast('✅ تم تثبيت السعر');
+        refreshRideSelectPriceUI();
+    } catch (e) {
+        console.error('Price lock failed:', e);
+        showToast('❌ تعذر تثبيت السعر');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('opacity-70', 'cursor-not-allowed');
+        }
+        updatePriceLockUI();
+    }
+};
+
+// Multi-stop (MVP numeric lat/lng)
+let stopRowSeq = 0;
+
+window.addStopRow = function() {
+    const list = document.getElementById('ride-stops-list');
+    if (!list) return;
+    stopRowSeq += 1;
+    const rowId = `stop-${stopRowSeq}`;
+
+    const html = `
+        <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3" data-stop-row="1" data-stop-row-id="${rowId}">
+            <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-extrabold text-gray-700">محطة</p>
+                <button type="button" class="text-xs font-bold text-red-600 hover:text-red-700" onclick="removeStopRow('${rowId}')">حذف</button>
+            </div>
+            <input type="text" class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none" placeholder="عنوان (اختياري)" data-stop-label>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+                <input type="number" inputmode="decimal" class="px-3 py-2 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none" placeholder="lat" data-stop-lat>
+                <input type="number" inputmode="decimal" class="px-3 py-2 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none" placeholder="lng" data-stop-lng>
+            </div>
+        </div>
+    `;
+    list.insertAdjacentHTML('beforeend', html);
+};
+
+window.removeStopRow = function(rowId) {
+    const list = document.getElementById('ride-stops-list');
+    if (!list) return;
+    const row = list.querySelector(`[data-stop-row-id="${CSS.escape(String(rowId))}"]`);
+    if (row) row.remove();
+};
+
+function collectStopsFromUI() {
+    const list = document.getElementById('ride-stops-list');
+    if (!list) return [];
+    const rows = Array.from(list.querySelectorAll('[data-stop-row="1"]'));
+    const stops = [];
+    for (const row of rows) {
+        const label = row.querySelector('[data-stop-label]')?.value?.trim() || '';
+        const latRaw = row.querySelector('[data-stop-lat]')?.value;
+        const lngRaw = row.querySelector('[data-stop-lng]')?.value;
+        if (latRaw === '' || lngRaw === '' || latRaw === undefined || lngRaw === undefined) continue;
+        const lat = Number(latRaw);
+        const lng = Number(lngRaw);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            throw new Error('Invalid stop coordinates');
+        }
+        stops.push({ label, lat, lng });
+    }
+    return stops;
+}
+
+// Split fare (MVP user_id based)
+let splitRowSeq = 0;
+
+function renderSplitFareRow(rowId, defaults = {}) {
+    const userId = defaults.user_id !== undefined && defaults.user_id !== null ? String(defaults.user_id) : '';
+    const amount = defaults.amount !== undefined && defaults.amount !== null ? String(defaults.amount) : '';
+    const method = defaults.method ? String(defaults.method) : 'wallet';
+
+    return `
+        <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3" data-split-row="1" data-split-row-id="${rowId}">
+            <div class="grid grid-cols-3 gap-2">
+                <input type="number" inputmode="numeric" class="px-3 py-2 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none" placeholder="user_id" value="${escapeHtml(userId)}" data-split-user-id>
+                <input type="number" inputmode="decimal" class="px-3 py-2 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none" placeholder="المبلغ" value="${escapeHtml(amount)}" data-split-amount>
+                <select class="px-3 py-2 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none" data-split-method>
+                    <option value="wallet" ${method === 'wallet' ? 'selected' : ''}>محفظة</option>
+                    <option value="cash" ${method === 'cash' ? 'selected' : ''}>كاش</option>
+                </select>
+            </div>
+            <div class="mt-2 flex justify-end">
+                <button type="button" class="text-xs font-bold text-red-600 hover:text-red-700" onclick="removeSplitFareRow('${rowId}')">حذف</button>
+            </div>
+        </div>
+    `;
+}
+
+window.toggleSplitFareUI = function() {
+    const check = document.getElementById('split-fare-check');
+    const wrap = document.getElementById('split-fare-wrap');
+    if (!check || !wrap) return;
+    wrap.classList.toggle('hidden', !check.checked);
+    if (check.checked) {
+        const list = document.getElementById('split-fare-list');
+        if (list && !list.querySelector('[data-split-row="1"]')) {
+            window.resetSplitFareRows();
+        }
+    }
+};
+
+window.resetSplitFareRows = function() {
+    const list = document.getElementById('split-fare-list');
+    if (!list) return;
+    list.innerHTML = '';
+    splitRowSeq = 0;
+
+    const user = DB.getUser();
+    const meId = user?.id ? Number(user.id) : '';
+
+    splitRowSeq += 1;
+    list.insertAdjacentHTML('beforeend', renderSplitFareRow(`split-${splitRowSeq}`, { user_id: meId, method: 'wallet' }));
+    splitRowSeq += 1;
+    list.insertAdjacentHTML('beforeend', renderSplitFareRow(`split-${splitRowSeq}`, { method: 'wallet' }));
+};
+
+window.addSplitFareRow = function() {
+    const list = document.getElementById('split-fare-list');
+    if (!list) return;
+    splitRowSeq += 1;
+    list.insertAdjacentHTML('beforeend', renderSplitFareRow(`split-${splitRowSeq}`, { method: 'wallet' }));
+};
+
+window.removeSplitFareRow = function(rowId) {
+    const list = document.getElementById('split-fare-list');
+    if (!list) return;
+    const row = list.querySelector(`[data-split-row-id="${CSS.escape(String(rowId))}"]`);
+    if (row) row.remove();
+};
+
+function collectSplitFareFromUI() {
+    const check = document.getElementById('split-fare-check');
+    if (!check || !check.checked) return null;
+    const list = document.getElementById('split-fare-list');
+    if (!list) return null;
+    const rows = Array.from(list.querySelectorAll('[data-split-row="1"]'));
+    const splits = [];
+    for (const row of rows) {
+        const userIdRaw = row.querySelector('[data-split-user-id]')?.value;
+        const amountRaw = row.querySelector('[data-split-amount]')?.value;
+        const method = row.querySelector('[data-split-method]')?.value || 'wallet';
+        if (!userIdRaw || !amountRaw) continue;
+        const userId = Number(userIdRaw);
+        const amount = Number(amountRaw);
+        if (!Number.isFinite(userId) || userId <= 0 || !Number.isFinite(amount) || amount <= 0) {
+            throw new Error('Invalid split row');
+        }
+        splits.push({ user_id: userId, amount, method });
+    }
+    if (splits.length < 2) {
+        throw new Error('Split must have at least 2 participants');
+    }
+    return splits;
+}
+
+// Wallet UI (Real Wallet: balance + transactions)
+window.refreshWalletUI = async function() {
+    if (currentUserRole !== 'passenger') return;
+
+    const list = document.getElementById('wallet-tx-list');
+    if (list) {
+        list.innerHTML = '<p class="text-gray-500 text-center py-6">جاري التحميل...</p>';
+    }
+
+    try {
+        const bal = await ApiService.wallet.getMyBalance();
+        const balance = Number(bal?.data?.balance || 0);
+
+        const profileBal = document.getElementById('profile-balance');
+        if (profileBal) profileBal.textContent = String(balance);
+        const walletBal = document.getElementById('wallet-balance');
+        if (walletBal) walletBal.textContent = String(balance);
+
+        try {
+            if (typeof DB.updateUser === 'function') {
+                DB.updateUser({ balance });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        const tx = await ApiService.wallet.getMyTransactions({ limit: 20 });
+        const rows = Array.isArray(tx?.data) ? tx.data : [];
+
+        if (!list) return;
+
+        if (!rows.length) {
+            list.innerHTML = '<p class="text-gray-500 text-center py-6">لا توجد معاملات</p>';
+            return;
+        }
+
+        list.innerHTML = rows.map((r) => {
+            const amount = Number(r.amount || 0);
+            const isDebit = amount < 0;
+            const title = r.reason || (isDebit ? 'خصم' : 'إضافة');
+            const ref = r.reference_type && r.reference_id ? `${r.reference_type}:${r.reference_id}` : '';
+            const date = r.created_at ? new Date(r.created_at) : null;
+            const dateText = date && Number.isFinite(date.getTime()) ? date.toLocaleString('ar-EG') : '';
+            return `
+                <div class="bg-white border border-gray-200 rounded-2xl p-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex-1">
+                            <p class="text-sm font-extrabold text-gray-800">${escapeHtml(title)}</p>
+                            <p class="text-[11px] text-gray-500 mt-1">${escapeHtml(ref)} ${escapeHtml(dateText)}</p>
+                        </div>
+                        <div class="text-left font-extrabold ${isDebit ? 'text-red-600' : 'text-emerald-600'}">${amount.toFixed(2)} ر.س</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('refreshWalletUI failed:', e);
+        if (list) list.innerHTML = '<p class="text-gray-500 text-center py-6">تعذر تحميل المحفظة</p>';
+    }
+};
+
+// Family UI
+window.refreshFamilyUI = async function() {
+    if (currentUserRole !== 'passenger') return;
+
+    const list = document.getElementById('family-list');
+    const select = document.getElementById('ride-family-member');
+    if (list) list.innerHTML = '<p class="text-gray-500 text-center py-4">جاري التحميل...</p>';
+
+    try {
+        const res = await ApiService.passenger.getFamily();
+        const rows = Array.isArray(res?.data) ? res.data : [];
+
+        if (select) {
+            select.innerHTML = '<option value="">(حجز لنفسي)</option>';
+            rows.forEach((m) => {
+                select.insertAdjacentHTML('beforeend', `<option value="${String(m.id)}">${escapeHtml(m.name || 'فرد')}</option>`);
+            });
+        }
+
+        if (!list) return;
+        if (!rows.length) {
+            list.innerHTML = '<p class="text-gray-500 text-center py-4">لا يوجد أفراد</p>';
+            return;
+        }
+
+        list.innerHTML = rows.map((m) => {
+            const phone = m.phone ? String(m.phone) : '';
+            return `
+                <div class="bg-white border border-gray-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+                    <div class="flex-1">
+                        <p class="font-extrabold text-gray-800">${escapeHtml(m.name || 'فرد')}</p>
+                        <p class="text-[11px] text-gray-500 mt-1">${escapeHtml(phone)}</p>
+                    </div>
+                    <button type="button" class="px-3 py-2 rounded-xl bg-red-50 text-red-600 font-extrabold hover:bg-red-100" onclick="deleteFamilyMember('${String(m.id)}')">حذف</button>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('refreshFamilyUI failed:', e);
+        if (list) list.innerHTML = '<p class="text-gray-500 text-center py-4">تعذر تحميل العائلة</p>';
+    }
+};
+
+window.addFamilyMemberFromUI = async function() {
+    const nameEl = document.getElementById('family-add-name');
+    const phoneEl = document.getElementById('family-add-phone');
+    const name = nameEl ? String(nameEl.value || '').trim() : '';
+    const phone = phoneEl ? String(phoneEl.value || '').trim() : '';
+    if (!name) {
+        showToast('اكتب اسم الفرد');
+        return;
+    }
+
+    try {
+        await ApiService.passenger.addFamilyMember({ name, phone: phone || null });
+        if (nameEl) nameEl.value = '';
+        if (phoneEl) phoneEl.value = '';
+        showToast('✅ تم إضافة فرد');
+        await window.refreshFamilyUI();
+    } catch (e) {
+        console.error('Add family member failed:', e);
+        showToast('❌ تعذر إضافة فرد');
+    }
+};
+
+window.deleteFamilyMember = async function(id) {
+    try {
+        await ApiService.passenger.deleteFamilyMember(id);
+        showToast('تم الحذف');
+        await window.refreshFamilyUI();
+    } catch (e) {
+        console.error('Delete family member failed:', e);
+        showToast('❌ تعذر الحذف');
+    }
+};
+
+// Note templates UI
+window.refreshNoteTemplatesUI = async function() {
+    if (currentUserRole !== 'passenger') return;
+
+    const list = document.getElementById('note-templates-list');
+    const select = document.getElementById('ride-note-template');
+    if (list) list.innerHTML = '<p class="text-gray-500 text-center py-4">جاري التحميل...</p>';
+
+    try {
+        const res = await ApiService.passenger.getNoteTemplates();
+        const rows = Array.isArray(res?.data) ? res.data : [];
+
+        if (select) {
+            select.innerHTML = '<option value="">(بدون قالب)</option>';
+            rows.forEach((t) => {
+                const title = t.title ? String(t.title) : (t.note ? String(t.note).slice(0, 22) : 'قالب');
+                select.insertAdjacentHTML('beforeend', `<option value="${String(t.id)}">${escapeHtml(title)}</option>`);
+            });
+        }
+
+        if (!list) return;
+        if (!rows.length) {
+            list.innerHTML = '<p class="text-gray-500 text-center py-4">لا توجد قوالب</p>';
+            return;
+        }
+
+        list.innerHTML = rows.map((t) => {
+            const title = t.title ? String(t.title) : 'بدون عنوان';
+            const note = t.note ? String(t.note) : '';
+            return `
+                <div class="bg-white border border-gray-200 rounded-2xl p-4 flex items-start justify-between gap-3">
+                    <div class="flex-1">
+                        <p class="font-extrabold text-gray-800">${escapeHtml(title)}</p>
+                        <p class="text-[11px] text-gray-600 mt-1">${escapeHtml(note)}</p>
+                    </div>
+                    <button type="button" class="px-3 py-2 rounded-xl bg-red-50 text-red-600 font-extrabold hover:bg-red-100" onclick="deleteNoteTemplate('${String(t.id)}')">حذف</button>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('refreshNoteTemplatesUI failed:', e);
+        if (list) list.innerHTML = '<p class="text-gray-500 text-center py-4">تعذر تحميل القوالب</p>';
+    }
+};
+
+window.addNoteTemplateFromUI = async function() {
+    const titleEl = document.getElementById('note-tpl-title');
+    const noteEl = document.getElementById('note-tpl-note');
+    const title = titleEl ? String(titleEl.value || '').trim() : '';
+    const note = noteEl ? String(noteEl.value || '').trim() : '';
+    if (!note) {
+        showToast('اكتب الملاحظة');
+        return;
+    }
+    try {
+        await ApiService.passenger.addNoteTemplate(note, title || null);
+        if (titleEl) titleEl.value = '';
+        if (noteEl) noteEl.value = '';
+        showToast('✅ تم إضافة قالب');
+        await window.refreshNoteTemplatesUI();
+    } catch (e) {
+        console.error('Add note template failed:', e);
+        showToast('❌ تعذر إضافة قالب');
+    }
+};
+
+window.deleteNoteTemplate = async function(id) {
+    try {
+        await ApiService.passenger.deleteNoteTemplate(id);
+        showToast('تم الحذف');
+        await window.refreshNoteTemplatesUI();
+    } catch (e) {
+        console.error('Delete note template failed:', e);
+        showToast('❌ تعذر الحذف');
+    }
+};
+
 function normalizeSuggestionRow(row) {
     if (!row) return null;
     const s = { ...row };
@@ -3394,6 +3874,9 @@ window.selectCar = function(element, type) {
         reqBtn.classList.add('animate-pulse');
         setTimeout(() => reqBtn.classList.remove('animate-pulse'), 500);
     }
+
+    // Enable price lock button + apply lock price if any
+    refreshRideSelectPriceUI();
 };
 
 window.toggleCarOptions = function() {
@@ -3483,6 +3966,29 @@ window.resetApp = function() {
     selectedPaymentMethod = null;
     appliedPromo = null;
     promoDiscount = 0;
+
+    // Reset passenger feature selections
+    activePriceLock = null;
+    try {
+        const statusEl = document.getElementById('price-lock-status');
+        if (statusEl) statusEl.textContent = '';
+        const familySelect = document.getElementById('ride-family-member');
+        if (familySelect) familySelect.value = '';
+        const noteTpl = document.getElementById('ride-note-template');
+        if (noteTpl) noteTpl.value = '';
+        const noteCustom = document.getElementById('ride-note-custom');
+        if (noteCustom) noteCustom.value = '';
+        const stopsList = document.getElementById('ride-stops-list');
+        if (stopsList) stopsList.innerHTML = '';
+        const splitCheck = document.getElementById('split-fare-check');
+        if (splitCheck) splitCheck.checked = false;
+        const splitWrap = document.getElementById('split-fare-wrap');
+        if (splitWrap) splitWrap.classList.add('hidden');
+        const splitList = document.getElementById('split-fare-list');
+        if (splitList) splitList.innerHTML = '';
+    } catch (e) {
+        // ignore
+    }
     
     switchSection('destination');
 };
@@ -3555,6 +4061,17 @@ window.switchSection = function(name) {
         renderTripHistory();
         loadPassengerProfileEditDefaults();
         setPassengerProfileEditMode(false);
+
+        // Load passenger feature data (real wallet / family / notes)
+        try { window.refreshWalletUI && window.refreshWalletUI(); } catch (e) { /* ignore */ }
+        try { window.refreshFamilyUI && window.refreshFamilyUI(); } catch (e) { /* ignore */ }
+        try { window.refreshNoteTemplatesUI && window.refreshNoteTemplatesUI(); } catch (e) { /* ignore */ }
+    }
+
+    if (name === 'rideSelect') {
+        try { window.refreshFamilyUI && window.refreshFamilyUI(); } catch (e) { /* ignore */ }
+        try { window.refreshNoteTemplatesUI && window.refreshNoteTemplatesUI(); } catch (e) { /* ignore */ }
+        try { updatePriceLockUI(); } catch (e) { /* ignore */ }
     }
 };
 
@@ -4120,6 +4637,9 @@ function updateTripEstimatesUI() {
     const tEl = document.getElementById('ride-time-badge');
     if (dEl) dEl.innerText = `${distanceKm} كم`;
     if (tEl) tEl.innerText = `~${etaMin} دقيقة`;
+
+    // Keep extras in sync (price lock button, locked price override)
+    refreshRideSelectPriceUI();
 }
 
 function stopPassengerMatchPolling() {
@@ -4316,6 +4836,34 @@ window.requestRide = async function() {
     try {
         const user = DB.getUser();
 
+        // Collect extra options from UI (before we create trip)
+        const familySelect = document.getElementById('ride-family-member');
+        const familyMemberId = familySelect && familySelect.value ? Number(familySelect.value) : null;
+
+        const noteTplEl = document.getElementById('ride-note-template');
+        const noteTplId = noteTplEl && noteTplEl.value ? Number(noteTplEl.value) : null;
+
+        const noteCustomEl = document.getElementById('ride-note-custom');
+        const noteCustom = noteCustomEl ? String(noteCustomEl.value || '').trim() : '';
+
+        const priceLockId = activePriceLock && isPriceLockValid(activePriceLock) ? Number(activePriceLock.id) : null;
+
+        let pendingStops = [];
+        try {
+            pendingStops = collectStopsFromUI();
+        } catch (e) {
+            showToast('❌ تأكد من إحداثيات المحطات (lat/lng)');
+            return;
+        }
+
+        let pendingSplits = null;
+        try {
+            pendingSplits = collectSplitFareFromUI();
+        } catch (e) {
+            showToast('❌ بيانات تقسيم الأجرة غير صحيحة');
+            return;
+        }
+
         // GPS ONLY (high accuracy) for pickup coordinates
         const fix = await getHighAccuracyPickupFix();
         if (!Number.isFinite(fix?.lat) || !Number.isFinite(fix?.lng)) {
@@ -4349,11 +4897,15 @@ window.requestRide = async function() {
             dropoff_lat: currentDestination.lat,
             dropoff_lng: currentDestination.lng,
             pickup_hub_id: currentPickupHubId || null,
+            passenger_note: noteCustom ? noteCustom : null,
+            passenger_note_template_id: !noteCustom && Number.isFinite(noteTplId) && noteTplId > 0 ? noteTplId : null,
+            booked_for_family_member_id: Number.isFinite(familyMemberId) && familyMemberId > 0 ? familyMemberId : null,
+            price_lock_id: Number.isFinite(priceLockId) && priceLockId > 0 ? priceLockId : null,
             car_type: currentCarType,
             cost: currentTripPrice,
             distance: est.distanceKm,
             duration: est.etaMin,
-            payment_method: 'cash',
+            payment_method: pendingSplits ? 'split' : 'cash',
             status: 'pending',
             source: 'passenger_app'
         };
@@ -4361,6 +4913,43 @@ window.requestRide = async function() {
         const created = await ApiService.trips.create(tripPayload);
         activePassengerTripId = created?.data?.id || null;
         if (activePassengerTripId) {
+            // Apply multi-stops (reprices server-side)
+            if (pendingStops.length) {
+                try {
+                    const stopsRes = await ApiService.trips.setStops(activePassengerTripId, pendingStops);
+                    const updatedTrip = stopsRes?.trip || null;
+                    if (updatedTrip && (updatedTrip.price !== undefined || updatedTrip.cost !== undefined)) {
+                        const newPrice = updatedTrip.price !== undefined && updatedTrip.price !== null ? Number(updatedTrip.price) : Number(updatedTrip.cost || currentTripPrice);
+                        if (Number.isFinite(newPrice)) {
+                            currentTripPrice = newPrice;
+                            refreshRideSelectPriceUI();
+                        }
+                    }
+                    showToast('✅ تم حفظ المحطات');
+                } catch (e) {
+                    console.error('setStops failed:', e);
+                    showToast('⚠️ تعذر حفظ المحطات');
+                }
+            }
+
+            // Apply split fare (must match trip price)
+            if (pendingSplits) {
+                try {
+                    const total = pendingSplits.reduce((acc, s) => acc + Number(s.amount || 0), 0);
+                    const rounded = Math.round(total * 100) / 100;
+                    const priceRounded = Math.round(Number(currentTripPrice || 0) * 100) / 100;
+                    if (Math.abs(rounded - priceRounded) > 0.5) {
+                        showToast('⚠️ مجموع التقسيم لازم يساوي سعر الرحلة');
+                    } else {
+                        await ApiService.trips.setSplitFare(activePassengerTripId, pendingSplits);
+                        showToast('✅ تم تفعيل تقسيم الأجرة');
+                    }
+                } catch (e) {
+                    console.error('setSplitFare failed:', e);
+                    showToast('⚠️ تعذر تفعيل تقسيم الأجرة');
+                }
+            }
+
             startPassengerPickupLiveUpdates(activePassengerTripId);
         }
     } catch (error) {
