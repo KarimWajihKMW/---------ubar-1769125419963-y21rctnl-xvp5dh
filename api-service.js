@@ -37,13 +37,30 @@ const ApiService = {
                 },
                 ...options
             });
-            
-            const data = await response.json();
-            
+
+            const raw = await response.text();
+            let data = {};
+            if (raw) {
+                try {
+                    data = JSON.parse(raw);
+                } catch (e) {
+                    data = { error: raw };
+                }
+            }
+
             if (!response.ok) {
+                // Common production issue: tokens become invalid after server restart if JWT secret changes.
+                // When we detect 401, clear local auth + session so the UI can force re-login.
+                if (response.status === 401) {
+                    try { window.Auth && typeof window.Auth.clearToken === 'function' && window.Auth.clearToken(); } catch (e) {}
+                    try { window.DB && typeof window.DB.clearSession === 'function' && window.DB.clearSession(); } catch (e) {}
+                    try { window.showToast && window.showToast('⚠️ انتهت الجلسة، سجل الدخول مرة أخرى'); } catch (e) {}
+                    try { window.openAuthModal && window.openAuthModal(); } catch (e) {}
+                }
+
                 throw new Error(data.error || 'Request failed');
             }
-            
+
             return data;
         } catch (error) {
             console.error('API Request Error:', error);

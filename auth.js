@@ -2,7 +2,20 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-const jwtSecret = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const jwtSecret = (() => {
+    if (process.env.JWT_SECRET && String(process.env.JWT_SECRET).trim()) {
+        return String(process.env.JWT_SECRET).trim();
+    }
+
+    // Fallback: derive a deterministic secret from DATABASE_URL so tokens remain valid across restarts
+    // even if the hosting platform doesn't set JWT_SECRET.
+    if (process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim()) {
+        return crypto.createHash('sha256').update(String(process.env.DATABASE_URL)).digest('hex');
+    }
+
+    // Last resort (dev only): random secret.
+    return crypto.randomBytes(32).toString('hex');
+})();
 const accessTtlSeconds = Number.parseInt(process.env.JWT_ACCESS_TTL_SECONDS || '86400', 10); // 24h
 
 function looksLikeBcryptHash(value) {
