@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const crypto = require('crypto');
 const { Server: SocketIOServer } = require('socket.io');
 require('dotenv').config();
 
@@ -536,8 +537,284 @@ async function ensureAdminTripCountersTables() {
     }
 }
 
-async function findNearestAvailableDriver({ pickupLat, pickupLng, carType }) {
+async function ensurePassengerFeatureTables() {
+    try {
+        // --- Pickup hubs (Smart Pickup Hubs) ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS pickup_hubs (
+                id SERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                category VARCHAR(60),
+                lat DECIMAL(10, 8) NOT NULL,
+                lng DECIMAL(11, 8) NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_pickup_hubs_active ON pickup_hubs(is_active);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_pickup_hubs_coords ON pickup_hubs(lat, lng);');
+
+        // Link trip -> hub
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_hub_id INTEGER REFERENCES pickup_hubs(id) ON DELETE SET NULL;');
+
+        // Driver suggestions for pickup hub/location
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_pickup_suggestions (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                suggested_by_role VARCHAR(20) NOT NULL,
+                suggested_by_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                hub_id INTEGER REFERENCES pickup_hubs(id) ON DELETE SET NULL,
+                suggested_title TEXT,
+                suggested_lat DECIMAL(10, 8),
+                suggested_lng DECIMAL(11, 8),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                passenger_decision_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_pickup_suggestions_trip ON trip_pickup_suggestions(trip_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_pickup_suggestions_status ON trip_pickup_suggestions(status);');
+
+        // --- ETA + delay reason ---
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS eta_minutes INTEGER;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS eta_reason TEXT;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS eta_updated_at TIMESTAMP;');
+
+        // --- Favorite captain ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_favorite_drivers (
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, driver_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_fav_driver ON passenger_favorite_drivers(driver_id);');
+
+        // --- Loyalty tiers ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_loyalty_stats (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                completed_trips INTEGER NOT NULL DEFAULT 0,
+                cancelled_trips INTEGER NOT NULL DEFAULT 0,
+                hub_compliance_trips INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // --- Passenger notes (templates + per-trip note) ---
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS passenger_note TEXT;');
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_note_templates (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(80),
+                note TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_note_templates_user ON passenger_note_templates(user_id, created_at DESC);');
+
+        // --- Family / Group ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_family_members (
+                id BIGSERIAL PRIMARY KEY,
+                owner_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR(120) NOT NULL,
+                phone VARCHAR(30),
+                daily_limit DECIMAL(12, 2),
+                weekly_limit DECIMAL(12, 2),
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_family_owner ON passenger_family_members(owner_user_id, is_active);');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS booked_for_family_member_id BIGINT REFERENCES passenger_family_members(id) ON DELETE SET NULL;');
+
+        // --- Scheduled rides ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS scheduled_rides (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                pickup_location VARCHAR(255) NOT NULL,
+                dropoff_location VARCHAR(255) NOT NULL,
+                pickup_lat DECIMAL(10, 8) NOT NULL,
+                pickup_lng DECIMAL(11, 8) NOT NULL,
+                dropoff_lat DECIMAL(10, 8) NOT NULL,
+                dropoff_lng DECIMAL(11, 8) NOT NULL,
+                car_type VARCHAR(50) DEFAULT 'economy',
+                estimated_price DECIMAL(10, 2),
+                payment_method VARCHAR(20) DEFAULT 'cash',
+                scheduled_at TIMESTAMP NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'pending_confirmation',
+                confirmed_at TIMESTAMP,
+                created_trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_scheduled_rides_user ON scheduled_rides(user_id, scheduled_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_scheduled_rides_status ON scheduled_rides(status, scheduled_at);');
+
+        // --- Price lock ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS price_locks (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                pickup_lat DECIMAL(10, 8) NOT NULL,
+                pickup_lng DECIMAL(11, 8) NOT NULL,
+                dropoff_lat DECIMAL(10, 8) NOT NULL,
+                dropoff_lng DECIMAL(11, 8) NOT NULL,
+                car_type VARCHAR(50) DEFAULT 'economy',
+                price DECIMAL(10, 2) NOT NULL,
+                currency VARCHAR(8) NOT NULL DEFAULT 'SAR',
+                expires_at TIMESTAMP NOT NULL,
+                used_trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_price_locks_user_expires ON price_locks(user_id, expires_at DESC);');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS price_lock_id BIGINT REFERENCES price_locks(id) ON DELETE SET NULL;');
+
+        // --- Multi-stop trip ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_stops (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                stop_order INTEGER NOT NULL,
+                label VARCHAR(255),
+                lat DECIMAL(10, 8) NOT NULL,
+                lng DECIMAL(11, 8) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (trip_id, stop_order)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_stops_trip ON trip_stops(trip_id, stop_order);');
+
+        // --- Split fare ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_split_payments (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                payer_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                amount DECIMAL(12, 2) NOT NULL,
+                method VARCHAR(20) NOT NULL DEFAULT 'wallet',
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                paid_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (trip_id, payer_user_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_split_payments_trip ON trip_split_payments(trip_id);');
+
+        // --- Safety pack ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_shares (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                share_token VARCHAR(80) UNIQUE NOT NULL,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                expires_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_shares_trip ON trip_shares(trip_id, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_safety_events (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                created_by_role VARCHAR(20) NOT NULL,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                event_type VARCHAR(40) NOT NULL,
+                message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_safety_events_trip ON trip_safety_events(trip_id, created_at DESC);');
+
+        // --- In-app support ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS support_tickets (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE SET NULL,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                category VARCHAR(60) NOT NULL,
+                description TEXT,
+                attachment_path TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_support_tickets_trip ON support_tickets(trip_id);');
+
+        // --- Anti-fraud / anti-abuse (idempotency for rewards/payments) ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_reward_events (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                points_awarded INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (trip_id)
+            );
+        `);
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_wallet_trip_payment
+            ON wallet_transactions(owner_type, owner_id, reference_type, reference_id)
+            WHERE reference_type IS NOT NULL AND reference_id IS NOT NULL;
+        `);
+
+        console.log('✅ Passenger feature tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure passenger feature tables:', err.message);
+    }
+}
+
+async function findNearestAvailableDriver({ pickupLat, pickupLng, carType, riderId = null }) {
     if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) return null;
+
+    const normalizedRiderId = riderId !== undefined && riderId !== null ? Number(riderId) : null;
+
+    // Favorites-first (if riderId exists)
+    if (Number.isFinite(normalizedRiderId) && normalizedRiderId > 0) {
+        const paramsFav = [pickupLat, pickupLng, normalizedRiderId];
+        let carFilterFav = '';
+        if (carType) {
+            paramsFav.push(String(carType));
+            carFilterFav = ` AND d.car_type = $${paramsFav.length}`;
+        }
+
+        const favRes = await pool.query(
+            `SELECT d.id, d.name,
+                    (6371 * acos(
+                        cos(radians($1)) * cos(radians(d.last_lat)) * cos(radians(d.last_lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(d.last_lat))
+                    )) AS distance_km
+             FROM passenger_favorite_drivers f
+             JOIN drivers d ON d.id = f.driver_id
+             LEFT JOIN trips t
+               ON t.driver_id = d.id AND t.status IN ('assigned', 'ongoing')
+             WHERE f.user_id = $3
+               AND d.status = 'online'
+               AND d.approval_status = 'approved'
+               AND d.last_lat IS NOT NULL
+               AND d.last_lng IS NOT NULL
+               AND d.last_location_at >= NOW() - ($${paramsFav.length + 1} * INTERVAL '1 minute')
+               AND t.id IS NULL
+               ${carFilterFav}
+             ORDER BY distance_km ASC
+             LIMIT 1`,
+            [...paramsFav, DRIVER_LOCATION_TTL_MINUTES]
+        );
+        if (favRes.rows.length > 0) return favRes.rows[0];
+    }
 
     const params = [pickupLat, pickupLng];
     let carFilter = '';
@@ -583,6 +860,1372 @@ app.get('/api/db/health', async (req, res) => {
     } catch (err) {
         console.error('Database health check failed:', err);
         res.status(500).json({ status: 'ERROR', message: 'Database connection failed' });
+    }
+});
+
+// ==================== PASSENGER FEATURES (Haged-uber.md) ====================
+
+function requireTripAccess({ tripRow, authRole, authUserId, authDriverId }) {
+    if (!tripRow) return { ok: false, status: 404, error: 'Trip not found' };
+
+    if (authRole === 'passenger') {
+        if (!authUserId) return { ok: false, status: 401, error: 'Unauthorized' };
+        if (String(tripRow.user_id) !== String(authUserId)) {
+            return { ok: false, status: 403, error: 'Forbidden' };
+        }
+        return { ok: true };
+    }
+
+    if (authRole === 'driver') {
+        if (!authDriverId) return { ok: false, status: 403, error: 'Driver profile not linked to this account' };
+        if (String(tripRow.driver_id || '') !== String(authDriverId)) {
+            return { ok: false, status: 403, error: 'Forbidden' };
+        }
+        return { ok: true };
+    }
+
+    // admin or other roles
+    return { ok: true };
+}
+
+function getLoyaltyTier({ completedTrips, cancelledTrips, hubComplianceTrips }) {
+    const completed = Math.max(0, Number(completedTrips) || 0);
+    const cancelled = Math.max(0, Number(cancelledTrips) || 0);
+    const compliance = Math.max(0, Number(hubComplianceTrips) || 0);
+    const cancelRate = completed > 0 ? cancelled / completed : 0;
+
+    if (completed >= 30 && cancelRate <= 0.10 && compliance >= 10) {
+        return {
+            tier: 'Gold',
+            benefits: ['أولوية مطابقة أعلى', 'خصومات/عروض أفضل', 'دعم أسرع']
+        };
+    }
+    if (completed >= 10 && cancelRate <= 0.20) {
+        return {
+            tier: 'Silver',
+            benefits: ['أولوية مطابقة', 'عروض دورية', 'دعم أسرع']
+        };
+    }
+    return {
+        tier: 'Bronze',
+        benefits: ['عروض ترحيبية', 'نقاط على الرحلات المكتملة']
+    };
+}
+
+function makeShareToken() {
+    return crypto.randomBytes(24).toString('hex');
+}
+
+function computeSimplePrice({ pickupLat, pickupLng, dropoffLat, dropoffLng, carType }) {
+    const km = haversineKm({ lat: pickupLat, lng: pickupLng }, { lat: dropoffLat, lng: dropoffLng });
+    const baseFare = 8; // minimal default (no extra UX)
+    const perKm = carType === 'vip' ? 4 : carType === 'family' ? 3.2 : 2.6;
+    const price = Math.max(10, Math.round((baseFare + km * perKm) * 100) / 100);
+    return { distance_km: Math.round(km * 100) / 100, price };
+}
+
+async function getWalletBalance(client, { owner_type, owner_id }) {
+    const sum = await client.query(
+        `SELECT COALESCE(SUM(amount), 0) AS balance
+         FROM wallet_transactions
+         WHERE owner_type = $1 AND owner_id = $2`,
+        [owner_type, owner_id]
+    );
+    return Number(sum.rows[0]?.balance || 0);
+}
+
+async function getTodayWalletDebitsTotal(client, { owner_type, owner_id, referenceType = null }) {
+    const params = [owner_type, owner_id];
+    let refFilter = '';
+    if (referenceType) {
+        params.push(referenceType);
+        refFilter = ` AND reference_type = $${params.length}`;
+    }
+
+    const res = await client.query(
+        `SELECT COALESCE(ABS(SUM(amount)), 0) AS total
+         FROM wallet_transactions
+         WHERE owner_type = $1
+           AND owner_id = $2
+           AND amount < 0
+           ${refFilter}
+           AND created_at >= date_trunc('day', NOW())`,
+        params
+    );
+    return Number(res.rows[0]?.total || 0);
+}
+
+// --- Smart Pickup Hubs ---
+
+app.get('/api/pickup-hubs/suggest', requireAuth, async (req, res) => {
+    try {
+        const lat = req.query.lat !== undefined ? Number(req.query.lat) : null;
+        const lng = req.query.lng !== undefined ? Number(req.query.lng) : null;
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 20) : 8;
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return res.status(400).json({ success: false, error: 'lat and lng are required' });
+        }
+
+        const result = await pool.query(
+            `SELECT id, title, category, lat, lng,
+                    (6371 * acos(
+                        cos(radians($1)) * cos(radians(lat)) * cos(radians(lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(lat))
+                    )) AS distance_km
+             FROM pickup_hubs
+             WHERE is_active = true
+             ORDER BY distance_km ASC
+             LIMIT $3`,
+            [lat, lng, limit]
+        );
+
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/admin/pickup-hubs', requireRole('admin'), async (req, res) => {
+    try {
+        const { title, category = null, lat, lng, is_active = true } = req.body || {};
+        const latitude = Number(lat);
+        const longitude = Number(lng);
+        if (!title || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return res.status(400).json({ success: false, error: 'title, lat, lng are required' });
+        }
+        const insert = await pool.query(
+            `INSERT INTO pickup_hubs (title, category, lat, lng, is_active)
+             VALUES ($1, NULLIF($2, ''), $3, $4, $5)
+             RETURNING *`,
+            [String(title), category !== null && category !== undefined ? String(category) : '', latitude, longitude, !!is_active]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Driver suggests alternative pickup hub/location; passenger accepts/rejects
+app.post('/api/trips/:id/pickup-suggestions', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const { hub_id, suggested_title, suggested_lat, suggested_lng } = req.body || {};
+
+        const hubId = hub_id !== undefined && hub_id !== null ? Number(hub_id) : null;
+        const lat = suggested_lat !== undefined && suggested_lat !== null ? Number(suggested_lat) : null;
+        const lng = suggested_lng !== undefined && suggested_lng !== null ? Number(suggested_lng) : null;
+
+        if (!hubId && (!Number.isFinite(lat) || !Number.isFinite(lng))) {
+            return res.status(400).json({ success: false, error: 'hub_id or suggested_lat/suggested_lng is required' });
+        }
+
+        const tripRes = await pool.query('SELECT id, user_id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(tripRow?.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        let hubData = null;
+        if (hubId) {
+            const hub = await pool.query('SELECT id, title, lat, lng FROM pickup_hubs WHERE id = $1 AND is_active = true LIMIT 1', [hubId]);
+            hubData = hub.rows[0] || null;
+            if (!hubData) {
+                return res.status(404).json({ success: false, error: 'Hub not found' });
+            }
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO trip_pickup_suggestions (
+                trip_id, suggested_by_role, suggested_by_driver_id, hub_id, suggested_title, suggested_lat, suggested_lng
+             ) VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7)
+             RETURNING *`,
+            [
+                tripId,
+                String(req.auth?.role || 'driver'),
+                authDriverId || null,
+                hubData ? hubData.id : null,
+                hubData ? hubData.title : (suggested_title !== undefined && suggested_title !== null ? String(suggested_title) : ''),
+                hubData ? Number(hubData.lat) : lat,
+                hubData ? Number(hubData.lng) : lng
+            ]
+        );
+
+        try {
+            io.to(tripRoom(tripId)).emit('pickup_suggestion_created', { trip_id: String(tripId), suggestion: insert.rows[0] });
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/trips/:id/pickup-suggestions', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const result = await pool.query(
+            `SELECT s.*,
+                    h.title AS hub_title,
+                    h.category AS hub_category
+             FROM trip_pickup_suggestions s
+             LEFT JOIN pickup_hubs h ON h.id = s.hub_id
+             WHERE s.trip_id = $1
+             ORDER BY s.created_at DESC
+             LIMIT 20`,
+            [tripId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.patch('/api/trips/:id/pickup-suggestions/:sid/decision', requireRole('passenger', 'admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const tripId = String(req.params.id);
+        const suggestionId = Number(req.params.sid);
+        const decision = String(req.body?.decision || '').toLowerCase();
+        if (!Number.isFinite(suggestionId) || suggestionId <= 0) {
+            return res.status(400).json({ success: false, error: 'Invalid suggestion id' });
+        }
+        if (!['accepted', 'rejected'].includes(decision)) {
+            return res.status(400).json({ success: false, error: "decision must be 'accepted' or 'rejected'" });
+        }
+
+        await client.query('BEGIN');
+        const tripRes = await client.query('SELECT * FROM trips WHERE id = $1 LIMIT 1 FOR UPDATE', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) {
+            await client.query('ROLLBACK');
+            return res.status(access.status).json({ success: false, error: access.error });
+        }
+
+        const sugRes = await client.query(
+            `SELECT * FROM trip_pickup_suggestions
+             WHERE id = $1 AND trip_id = $2
+             LIMIT 1
+             FOR UPDATE`,
+            [suggestionId, tripId]
+        );
+        const suggestion = sugRes.rows[0] || null;
+        if (!suggestion) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: 'Suggestion not found' });
+        }
+        if (suggestion.status !== 'pending') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ success: false, error: 'Suggestion already decided' });
+        }
+
+        const updatedSug = await client.query(
+            `UPDATE trip_pickup_suggestions
+             SET status = $1,
+                 passenger_decision_at = CURRENT_TIMESTAMP
+             WHERE id = $2
+             RETURNING *`,
+            [decision, suggestionId]
+        );
+
+        let updatedTrip = tripRow;
+        if (decision === 'accepted') {
+            const newLat = suggestion.suggested_lat !== null && suggestion.suggested_lat !== undefined ? Number(suggestion.suggested_lat) : null;
+            const newLng = suggestion.suggested_lng !== null && suggestion.suggested_lng !== undefined ? Number(suggestion.suggested_lng) : null;
+            if (Number.isFinite(newLat) && Number.isFinite(newLng)) {
+                const title = suggestion.suggested_title ? String(suggestion.suggested_title) : tripRow.pickup_location;
+                const updateTripRes = await client.query(
+                    `UPDATE trips
+                     SET pickup_lat = $1,
+                         pickup_lng = $2,
+                         pickup_location = $3,
+                         pickup_hub_id = $4,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $5
+                     RETURNING *`,
+                    [newLat, newLng, title, suggestion.hub_id || null, tripId]
+                );
+                updatedTrip = updateTripRes.rows[0] || updatedTrip;
+
+                // Keep pending_ride_requests in sync (if still waiting)
+                try {
+                    await client.query(
+                        `UPDATE pending_ride_requests
+                         SET pickup_lat = $1,
+                             pickup_lng = $2,
+                             pickup_location = $3,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE trip_id = $4
+                           AND status IN ('waiting', 'accepted')`,
+                        [newLat, newLng, title, tripId]
+                    );
+                } catch (e) {
+                    // non-blocking
+                }
+            }
+        }
+
+        await client.query('COMMIT');
+
+        try {
+            io.to(tripRoom(tripId)).emit('pickup_suggestion_decided', {
+                trip_id: String(tripId),
+                suggestion_id: suggestionId,
+                decision,
+                trip: updatedTrip
+            });
+        } catch (e) {
+            // ignore
+        }
+
+        res.json({ success: true, data: updatedSug.rows[0], trip: updatedTrip });
+    } catch (err) {
+        try {
+            await client.query('ROLLBACK');
+        } catch (e) {
+            // ignore
+        }
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// --- ETA + delay reason ---
+
+app.get('/api/trips/:id/eta', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        res.json({
+            success: true,
+            data: {
+                trip_id: String(tripId),
+                eta_minutes: tripRow.eta_minutes !== null && tripRow.eta_minutes !== undefined ? Number(tripRow.eta_minutes) : null,
+                eta_reason: tripRow.eta_reason || null,
+                eta_updated_at: tripRow.eta_updated_at || null
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.patch('/api/trips/:id/eta', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const { eta_minutes, eta_reason } = req.body || {};
+        const eta = eta_minutes !== undefined && eta_minutes !== null ? Number(eta_minutes) : null;
+        if (eta !== null && (!Number.isFinite(eta) || eta < 0 || eta > 360)) {
+            return res.status(400).json({ success: false, error: 'eta_minutes must be a valid number of minutes' });
+        }
+
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(tripRow?.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        const updated = await pool.query(
+            `UPDATE trips
+             SET eta_minutes = $1,
+                 eta_reason = NULLIF($2, ''),
+                 eta_updated_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3
+             RETURNING id, eta_minutes, eta_reason, eta_updated_at`,
+            [eta, eta_reason !== undefined && eta_reason !== null ? String(eta_reason) : '', tripId]
+        );
+
+        try {
+            io.to(tripRoom(tripId)).emit('trip_eta_update', { trip_id: String(tripId), ...updated.rows[0] });
+        } catch (e) {
+            // ignore
+        }
+
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Favorite captain ---
+
+app.get('/api/passengers/me/favorites', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT f.driver_id, f.created_at, d.name, d.phone, d.email, d.car_type, d.rating, d.total_trips
+             FROM passenger_favorite_drivers f
+             JOIN drivers d ON d.id = f.driver_id
+             WHERE f.user_id = $1
+             ORDER BY f.created_at DESC`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/favorites', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const driverId = Number(req.body?.driver_id);
+        if (!userId || !Number.isFinite(driverId) || driverId <= 0) {
+            return res.status(400).json({ success: false, error: 'driver_id is required' });
+        }
+
+        await pool.query(
+            `INSERT INTO passenger_favorite_drivers (user_id, driver_id)
+             VALUES ($1, $2)
+             ON CONFLICT (user_id, driver_id) DO NOTHING`,
+            [userId, driverId]
+        );
+
+        res.status(201).json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/passengers/me/favorites/:driverId', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        const driverId = Number(req.params.driverId);
+        if (!userId || !Number.isFinite(driverId) || driverId <= 0) {
+            return res.status(400).json({ success: false, error: 'Invalid request' });
+        }
+
+        await pool.query('DELETE FROM passenger_favorite_drivers WHERE user_id = $1 AND driver_id = $2', [userId, driverId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Passenger note templates ---
+
+app.get('/api/passengers/me/note-templates', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+        const result = await pool.query(
+            `SELECT id, title, note, created_at
+             FROM passenger_note_templates
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 50`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/note-templates', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const { title = null, note } = req.body || {};
+        if (!userId || !note) return res.status(400).json({ success: false, error: 'note is required' });
+
+        const insert = await pool.query(
+            `INSERT INTO passenger_note_templates (user_id, title, note)
+             VALUES ($1, NULLIF($2, ''), $3)
+             RETURNING id, title, note, created_at`,
+            [userId, title !== null && title !== undefined ? String(title) : '', String(note)]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/passengers/me/note-templates/:id', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const templateId = Number(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId || !Number.isFinite(templateId) || templateId <= 0) {
+            return res.status(400).json({ success: false, error: 'Invalid request' });
+        }
+        await pool.query('DELETE FROM passenger_note_templates WHERE id = $1 AND user_id = $2', [templateId, userId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Loyalty tiers ---
+
+app.get('/api/passengers/me/loyalty', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        // Ensure row exists
+        await pool.query(
+            `INSERT INTO passenger_loyalty_stats (user_id)
+             VALUES ($1)
+             ON CONFLICT (user_id) DO NOTHING`,
+            [userId]
+        );
+
+        // Recompute quickly from canonical trips (keeps accuracy even if server restarted)
+        const completedRes = await pool.query(
+            `SELECT COUNT(*)::int AS count
+             FROM trips
+             WHERE COALESCE(rider_id, user_id) = $1
+               AND status = 'completed'`,
+            [userId]
+        );
+        const cancelledRes = await pool.query(
+            `SELECT COUNT(*)::int AS count
+             FROM trips
+             WHERE COALESCE(rider_id, user_id) = $1
+               AND status = 'cancelled'`,
+            [userId]
+        );
+        const hubRes = await pool.query(
+            `SELECT COUNT(*)::int AS count
+             FROM trips
+             WHERE COALESCE(rider_id, user_id) = $1
+               AND status = 'completed'
+               AND pickup_hub_id IS NOT NULL`,
+            [userId]
+        );
+
+        const completedTrips = completedRes.rows[0]?.count || 0;
+        const cancelledTrips = cancelledRes.rows[0]?.count || 0;
+        const hubComplianceTrips = hubRes.rows[0]?.count || 0;
+
+        await pool.query(
+            `UPDATE passenger_loyalty_stats
+             SET completed_trips = $2,
+                 cancelled_trips = $3,
+                 hub_compliance_trips = $4,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = $1`,
+            [userId, completedTrips, cancelledTrips, hubComplianceTrips]
+        );
+
+        const tierInfo = getLoyaltyTier({ completedTrips, cancelledTrips, hubComplianceTrips });
+        res.json({
+            success: true,
+            data: {
+                user_id: userId,
+                completed_trips: completedTrips,
+                cancelled_trips: cancelledTrips,
+                hub_compliance_trips: hubComplianceTrips,
+                ...tierInfo
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Family / group ---
+
+app.get('/api/passengers/me/family', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+        const result = await pool.query(
+            `SELECT id, name, phone, daily_limit, weekly_limit, is_active, created_at
+             FROM passenger_family_members
+             WHERE owner_user_id = $1
+             ORDER BY created_at DESC`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/family', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const { name, phone = null, daily_limit = null, weekly_limit = null } = req.body || {};
+        if (!userId || !name) return res.status(400).json({ success: false, error: 'name is required' });
+        const insert = await pool.query(
+            `INSERT INTO passenger_family_members (owner_user_id, name, phone, daily_limit, weekly_limit)
+             VALUES ($1, $2, NULLIF($3, ''), $4, $5)
+             RETURNING id, name, phone, daily_limit, weekly_limit, is_active, created_at`,
+            [
+                userId,
+                String(name),
+                phone !== null && phone !== undefined ? String(phone) : '',
+                daily_limit !== null && daily_limit !== undefined ? Number(daily_limit) : null,
+                weekly_limit !== null && weekly_limit !== undefined ? Number(weekly_limit) : null
+            ]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/passengers/me/family/:id', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const memberId = Number(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId || !Number.isFinite(memberId) || memberId <= 0) {
+            return res.status(400).json({ success: false, error: 'Invalid request' });
+        }
+        await pool.query('DELETE FROM passenger_family_members WHERE id = $1 AND owner_user_id = $2', [memberId, userId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Scheduled rides ---
+
+app.post('/api/scheduled-rides', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const {
+            pickup_location,
+            dropoff_location,
+            pickup_lat,
+            pickup_lng,
+            dropoff_lat,
+            dropoff_lng,
+            car_type = 'economy',
+            payment_method = 'cash',
+            scheduled_at
+        } = req.body || {};
+
+        const pickupLat = Number(pickup_lat);
+        const pickupLng = Number(pickup_lng);
+        const dropoffLat = Number(dropoff_lat);
+        const dropoffLng = Number(dropoff_lng);
+        const scheduledAt = scheduled_at ? new Date(scheduled_at) : null;
+        if (!userId || !pickup_location || !dropoff_location) {
+            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) {
+            return res.status(400).json({ success: false, error: 'Invalid coordinates' });
+        }
+        if (!scheduledAt || isNaN(scheduledAt.getTime())) {
+            return res.status(400).json({ success: false, error: 'scheduled_at is required' });
+        }
+        if (scheduledAt.getTime() < Date.now() + 5 * 60 * 1000) {
+            return res.status(400).json({ success: false, error: 'scheduled_at must be at least 5 minutes in the future' });
+        }
+
+        const { price } = computeSimplePrice({ pickupLat, pickupLng, dropoffLat, dropoffLng, carType: car_type });
+
+        const insert = await pool.query(
+            `INSERT INTO scheduled_rides (
+                user_id, pickup_location, dropoff_location,
+                pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                car_type, estimated_price, payment_method, scheduled_at
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             RETURNING *`,
+            [userId, pickup_location, dropoff_location, pickupLat, pickupLng, dropoffLat, dropoffLng, car_type, price, payment_method, scheduledAt]
+        );
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/scheduled-rides/me', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+        const result = await pool.query(
+            `SELECT *
+             FROM scheduled_rides
+             WHERE user_id = $1
+             ORDER BY scheduled_at DESC
+             LIMIT 100`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/scheduled-rides/:id/confirm', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const scheduledId = Number(req.params.id);
+        if (!Number.isFinite(scheduledId) || scheduledId <= 0) {
+            return res.status(400).json({ success: false, error: 'Invalid scheduled ride id' });
+        }
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'Unauthorized' });
+
+        const updated = await pool.query(
+            `UPDATE scheduled_rides
+             SET status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND user_id = $2 AND status = 'pending_confirmation'
+             RETURNING *`,
+            [scheduledId, userId]
+        );
+        if (updated.rows.length === 0) {
+            return res.status(409).json({ success: false, error: 'Scheduled ride cannot be confirmed' });
+        }
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Admin/cron helper: create real trips for scheduled rides near time window
+app.post('/api/scheduled-rides/process', requireRole('admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const windowMinutes = Number.isFinite(Number(req.body?.window_minutes)) ? Math.min(Math.max(Number(req.body.window_minutes), 1), 180) : 15;
+        await client.query('BEGIN');
+
+        const due = await client.query(
+            `SELECT *
+             FROM scheduled_rides
+             WHERE status = 'confirmed'
+               AND scheduled_at <= NOW() + ($1 * INTERVAL '1 minute')
+               AND created_trip_id IS NULL
+             ORDER BY scheduled_at ASC
+             LIMIT 25
+             FOR UPDATE SKIP LOCKED`,
+            [windowMinutes]
+        );
+
+        const created = [];
+        for (const ride of due.rows) {
+            const tripId = 'SCH-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+            const tripInsert = await client.query(
+                `INSERT INTO trips (
+                    id, user_id, rider_id,
+                    pickup_location, dropoff_location,
+                    pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                    car_type, cost, price, payment_method, status, source
+                 ) VALUES ($1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,'pending','scheduled')
+                 RETURNING *`,
+                [
+                    tripId,
+                    ride.user_id,
+                    ride.pickup_location,
+                    ride.dropoff_location,
+                    Number(ride.pickup_lat),
+                    Number(ride.pickup_lng),
+                    Number(ride.dropoff_lat),
+                    Number(ride.dropoff_lng),
+                    ride.car_type || 'economy',
+                    Number(ride.estimated_price || 0),
+                    ride.payment_method || 'cash'
+                ]
+            );
+
+            await client.query(
+                `UPDATE scheduled_rides
+                 SET status = 'driver_assignment',
+                     created_trip_id = $2,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1`,
+                [ride.id, tripId]
+            );
+            created.push(tripInsert.rows[0]);
+        }
+
+        await client.query('COMMIT');
+        res.json({ success: true, created_count: created.length, data: created });
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// --- Price lock ---
+
+app.post('/api/pricing/lock', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const { pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, car_type = 'economy' } = req.body || {};
+        const pickupLat = Number(pickup_lat);
+        const pickupLng = Number(pickup_lng);
+        const dropoffLat = Number(dropoff_lat);
+        const dropoffLng = Number(dropoff_lng);
+        if (!userId || !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) {
+            return res.status(400).json({ success: false, error: 'Invalid coordinates' });
+        }
+
+        const ttlSeconds = Number.isFinite(Number(req.body?.ttl_seconds)) ? Math.min(Math.max(Number(req.body.ttl_seconds), 30), 600) : 120;
+        const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+        const { price, distance_km } = computeSimplePrice({ pickupLat, pickupLng, dropoffLat, dropoffLng, carType: car_type });
+
+        const insert = await pool.query(
+            `INSERT INTO price_locks (
+                user_id, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, car_type, price, expires_at
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             RETURNING id, user_id, price, currency, expires_at, created_at`,
+            [userId, pickupLat, pickupLng, dropoffLat, dropoffLng, car_type, price, expiresAt]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0], quote: { distance_km, price } });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Multi-stop trip ---
+
+app.get('/api/trips/:id/stops', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const stops = await pool.query(
+            `SELECT stop_order, label, lat, lng, created_at
+             FROM trip_stops
+             WHERE trip_id = $1
+             ORDER BY stop_order ASC`,
+            [tripId]
+        );
+
+        res.json({ success: true, data: stops.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/stops', requireRole('passenger', 'admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const tripId = String(req.params.id);
+        const stops = Array.isArray(req.body?.stops) ? req.body.stops : [];
+        if (stops.length > 5) {
+            return res.status(400).json({ success: false, error: 'Maximum 5 stops' });
+        }
+
+        await client.query('BEGIN');
+        const tripRes = await client.query('SELECT * FROM trips WHERE id = $1 LIMIT 1 FOR UPDATE', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) {
+            await client.query('ROLLBACK');
+            return res.status(access.status).json({ success: false, error: access.error });
+        }
+
+        await client.query('DELETE FROM trip_stops WHERE trip_id = $1', [tripId]);
+        let order = 1;
+        for (const s of stops) {
+            const lat = Number(s?.lat);
+            const lng = Number(s?.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, error: 'Invalid stop coordinates' });
+            }
+            const label = s?.label !== undefined && s?.label !== null ? String(s.label) : null;
+            await client.query(
+                `INSERT INTO trip_stops (trip_id, stop_order, label, lat, lng)
+                 VALUES ($1,$2,NULLIF($3,''),$4,$5)`,
+                [tripId, order, label || '', lat, lng]
+            );
+            order += 1;
+        }
+
+        // Reprice (simple) using segments
+        const pickupLat = Number(tripRow.pickup_lat);
+        const pickupLng = Number(tripRow.pickup_lng);
+        const dropoffLat = Number(tripRow.dropoff_lat);
+        const dropoffLng = Number(tripRow.dropoff_lng);
+        let last = { lat: pickupLat, lng: pickupLng };
+        let totalKm = 0;
+        for (const s of stops) {
+            const seg = haversineKm(last, { lat: Number(s.lat), lng: Number(s.lng) });
+            totalKm += seg;
+            last = { lat: Number(s.lat), lng: Number(s.lng) };
+        }
+        totalKm += haversineKm(last, { lat: dropoffLat, lng: dropoffLng });
+        const carType = tripRow.car_type || 'economy';
+        const baseFare = 8;
+        const perKm = carType === 'vip' ? 4 : carType === 'family' ? 3.2 : 2.6;
+        const newPrice = Math.max(10, Math.round((baseFare + totalKm * perKm) * 100) / 100);
+
+        const updatedTripRes = await client.query(
+            `UPDATE trips
+             SET price = $2,
+                 cost = $2,
+                 distance_km = $3,
+                 distance = $3,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING *`,
+            [tripId, newPrice, Math.round(totalKm * 100) / 100]
+        );
+
+        await client.query('COMMIT');
+        res.json({ success: true, trip: updatedTripRes.rows[0] });
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// --- Split fare ---
+
+app.post('/api/trips/:id/split-fare', requireRole('passenger', 'admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const tripId = String(req.params.id);
+        const splits = Array.isArray(req.body?.splits) ? req.body.splits : [];
+        if (splits.length < 2 || splits.length > 5) {
+            return res.status(400).json({ success: false, error: 'splits must have 2-5 participants' });
+        }
+
+        await client.query('BEGIN');
+        const tripRes = await client.query('SELECT * FROM trips WHERE id = $1 LIMIT 1 FOR UPDATE', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) {
+            await client.query('ROLLBACK');
+            return res.status(access.status).json({ success: false, error: access.error });
+        }
+
+        const tripPrice = Number(tripRow.price !== null && tripRow.price !== undefined ? tripRow.price : tripRow.cost || 0);
+        if (!Number.isFinite(tripPrice) || tripPrice <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ success: false, error: 'Trip price is not set' });
+        }
+
+        let total = 0;
+        for (const s of splits) {
+            const payerUserId = Number(s?.user_id);
+            const amount = Number(s?.amount);
+            const method = String(s?.method || 'wallet').toLowerCase();
+            if (!Number.isFinite(payerUserId) || payerUserId <= 0 || !Number.isFinite(amount) || amount <= 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, error: 'Invalid split entry' });
+            }
+            if (!['wallet', 'cash'].includes(method)) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, error: 'method must be wallet or cash' });
+            }
+            total += amount;
+        }
+
+        const rounded = Math.round(total * 100) / 100;
+        if (Math.abs(rounded - tripPrice) > 0.5) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, error: 'Split total must match trip price' });
+        }
+
+        await client.query('DELETE FROM trip_split_payments WHERE trip_id = $1', [tripId]);
+        for (const s of splits) {
+            const payerUserId = Number(s.user_id);
+            const amount = Math.round(Number(s.amount) * 100) / 100;
+            const method = String(s.method || 'wallet').toLowerCase();
+            await client.query(
+                `INSERT INTO trip_split_payments (trip_id, payer_user_id, amount, method)
+                 VALUES ($1,$2,$3,$4)`,
+                [tripId, payerUserId, amount, method]
+            );
+        }
+
+        await client.query(
+            `UPDATE trips
+             SET payment_method = 'split', updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [tripId]
+        );
+
+        await client.query('COMMIT');
+        res.json({ success: true });
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.get('/api/trips/:id/split-fare', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const result = await pool.query(
+            `SELECT payer_user_id AS user_id, amount, method, status, paid_at, created_at
+             FROM trip_split_payments
+             WHERE trip_id = $1
+             ORDER BY created_at ASC`,
+            [tripId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/split-fare/cash-collected', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(tripRow?.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        const updated = await pool.query(
+            `UPDATE trip_split_payments
+             SET status = 'paid', paid_at = CURRENT_TIMESTAMP
+             WHERE trip_id = $1 AND method = 'cash'
+             RETURNING *`,
+            [tripId]
+        );
+        res.json({ success: true, count: updated.rows.length, data: updated.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Safety pack (share + emergency + event log) ---
+
+app.post('/api/trips/:id/share', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const ttlHours = Number.isFinite(Number(req.body?.ttl_hours)) ? Math.min(Math.max(Number(req.body.ttl_hours), 1), 168) : 24;
+        const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1000);
+        const token = makeShareToken();
+
+        const insert = await pool.query(
+            `INSERT INTO trip_shares (trip_id, share_token, created_by_user_id, expires_at)
+             VALUES ($1,$2,$3,$4)
+             RETURNING id, trip_id, share_token, expires_at, created_at`,
+            [tripId, token, authUserId || null, expiresAt]
+        );
+
+        try {
+            await pool.query(
+                `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
+                 VALUES ($1,$2,$3,'share_created',NULL)`,
+                [tripId, String(req.auth?.role || 'passenger'), authUserId || null]
+            );
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0], url: `/api/share/${token}` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/share/:token', async (req, res) => {
+    try {
+        const token = String(req.params.token);
+        const shareRes = await pool.query(
+            `SELECT *
+             FROM trip_shares
+             WHERE share_token = $1
+             LIMIT 1`,
+            [token]
+        );
+        const share = shareRes.rows[0] || null;
+        if (!share) return res.status(404).json({ success: false, error: 'Share not found' });
+        if (share.expires_at && new Date(share.expires_at).getTime() < Date.now()) {
+            return res.status(410).json({ success: false, error: 'Share expired' });
+        }
+
+        const tripRes = await pool.query(
+            `SELECT t.id, t.pickup_location, t.dropoff_location, t.pickup_lat, t.pickup_lng, t.dropoff_lat, t.dropoff_lng,
+                    t.status, t.trip_status, t.driver_id, COALESCE(t.driver_name, d.name) AS driver_name,
+                    d.last_lat AS driver_lat, d.last_lng AS driver_lng, d.last_location_at
+             FROM trips t
+             LEFT JOIN drivers d ON d.id = t.driver_id
+             WHERE t.id = $1
+             LIMIT 1`,
+            [share.trip_id]
+        );
+        if (tripRes.rows.length === 0) return res.status(404).json({ success: false, error: 'Trip not found' });
+        res.json({ success: true, data: tripRes.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/safety/emergency', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const msg = req.body?.message !== undefined && req.body?.message !== null ? String(req.body.message) : null;
+        const insert = await pool.query(
+            `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, created_by_driver_id, event_type, message)
+             VALUES ($1,$2,$3,$4,'emergency_pressed',NULLIF($5,''))
+             RETURNING *`,
+            [tripId, String(req.auth?.role || ''), authUserId || null, authDriverId || null, msg || '']
+        );
+
+        try {
+            io.to(tripRoom(tripId)).emit('safety_event', { trip_id: String(tripId), event: insert.rows[0] });
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/trips/:id/safety/events', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const events = await pool.query(
+            `SELECT id, event_type, message, created_by_role, created_at
+             FROM trip_safety_events
+             WHERE trip_id = $1
+             ORDER BY created_at DESC
+             LIMIT 50`,
+            [tripId]
+        );
+        res.json({ success: true, data: events.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- In-app support tickets (with optional attachment) ---
+
+app.post('/api/support/tickets', requireAuth, upload.single('attachment'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+
+        const tripId = req.body?.trip_id ? String(req.body.trip_id) : null;
+        const category = req.body?.category ? String(req.body.category) : null;
+        const description = req.body?.description !== undefined && req.body?.description !== null ? String(req.body.description) : null;
+
+        if (!category) return res.status(400).json({ success: false, error: 'category is required' });
+
+        if (tripId) {
+            const tripRes = await pool.query('SELECT id, user_id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+            const tripRow = tripRes.rows[0] || null;
+            const access = requireTripAccess({
+                tripRow,
+                authRole,
+                authUserId,
+                authDriverId: req.auth?.driver_id
+            });
+            if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+        }
+
+        const attachmentPath = req.file ? `/uploads/${req.file.filename}` : null;
+        const insert = await pool.query(
+            `INSERT INTO support_tickets (trip_id, user_id, category, description, attachment_path)
+             VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5,''))
+             RETURNING *`,
+            [tripId, authUserId || null, category, description || '', attachmentPath || '']
+        );
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/support/me/tickets', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+        const result = await pool.query(
+            `SELECT *
+             FROM support_tickets
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 100`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/admin/support/tickets', requireRole('admin'), async (req, res) => {
+    try {
+        const status = req.query.status ? String(req.query.status) : null;
+        const params = [];
+        let where = '';
+        if (status) {
+            params.push(status);
+            where = `WHERE status = $${params.length}`;
+        }
+        const result = await pool.query(
+            `SELECT *
+             FROM support_tickets
+             ${where}
+             ORDER BY created_at DESC
+             LIMIT 200`,
+            params
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.patch('/api/admin/support/tickets/:id', requireRole('admin'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const nextStatus = req.body?.status ? String(req.body.status) : null;
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (!nextStatus) return res.status(400).json({ success: false, error: 'status is required' });
+        const updated = await pool.query(
+            `UPDATE support_tickets
+             SET status = $2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING *`,
+            [id, nextStatus]
+        );
+        if (updated.rows.length === 0) return res.status(404).json({ success: false, error: 'Ticket not found' });
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Receipts ---
+
+app.get('/api/trips/:id/receipt', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query(
+            `SELECT t.*, u.name AS passenger_name, u.phone AS passenger_phone, COALESCE(t.driver_name, d.name) AS driver_name
+             FROM trips t
+             LEFT JOIN users u ON u.id = t.user_id
+             LEFT JOIN drivers d ON d.id = t.driver_id
+             WHERE t.id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const split = await pool.query(
+            `SELECT payer_user_id, amount, method, status, paid_at
+             FROM trip_split_payments
+             WHERE trip_id = $1
+             ORDER BY created_at ASC`,
+            [tripId]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                trip: tripRow,
+                split_fare: split.rows
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
@@ -935,6 +2578,11 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             pickup_timestamp,
             dropoff_lat,
             dropoff_lng,
+            pickup_hub_id,
+            passenger_note,
+            passenger_note_template_id,
+            booked_for_family_member_id,
+            price_lock_id,
             car_type = 'economy',
             cost,
             price,
@@ -959,7 +2607,85 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
         }
 
         const effectiveRiderId = authRole === 'passenger' ? authUserId : (rider_id || user_id);
-        const effectiveCost = price !== undefined && price !== null ? price : cost;
+
+        // Optional: passenger note from template
+        let effectivePassengerNote = passenger_note !== undefined && passenger_note !== null ? String(passenger_note) : null;
+        if (!effectivePassengerNote && passenger_note_template_id !== undefined && passenger_note_template_id !== null) {
+            const tplId = Number(passenger_note_template_id);
+            if (Number.isFinite(tplId) && tplId > 0) {
+                const tplRes = await pool.query(
+                    `SELECT note
+                     FROM passenger_note_templates
+                     WHERE id = $1 AND user_id = $2
+                     LIMIT 1`,
+                    [tplId, effectiveRiderId]
+                );
+                if (tplRes.rows.length > 0) {
+                    effectivePassengerNote = tplRes.rows[0].note ? String(tplRes.rows[0].note) : null;
+                }
+            }
+        }
+
+        // Optional: family member booking
+        let familyMember = null;
+        const familyMemberId = booked_for_family_member_id !== undefined && booked_for_family_member_id !== null
+            ? Number(booked_for_family_member_id)
+            : null;
+        if (Number.isFinite(familyMemberId) && familyMemberId > 0) {
+            const famRes = await pool.query(
+                `SELECT id, name, phone, daily_limit, weekly_limit
+                 FROM passenger_family_members
+                 WHERE id = $1 AND owner_user_id = $2 AND is_active = true
+                 LIMIT 1`,
+                [familyMemberId, effectiveRiderId]
+            );
+            familyMember = famRes.rows[0] || null;
+            if (!familyMember) {
+                return res.status(404).json({ success: false, error: 'Family member not found' });
+            }
+        }
+
+        // Optional: price lock validation
+        let effectiveCost = price !== undefined && price !== null ? price : cost;
+        const priceLockId = price_lock_id !== undefined && price_lock_id !== null ? Number(price_lock_id) : null;
+        let lockedPriceRow = null;
+        if (Number.isFinite(priceLockId) && priceLockId > 0) {
+            const lockRes = await pool.query(
+                `SELECT *
+                 FROM price_locks
+                 WHERE id = $1 AND user_id = $2
+                 LIMIT 1`,
+                [priceLockId, effectiveRiderId]
+            );
+            lockedPriceRow = lockRes.rows[0] || null;
+            if (!lockedPriceRow) {
+                return res.status(404).json({ success: false, error: 'Price lock not found' });
+            }
+            if (lockedPriceRow.used_trip_id) {
+                return res.status(409).json({ success: false, error: 'Price lock already used' });
+            }
+            if (lockedPriceRow.expires_at && new Date(lockedPriceRow.expires_at).getTime() < Date.now()) {
+                return res.status(410).json({ success: false, error: 'Price lock expired' });
+            }
+            effectiveCost = Number(lockedPriceRow.price);
+        }
+
+        // Optional: pickup hub overrides pickup coords + location
+        const pickupHubId = pickup_hub_id !== undefined && pickup_hub_id !== null ? Number(pickup_hub_id) : null;
+        let pickupHub = null;
+        if (Number.isFinite(pickupHubId) && pickupHubId > 0) {
+            const hubRes = await pool.query(
+                `SELECT id, title, lat, lng
+                 FROM pickup_hubs
+                 WHERE id = $1 AND is_active = true
+                 LIMIT 1`,
+                [pickupHubId]
+            );
+            pickupHub = hubRes.rows[0] || null;
+            if (!pickupHub) {
+                return res.status(404).json({ success: false, error: 'Pickup hub not found' });
+            }
+        }
 
         // Validation: Require core trip fields
         if (!effectiveRiderId || !pickup_location || !dropoff_location || effectiveCost === undefined || effectiveCost === null || isNaN(effectiveCost)) {
@@ -969,8 +2695,8 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             });
         }
 
-        const pickupLat = pickup_lat !== undefined && pickup_lat !== null ? Number(pickup_lat) : null;
-        const pickupLng = pickup_lng !== undefined && pickup_lng !== null ? Number(pickup_lng) : null;
+        const pickupLat = pickupHub ? Number(pickupHub.lat) : (pickup_lat !== undefined && pickup_lat !== null ? Number(pickup_lat) : null);
+        const pickupLng = pickupHub ? Number(pickupHub.lng) : (pickup_lng !== undefined && pickup_lng !== null ? Number(pickup_lng) : null);
         const pickupAccuracy = pickup_accuracy !== undefined && pickup_accuracy !== null ? Number(pickup_accuracy) : null;
         const pickupTimestamp = pickup_timestamp !== undefined && pickup_timestamp !== null ? Number(pickup_timestamp) : null;
         const dropoffLat = dropoff_lat !== undefined && dropoff_lat !== null ? Number(dropoff_lat) : null;
@@ -1014,6 +2740,8 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
 
         const tripId = id || 'TR-' + Date.now();
 
+        const effectivePickupLocation = pickupHub ? String(pickupHub.title) : pickup_location;
+
         const effectiveDistance = distance_km !== undefined && distance_km !== null ? distance_km : distance;
         const effectiveDuration = duration_minutes !== undefined && duration_minutes !== null ? duration_minutes : duration;
 
@@ -1025,27 +2753,47 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                 cost, price,
                 distance, distance_km,
                 duration, duration_minutes,
-                payment_method, status, driver_name, source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                payment_method, status, driver_name, source,
+                pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
             RETURNING *
         `, [
-            tripId, effectiveRiderId, effectiveRiderId, driver_id, pickup_location, dropoff_location,
+            tripId, effectiveRiderId, effectiveRiderId, driver_id, effectivePickupLocation, dropoff_location,
             pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
             car_type,
             effectiveCost, effectiveCost,
             effectiveDistance, effectiveDistance,
             effectiveDuration, effectiveDuration,
-            payment_method, status, driver_name, source
+            payment_method, status, driver_name, source,
+            pickupHub ? pickupHub.id : null,
+            effectivePassengerNote ? String(effectivePassengerNote) : null,
+            familyMember ? Number(familyMember.id) : null,
+            lockedPriceRow ? Number(lockedPriceRow.id) : null
         ]);
 
         let createdTrip = result.rows[0];
+
+        if (lockedPriceRow) {
+            try {
+                await pool.query(
+                    `UPDATE price_locks
+                     SET used_trip_id = $2
+                     WHERE id = $1 AND used_trip_id IS NULL`,
+                    [lockedPriceRow.id, createdTrip.id]
+                );
+            } catch (e) {
+                // non-blocking
+            }
+        }
 
         // ✨ إضافة الطلب إلى جدول pending_ride_requests إذا كان في حالة pending
         if (createdTrip.status === 'pending' && !createdTrip.driver_id) {
             try {
                 // الحصول على معلومات الراكب
-                const userResult = await pool.query('SELECT name, phone FROM users WHERE id = $1', [effectiveRiderId]);
-                const user = userResult.rows[0];
+            const userResult = await pool.query('SELECT name, phone FROM users WHERE id = $1', [effectiveRiderId]);
+            const user = userResult.rows[0];
+            const effectivePassengerName = familyMember ? String(familyMember.name) : (user?.name || 'راكب');
+            const effectivePassengerPhone = familyMember ? (familyMember.phone || '') : (user?.phone || '');
                 
                 const requestId = `REQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                 const expiresAt = new Date(Date.now() + PENDING_TRIP_TTL_MINUTES * 60 * 1000);
@@ -1062,12 +2810,27 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                     VALUES ($1, 'passenger_app', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'waiting', $19)
                 `, [
                     tripId,
-                    requestId, effectiveRiderId, user?.name || 'راكب', user?.phone || '',
-                    pickup_location, dropoff_location,
+                    requestId, effectiveRiderId, effectivePassengerName, effectivePassengerPhone,
+                    effectivePickupLocation, dropoff_location,
                     pickupLat, pickupLng, pickupAccuracy, pickupTimestamp, dropoffLat, dropoffLng,
                     car_type, cost, distance, duration,
                     payment_method, expiresAt
                 ]);
+
+                // Store passenger notes (if present)
+                if (effectivePassengerNote) {
+                    try {
+                        await pool.query(
+                            `UPDATE pending_ride_requests
+                             SET notes = $1,
+                                 updated_at = CURRENT_TIMESTAMP
+                             WHERE trip_id = $2 AND request_id = $3`,
+                            [String(effectivePassengerNote), tripId, requestId]
+                        );
+                    } catch (e) {
+                        // non-blocking
+                    }
+                }
 
                 console.log(`✅ تم إضافة الطلب ${requestId} إلى pending_ride_requests للرحلة ${tripId}`);
             } catch (pendingErr) {
@@ -1081,7 +2844,8 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                 const nearest = await findNearestAvailableDriver({
                     pickupLat,
                     pickupLng,
-                    carType: createdTrip.car_type
+                    carType: createdTrip.car_type,
+                    riderId: effectiveRiderId
                 });
 
                 if (nearest && Number(nearest.distance_km) <= MAX_ASSIGN_DISTANCE_KM) {
@@ -1418,6 +3182,30 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
             return res.status(404).json({ success: false, error: 'Trip not found' });
         }
 
+        // Loyalty stats (cancel count) - anti-abuse: only on first transition to cancelled
+        if (status === 'cancelled' && beforeStatus !== 'cancelled') {
+            try {
+                const passengerId = result.rows[0].user_id ? Number(result.rows[0].user_id) : null;
+                if (passengerId) {
+                    await pool.query(
+                        `INSERT INTO passenger_loyalty_stats (user_id)
+                         VALUES ($1)
+                         ON CONFLICT (user_id) DO NOTHING`,
+                        [passengerId]
+                    );
+                    await pool.query(
+                        `UPDATE passenger_loyalty_stats
+                         SET cancelled_trips = cancelled_trips + 1,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE user_id = $1`,
+                        [passengerId]
+                    );
+                }
+            } catch (e) {
+                // non-blocking
+            }
+        }
+
         // Realtime events
         try {
             const updatedTrip = result.rows[0];
@@ -1742,6 +3530,164 @@ async function endTripHandler(req, res) {
 
         // Side effects (only on first completion transition)
         if (beforeStatus !== 'completed') {
+            // Passenger wallet payment (ledger) + anti-fraud safeguards
+            try {
+                const tripCost = Number(updatedTrip.cost || updatedTrip.price || 0);
+                const passengerId = updatedTrip.user_id ? Number(updatedTrip.user_id) : null;
+                const paymentMethod = String(updatedTrip.payment_method || '').toLowerCase();
+
+                const dailyLimit = process.env.PASSENGER_WALLET_DAILY_DEBIT_LIMIT
+                    ? Number(process.env.PASSENGER_WALLET_DAILY_DEBIT_LIMIT)
+                    : 5000;
+
+                async function debitUserWalletOnce({ ownerId, amount, referenceType, referenceId, reason }) {
+                    if (!Number.isFinite(ownerId) || ownerId <= 0) throw new Error('Invalid owner id');
+                    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Invalid amount');
+
+                    const owner = { owner_type: 'user', owner_id: ownerId };
+                    const balance = await getWalletBalance(client, owner);
+                    if (balance < amount) {
+                        throw new Error('Insufficient wallet balance');
+                    }
+
+                    if (Number.isFinite(dailyLimit) && dailyLimit > 0) {
+                        const today = await getTodayWalletDebitsTotal(client, { ...owner, referenceType: null });
+                        if (today + amount > dailyLimit) {
+                            throw new Error('Daily wallet limit exceeded');
+                        }
+                    }
+
+                    await client.query(
+                        `INSERT INTO wallet_transactions (
+                            owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_by_user_id, created_by_role
+                         ) VALUES ('user', $1, $2, 'SAR', NULLIF($3,''), $4, $5, NULL, 'system')
+                         ON CONFLICT DO NOTHING`,
+                        [ownerId, -Math.abs(amount), reason || '', referenceType, referenceId]
+                    );
+
+                    // Best-effort cached balance update for backward compatibility
+                    try {
+                        await client.query(
+                            `UPDATE users
+                             SET balance = COALESCE(balance, 0) - $1,
+                                 updated_at = CURRENT_TIMESTAMP
+                             WHERE id = $2`,
+                            [Math.abs(amount), ownerId]
+                        );
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+
+                if (passengerId && Number.isFinite(tripCost) && tripCost > 0) {
+                    if (paymentMethod === 'wallet') {
+                        await debitUserWalletOnce({
+                            ownerId: passengerId,
+                            amount: tripCost,
+                            referenceType: 'trip_payment',
+                            referenceId: String(updatedTrip.id),
+                            reason: `Trip payment ${String(updatedTrip.id)}`
+                        });
+                    }
+
+                    if (paymentMethod === 'split') {
+                        const splits = await client.query(
+                            `SELECT id, payer_user_id, amount, method, status
+                             FROM trip_split_payments
+                             WHERE trip_id = $1
+                             ORDER BY created_at ASC
+                             FOR UPDATE`,
+                            [updatedTrip.id]
+                        );
+
+                        if (splits.rows.length > 0) {
+                            // Validate totals (best-effort)
+                            const sum = splits.rows.reduce((acc, r) => acc + Number(r.amount || 0), 0);
+                            if (Math.abs((Math.round(sum * 100) / 100) - (Math.round(tripCost * 100) / 100)) > 0.5) {
+                                throw new Error('Split fare total mismatch');
+                            }
+
+                            for (const sp of splits.rows) {
+                                const method = String(sp.method || 'wallet').toLowerCase();
+                                const amount = Number(sp.amount || 0);
+                                const payerId = Number(sp.payer_user_id);
+
+                                if (!Number.isFinite(amount) || amount <= 0) continue;
+                                if (!Number.isFinite(payerId) || payerId <= 0) continue;
+                                if (String(sp.status || 'pending').toLowerCase() !== 'pending') continue;
+
+                                if (method === 'wallet') {
+                                    await debitUserWalletOnce({
+                                        ownerId: payerId,
+                                        amount,
+                                        referenceType: 'split_trip_payment',
+                                        referenceId: `${String(updatedTrip.id)}:${String(payerId)}`,
+                                        reason: `Split trip payment ${String(updatedTrip.id)}`
+                                    });
+
+                                    await client.query(
+                                        `UPDATE trip_split_payments
+                                         SET status = 'paid', paid_at = CURRENT_TIMESTAMP
+                                         WHERE id = $1`,
+                                        [sp.id]
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // If wallet payment fails, rollback trip completion (safety) only when wallet/split is required
+                const pm = String(updatedTrip.payment_method || '').toLowerCase();
+                if (pm === 'wallet' || pm === 'split') {
+                    throw e;
+                }
+            }
+
+            // Loyalty stats + points (award once per trip)
+            try {
+                const passengerId = updatedTrip.user_id ? Number(updatedTrip.user_id) : null;
+                if (passengerId) {
+                    await client.query(
+                        `INSERT INTO passenger_loyalty_stats (user_id)
+                         VALUES ($1)
+                         ON CONFLICT (user_id) DO NOTHING`,
+                        [passengerId]
+                    );
+                    await client.query(
+                        `UPDATE passenger_loyalty_stats
+                         SET completed_trips = completed_trips + 1,
+                             hub_compliance_trips = hub_compliance_trips + CASE WHEN $2::int IS NOT NULL THEN 1 ELSE 0 END,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE user_id = $1`,
+                        [passengerId, updatedTrip.pickup_hub_id ? 1 : null]
+                    );
+
+                    const tripCost = Number(updatedTrip.cost || updatedTrip.price || 0);
+                    const points = Number.isFinite(tripCost) && tripCost > 0 ? Math.max(1, Math.floor(tripCost / 10)) : 0;
+                    if (points > 0) {
+                        const reward = await client.query(
+                            `INSERT INTO trip_reward_events (user_id, trip_id, points_awarded)
+                             VALUES ($1,$2,$3)
+                             ON CONFLICT (trip_id) DO NOTHING
+                             RETURNING id`,
+                            [passengerId, String(updatedTrip.id), points]
+                        );
+                        if (reward.rows.length > 0) {
+                            await client.query(
+                                `UPDATE users
+                                 SET points = COALESCE(points, 0) + $1,
+                                     updated_at = CURRENT_TIMESTAMP
+                                 WHERE id = $2`,
+                                [points, passengerId]
+                            );
+                        }
+                    }
+                }
+            } catch (e) {
+                // non-blocking
+            }
+
             // Driver earnings
             if (updatedTrip.driver_id) {
                 const tripCost = Number(updatedTrip.cost || 0);
@@ -4757,6 +6703,7 @@ ensureDefaultAdmins()
     .then(() => ensurePendingRideColumns())
     .then(() => ensureDriverLocationColumns())
     .then(() => ensureAdminTripCountersTables())
+    .then(() => ensurePassengerFeatureTables())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');
         return driverSync.initializeSyncSystem();

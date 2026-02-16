@@ -597,6 +597,7 @@ let driverMarkerL = null;
 let passengerMarkerL = null;
 let routePolyline = null;
 let currentPickup = null; // {lat, lng}
+let currentPickupHubId = null;
 let currentDestination = null; // {lat, lng, label}
 let driverLocation = null; // {lat, lng}
 let passengerPickup = null; // {lat, lng, label}
@@ -621,6 +622,86 @@ let geoPermissionDenied = false;
 
 let passengerPickupUpdateInterval = null;
 let driverIncomingTripUpdateInterval = null;
+
+let pickupHubSuggestRequestAt = 0;
+
+function setSelectedPickupHub(hub) {
+    if (!hub || !hub.id) {
+        currentPickupHubId = null;
+        return;
+    }
+    currentPickupHubId = Number(hub.id);
+}
+
+function clearSelectedPickupHub() {
+    currentPickupHubId = null;
+}
+
+function renderPickupHubSuggestions(hubs) {
+    const box = document.getElementById('pickup-hubs-suggestions');
+    const list = document.getElementById('pickup-hubs-list');
+    if (!box || !list) return;
+
+    const rows = Array.isArray(hubs) ? hubs : [];
+    if (!rows.length) {
+        box.classList.add('hidden');
+        list.innerHTML = '';
+        return;
+    }
+
+    list.innerHTML = rows.map((h) => {
+        const title = (h.title || '').toString();
+        const category = (h.category || '').toString();
+        const dist = Number.isFinite(Number(h.distance_km)) ? `${Number(h.distance_km).toFixed(1)} كم` : '';
+        const sub = [category, dist].filter(Boolean).join(' • ');
+        return `
+            <button type="button" data-hub-id="${String(h.id)}" class="w-full text-right px-3 py-2 rounded-xl bg-gray-50 hover:bg-indigo-50 border border-gray-100 hover:border-indigo-100 transition-colors">
+                <div class="font-extrabold text-gray-800 text-sm">${escapeHtml(title)}</div>
+                ${sub ? `<div class="text-xs font-bold text-gray-500 mt-0.5">${escapeHtml(sub)}</div>` : ''}
+            </button>
+        `;
+    }).join('');
+
+    box.classList.remove('hidden');
+
+    list.querySelectorAll('button[data-hub-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const hubId = Number(btn.getAttribute('data-hub-id'));
+            const hub = rows.find((h) => Number(h.id) === hubId);
+            if (!hub) return;
+            setSelectedPickupHub(hub);
+            setPickup({ lat: Number(hub.lat), lng: Number(hub.lng) }, hub.title || 'نقطة تجمع', { keepHub: true });
+            showToast('✅ تم اختيار نقطة تجمع');
+        });
+    });
+}
+
+function escapeHtml(str) {
+    return String(str || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+async function refreshPickupHubSuggestions() {
+    if (currentUserRole !== 'passenger') return;
+    if (!currentPickup || !Number.isFinite(currentPickup.lat) || !Number.isFinite(currentPickup.lng)) return;
+    if (!window.ApiService || !ApiService.pickupHubs || typeof ApiService.pickupHubs.suggest !== 'function') return;
+
+    const now = Date.now();
+    if (now - pickupHubSuggestRequestAt < 1500) return;
+    pickupHubSuggestRequestAt = now;
+
+    try {
+        const resp = await ApiService.pickupHubs.suggest(currentPickup.lat, currentPickup.lng, 6);
+        renderPickupHubSuggestions(resp?.data || []);
+    } catch (e) {
+        // Hide on error
+        renderPickupHubSuggestions([]);
+    }
+}
 
 function formatStreetLabel(label) {
     if (!label) return 'موقع محدد';
@@ -839,7 +920,12 @@ function moveLeafletMapToContainer(containerId) {
     }
 }
 
-function setPickup(coords, label) {
+function setPickup(coords, label, options = {}) {
+    const keepHub = !!options.keepHub;
+    if (!keepHub) {
+        clearSelectedPickupHub();
+    }
+
     currentPickup = { ...coords, label: label || 'نقطة الالتقاط' };
     if (!leafletMap) return;
     if (pickupMarkerL) pickupMarkerL.remove();
@@ -851,6 +937,7 @@ function setPickup(coords, label) {
     updateCurrentLocationInput(currentPickup.label);
     
     pickupMarkerL.on('dragend', () => {
+        clearSelectedPickupHub();
         const p = pickupMarkerL.getLatLng();
         currentPickup.lat = p.lat;
         currentPickup.lng = p.lng;
@@ -861,8 +948,11 @@ function setPickup(coords, label) {
             bindStreetLabel(pickupMarkerL, address);
             updateCurrentLocationInput(address);
             showToast('تم تعديل موقع الالتقاط');
+            refreshPickupHubSuggestions();
         });
     });
+
+    refreshPickupHubSuggestions();
 }
 
 function setDestination(coords, label) {
@@ -3697,9 +3787,26 @@ window.requestRide = async function() {
     currentTripPrice = computePrice(currentCarType, est.distanceKm);
     
     if (scheduledTime) {
-        showToast(`تم جدولة الرحلة في ${scheduledTime.toLocaleString('ar-EG')}`);
-        setTimeout(() => resetApp(), 2000);
-        return;
+        try {
+            const payload = {
+                pickup_location: currentPickup.label || 'نقطة الالتقاط',
+                dropoff_location: currentDestination.label || 'الوجهة',
+                pickup_lat: currentPickup.lat,
+                pickup_lng: currentPickup.lng,
+                dropoff_lat: currentDestination.lat,
+                dropoff_lng: currentDestination.lng,
+                car_type: currentCarType,
+                payment_method: 'cash',
+                scheduled_at: scheduledTime.toISOString()
+            };
+            await ApiService.scheduledRides.create(payload);
+            showToast(`✅ تم جدولة الرحلة في ${scheduledTime.toLocaleString('ar-EG')}`);
+            setTimeout(() => resetApp(), 2000);
+            return;
+        } catch (e) {
+            showToast('❌ تعذر جدولة الرحلة، حاول مرة أخرى');
+            return;
+        }
     }
     
     try {
@@ -3713,9 +3820,12 @@ window.requestRide = async function() {
         }
 
         // Update local pickup marker/state to match what will be sent
-        const gpsPickupCoords = { lat: fix.lat, lng: fix.lng };
-        applyPassengerLocation(gpsPickupCoords, false);
-        maybeReverseGeocodePickup(gpsPickupCoords);
+        // If a pickup hub was selected, keep hub coords (do not overwrite with GPS fix)
+        if (!currentPickupHubId) {
+            const gpsPickupCoords = { lat: fix.lat, lng: fix.lng };
+            applyPassengerLocation(gpsPickupCoords, false);
+            maybeReverseGeocodePickup(gpsPickupCoords);
+        }
 
         console.log('📍 Rider pickup before sending trip:', {
             pickup_lat: fix.lat,
@@ -3728,12 +3838,13 @@ window.requestRide = async function() {
             user_id: user?.id || 1,
             pickup_location: currentPickup.label || 'نقطة الالتقاط',
             dropoff_location: currentDestination.label || 'الوجهة',
-            pickup_lat: fix.lat,
-            pickup_lng: fix.lng,
+            pickup_lat: currentPickupHubId ? currentPickup.lat : fix.lat,
+            pickup_lng: currentPickupHubId ? currentPickup.lng : fix.lng,
             pickup_accuracy: fix.accuracy,
             pickup_timestamp: fix.timestamp,
             dropoff_lat: currentDestination.lat,
             dropoff_lng: currentDestination.lng,
+            pickup_hub_id: currentPickupHubId || null,
             car_type: currentCarType,
             cost: currentTripPrice,
             distance: est.distanceKm,

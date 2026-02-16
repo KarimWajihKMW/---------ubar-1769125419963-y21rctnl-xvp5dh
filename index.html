@@ -977,6 +977,13 @@
                         </div>
                         <input type="text" id="current-loc-input" value="" placeholder="حدد موقعك" class="bg-transparent w-full outline-none text-gray-700 text-sm sm:text-base font-bold placeholder-gray-400" style="font-size: 16px" autocomplete="off">
                     </div>
+
+                    <!-- Smart Pickup Hubs Suggestions -->
+                    <div id="pickup-hubs-suggestions" class="hidden bg-white border border-gray-100 rounded-2xl p-3 shadow-sm">
+                        <div class="text-xs font-extrabold text-gray-500 mb-2">نقاط تجمع مقترحة قريبًا</div>
+                        <div id="pickup-hubs-list" class="space-y-2"></div>
+                    </div>
+
                     <div class="flex flex-wrap gap-2 sm:gap-3">
                         <button type="button" id="pickup-map-btn" onclick="startMapSelection('pickup')" class="px-3 sm:px-4 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-xs sm:text-sm font-bold border border-indigo-100 hover:bg-indigo-100 transition-colors">
                             حدد مكانك على الخريطة

@@ -170,8 +170,197 @@ const ApiService = {
                 method: 'PATCH',
                 body: JSON.stringify(pickupUpdate)
             });
+        },
+
+        async getEta(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/eta`);
+        },
+
+        async updateEta(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/eta`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async createPickupSuggestion(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/pickup-suggestions`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getPickupSuggestions(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/pickup-suggestions`);
+        },
+
+        async decidePickupSuggestion(tripId, suggestionId, decision) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/pickup-suggestions/${encodeURIComponent(suggestionId)}/decision`, {
+                method: 'PATCH',
+                body: JSON.stringify({ decision })
+            });
+        },
+
+        async getStops(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/stops`);
+        },
+
+        async setStops(tripId, stops = []) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/stops`, {
+                method: 'POST',
+                body: JSON.stringify({ stops })
+            });
+        },
+
+        async setSplitFare(tripId, splits = []) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/split-fare`, {
+                method: 'POST',
+                body: JSON.stringify({ splits })
+            });
+        },
+
+        async getSplitFare(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/split-fare`);
+        },
+
+        async markSplitCashCollected(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/split-fare/cash-collected`, {
+                method: 'POST'
+            });
+        },
+
+        async createShareLink(tripId, ttlHours = null) {
+            const payload = {};
+            if (Number.isFinite(ttlHours)) payload.ttl_hours = ttlHours;
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/share`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async emergency(tripId, message = null) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/emergency`, {
+                method: 'POST',
+                body: JSON.stringify({ message })
+            });
+        },
+
+        async getSafetyEvents(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/events`);
+        },
+
+        async getReceipt(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/receipt`);
         }
     },
+
+    pickupHubs: {
+        async suggest(lat, lng, limit = null) {
+            const params = new URLSearchParams();
+            params.set('lat', lat);
+            params.set('lng', lng);
+            if (Number.isFinite(limit)) params.set('limit', limit);
+            return ApiService.request(`/pickup-hubs/suggest?${params.toString()}`);
+        }
+    },
+
+    passenger: {
+        async getFavorites() {
+            return ApiService.request('/passengers/me/favorites');
+        },
+        async addFavorite(driverId) {
+            return ApiService.request('/passengers/me/favorites', {
+                method: 'POST',
+                body: JSON.stringify({ driver_id: driverId })
+            });
+        },
+        async removeFavorite(driverId) {
+            return ApiService.request(`/passengers/me/favorites/${encodeURIComponent(driverId)}`, {
+                method: 'DELETE'
+            });
+        },
+
+        async getLoyalty() {
+            return ApiService.request('/passengers/me/loyalty');
+        },
+
+        async getNoteTemplates() {
+            return ApiService.request('/passengers/me/note-templates');
+        },
+        async addNoteTemplate(note, title = null) {
+            return ApiService.request('/passengers/me/note-templates', {
+                method: 'POST',
+                body: JSON.stringify({ note, title })
+            });
+        },
+        async deleteNoteTemplate(id) {
+            return ApiService.request(`/passengers/me/note-templates/${encodeURIComponent(id)}`, {
+                method: 'DELETE'
+            });
+        },
+
+        async getFamily() {
+            return ApiService.request('/passengers/me/family');
+        },
+        async addFamilyMember(payload) {
+            return ApiService.request('/passengers/me/family', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+        async deleteFamilyMember(id) {
+            return ApiService.request(`/passengers/me/family/${encodeURIComponent(id)}`, {
+                method: 'DELETE'
+            });
+        }
+    },
+
+    scheduledRides: {
+        async create(payload) {
+            return ApiService.request('/scheduled-rides', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+        async listMine() {
+            return ApiService.request('/scheduled-rides/me');
+        },
+        async confirm(id) {
+            return ApiService.request(`/scheduled-rides/${encodeURIComponent(id)}/confirm`, {
+                method: 'POST'
+            });
+        }
+    },
+
+    pricing: {
+        async lock(payload) {
+            return ApiService.request('/pricing/lock', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        }
+    },
+
+    support: {
+        async listMine() {
+            return ApiService.request('/support/me/tickets');
+        },
+        async createTicket(formData) {
+            // formData should be FormData (optional attachment)
+            const token = ApiService.getToken();
+            const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
+            const response = await fetch(`${API_BASE_URL}/support/tickets`, {
+                method: 'POST',
+                headers: {
+                    ...authHeader
+                },
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Request failed');
+            return data;
+        }
+    }
 
     // Pending rides endpoints (real-time nearest requests for drivers)
     pendingRides: {
