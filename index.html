@@ -1184,6 +1184,7 @@
                         <div class="text-center">
                             <p class="text-xs text-indigo-600 font-bold mb-1">⏱️ الكابتن يصل خلال</p>
                             <h3 class="text-2xl font-extrabold text-indigo-600" id="eta-display">-- د -- ث</h3>
+                            <p class="text-[11px] text-gray-600 mt-1 hidden" id="eta-reason-display"></p>
                             <p class="text-xs text-gray-600 mt-1" id="driver-distance">على بُعد -- متر</p>
                         </div>
                     </div>
@@ -1277,6 +1278,7 @@
                         <div>
                              <p class="text-gray-400 text-xs">الوصول المتوقع</p>
                              <h2 class="text-2xl font-bold" id="ride-eta-display">12 دقيقة</h2>
+                             <p class="text-xs text-gray-300 mt-1 hidden" id="ride-eta-reason-display"></p>
                         </div>
                      </div>
                  </div>
@@ -2018,6 +2020,39 @@
                      <button onclick="driverOpenNavigation()" class="flex-1 py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold">الملاحة</button>
                      <button onclick="driverCallPassenger()" class="flex-1 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold">اتصال</button>
                  </div>
+
+                 <!-- ETA Update (Driver) -->
+                 <div class="mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                     <div class="flex items-center justify-between mb-3">
+                         <p class="text-sm font-extrabold text-gray-800">⏱️ تحديث وقت الوصول (ETA)</p>
+                         <span class="text-[11px] font-bold text-gray-500" id="driver-eta-last-updated"></span>
+                     </div>
+                     <div class="grid grid-cols-2 gap-3">
+                         <div>
+                             <label class="block text-[11px] font-bold text-gray-500 mb-1">الوقت (بالدقائق)</label>
+                             <input id="driver-eta-minutes" type="number" min="0" max="360" inputmode="numeric" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none focus:ring-2 ring-indigo-500/30" placeholder="مثال: 7">
+                         </div>
+                         <div>
+                             <label class="block text-[11px] font-bold text-gray-500 mb-1">السبب</label>
+                             <select id="driver-eta-reason" onchange="driverEtaReasonChanged()" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none focus:ring-2 ring-indigo-500/30">
+                                 <option value="">بدون</option>
+                                 <option value="زحمة">زحمة</option>
+                                 <option value="واقف">واقف</option>
+                                 <option value="دوران للعثور على مكان">دوران للعثور على مكان</option>
+                                 <option value="custom">أخرى (اكتب)</option>
+                             </select>
+                         </div>
+                     </div>
+                     <div id="driver-eta-reason-custom-wrap" class="hidden mt-3">
+                         <label class="block text-[11px] font-bold text-gray-500 mb-1">سبب مختصر</label>
+                         <input id="driver-eta-reason-custom" type="text" maxlength="120" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none focus:ring-2 ring-indigo-500/30" placeholder="اكتب السبب المختصر">
+                     </div>
+                     <button id="driver-eta-update-btn" type="button" onclick="driverUpdateEta()" class="mt-4 w-full py-3 rounded-xl bg-indigo-600 text-white font-extrabold hover:bg-indigo-700 transition-colors">
+                         تحديث ETA
+                     </button>
+                     <p class="text-[11px] text-gray-500 mt-2" id="driver-eta-current"></p>
+                 </div>
+
                  <button id="driver-end-btn" onclick="driverEndTrip()" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700" disabled>إنهاء الرحلة</button>
                  <button id="driver-start-btn" onclick="driverStartTrip()" class="hidden w-full mt-3 bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-emerald-700">بدء الرحلة</button>
             </div>

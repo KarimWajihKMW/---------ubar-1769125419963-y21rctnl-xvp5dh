@@ -217,6 +217,95 @@ let passengerDriverAnimTo = null;
 let passengerDriverAnimStart = 0;
 let passengerDriverAnimDuration = 650;
 
+// Trip ETA cache (driver-updated ETA + delay reason)
+const tripEtaCache = new Map();
+
+function setTripEtaCache(tripId, etaMinutes, etaReason, etaUpdatedAt) {
+    if (!tripId) return;
+    const key = String(tripId);
+    const eta = etaMinutes !== undefined && etaMinutes !== null ? Number(etaMinutes) : null;
+    tripEtaCache.set(key, {
+        eta_minutes: Number.isFinite(eta) ? eta : null,
+        eta_reason: etaReason !== undefined && etaReason !== null && String(etaReason).trim() ? String(etaReason).trim() : null,
+        eta_updated_at: etaUpdatedAt || null
+    });
+}
+
+function getTripEtaCache(tripId) {
+    if (!tripId) return null;
+    return tripEtaCache.get(String(tripId)) || null;
+}
+
+function formatEtaMetaText(meta) {
+    if (!meta) return '';
+    const parts = [];
+    if (meta.eta_minutes !== null && meta.eta_minutes !== undefined) {
+        const mins = Number(meta.eta_minutes);
+        if (Number.isFinite(mins)) parts.push(`ETA: ${Math.max(0, Math.round(mins))} دقيقة`);
+    }
+    if (meta.eta_reason) parts.push(`السبب: ${meta.eta_reason}`);
+    return parts.join(' • ');
+}
+
+function renderPassengerEtaMeta() {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) return;
+    const meta = getTripEtaCache(activePassengerTripId);
+    const text = formatEtaMetaText(meta);
+
+    const elPickup = document.getElementById('eta-reason-display');
+    if (elPickup) {
+        elPickup.textContent = text;
+        elPickup.classList.toggle('hidden', !text);
+    }
+
+    const elRide = document.getElementById('ride-eta-reason-display');
+    if (elRide) {
+        elRide.textContent = text;
+        elRide.classList.toggle('hidden', !text);
+    }
+}
+
+function renderDriverEtaMeta() {
+    if (currentUserRole !== 'driver') return;
+    if (!activeDriverTripId) return;
+    const meta = getTripEtaCache(activeDriverTripId);
+
+    const currentEl = document.getElementById('driver-eta-current');
+    if (currentEl) {
+        const text = formatEtaMetaText(meta);
+        currentEl.textContent = text ? `آخر تحديث: ${text}` : '';
+    }
+
+    const updatedAtEl = document.getElementById('driver-eta-last-updated');
+    if (updatedAtEl) {
+        if (meta?.eta_updated_at) {
+            const d = new Date(meta.eta_updated_at);
+            updatedAtEl.textContent = Number.isFinite(d.getTime()) ? d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '';
+        } else {
+            updatedAtEl.textContent = '';
+        }
+    }
+}
+
+async function loadTripEtaMeta(tripId) {
+    if (!tripId) return;
+    try {
+        const res = await ApiService.trips.getEta(tripId);
+        const d = res?.data || null;
+        if (!d) return;
+        setTripEtaCache(tripId, d.eta_minutes, d.eta_reason, d.eta_updated_at);
+        if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+            renderPassengerEtaMeta();
+        }
+        if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+            renderDriverEtaMeta();
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
 function initRealtimeSocket() {
     if (realtimeSocket || typeof io !== 'function') return;
     try {
@@ -270,12 +359,90 @@ function initRealtimeSocket() {
             if (!tripId || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
             handleDriverLiveLocationRealtime(String(tripId), { lat, lng });
         });
+
+        realtimeSocket.on('trip_eta_update', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            setTripEtaCache(String(tripId), payload?.eta_minutes, payload?.eta_reason, payload?.eta_updated_at);
+
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                renderPassengerEtaMeta();
+            }
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                renderDriverEtaMeta();
+            }
+        });
     } catch (err) {
         console.warn('⚠️ Realtime socket init failed:', err.message || err);
         realtimeSocket = null;
         realtimeConnected = false;
     }
 }
+
+window.driverEtaReasonChanged = function() {
+    const reasonEl = document.getElementById('driver-eta-reason');
+    const wrap = document.getElementById('driver-eta-reason-custom-wrap');
+    if (!reasonEl || !wrap) return;
+    wrap.classList.toggle('hidden', String(reasonEl.value) !== 'custom');
+};
+
+window.driverUpdateEta = async function() {
+    if (currentUserRole !== 'driver') {
+        showToast('هذه الميزة للسائق فقط');
+        return;
+    }
+    if (!activeDriverTripId) {
+        showToast('لا توجد رحلة نشطة');
+        return;
+    }
+
+    const btn = document.getElementById('driver-eta-update-btn');
+    const minsEl = document.getElementById('driver-eta-minutes');
+    const reasonEl = document.getElementById('driver-eta-reason');
+    const customEl = document.getElementById('driver-eta-reason-custom');
+
+    const etaMinutesRaw = minsEl ? minsEl.value : '';
+    const etaMinutes = etaMinutesRaw !== '' && etaMinutesRaw !== null && etaMinutesRaw !== undefined
+        ? Number(etaMinutesRaw)
+        : null;
+
+    if (etaMinutes !== null && (!Number.isFinite(etaMinutes) || etaMinutes < 0 || etaMinutes > 360)) {
+        showToast('❌ الوقت لازم يكون بين 0 و 360 دقيقة');
+        return;
+    }
+
+    let reason = reasonEl ? String(reasonEl.value || '') : '';
+    if (reason === 'custom') {
+        reason = customEl ? String(customEl.value || '') : '';
+    }
+    reason = reason.trim();
+
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-70', 'cursor-not-allowed');
+    }
+
+    try {
+        const res = await ApiService.trips.updateEta(activeDriverTripId, {
+            eta_minutes: etaMinutes,
+            eta_reason: reason
+        });
+        const d = res?.data || null;
+        if (d) {
+            setTripEtaCache(activeDriverTripId, d.eta_minutes, d.eta_reason, d.eta_updated_at);
+            renderDriverEtaMeta();
+        }
+        showToast('✅ تم تحديث ETA');
+    } catch (e) {
+        console.error('ETA update failed:', e);
+        showToast('❌ تعذر تحديث ETA');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('opacity-70', 'cursor-not-allowed');
+        }
+    }
+};
 
 function subscribeTripRealtime(tripId) {
     if (!tripId) return;
@@ -1650,6 +1817,12 @@ async function refreshPassengerLiveTripTracking() {
 
         const driverId = trip.driver_id || passengerLiveTrackingDriverId;
         passengerLiveTrackingDriverId = driverId;
+
+        // Keep ETA meta (driver-updated) in sync with polling snapshot
+        if (trip.eta_minutes !== undefined || trip.eta_reason !== undefined || trip.eta_updated_at !== undefined) {
+            setTripEtaCache(tripId, trip.eta_minutes, trip.eta_reason, trip.eta_updated_at);
+            renderPassengerEtaMeta();
+        }
 
         // Update UI labels
         const driverName = trip.driver_name || trip.driver_live_name || 'الكابتن';
@@ -3220,6 +3393,7 @@ window.driverAcceptRequest = async function() {
 
         if (activeDriverTripId) {
             subscribeTripRealtime(activeDriverTripId);
+            loadTripEtaMeta(activeDriverTripId);
         }
 
         const waiting = document.getElementById('driver-status-waiting');
@@ -3706,6 +3880,7 @@ async function handlePassengerAssignedTrip(trip) {
     // Realtime subscribe for trip state + live driver location
     if (activePassengerTripId) {
         subscribeTripRealtime(activePassengerTripId);
+        loadTripEtaMeta(activePassengerTripId);
         passengerRealtimeActive = true;
         passengerLastTripStatus = 'assigned';
         passengerTripCenteredOnce = false;

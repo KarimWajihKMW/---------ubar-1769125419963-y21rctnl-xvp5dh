@@ -8,20 +8,31 @@ async function jsonFetch(url, options = {}) {
 }
 
 async function loginAdmin() {
-  const email = process.env.ADMIN_EMAIL || 'admin@ubar.sa';
-  const password = process.env.ADMIN_PASSWORD || '12345678';
+  const candidates = [];
 
-  const { res, data } = await jsonFetch(`${baseURL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, role: 'admin' })
-  });
-
-  if (!res.ok || !data.success || !data.token) {
-    throw new Error(`Admin login failed: ${data.error || res.status}`);
+  if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+    candidates.push({ email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD });
   }
 
-  return { token: data.token, user: data.data };
+  candidates.push(
+    { email: 'admin@ubar.sa', password: '12345678' },
+    { email: 'admin2@ubar.sa', password: '12345678' },
+    { email: 'admin@ubar.sa', password: '11111111' }
+  );
+
+  for (const c of candidates) {
+    const { res, data } = await jsonFetch(`${baseURL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: c.email, password: c.password, role: 'admin' })
+    });
+
+    if (res.ok && data.success && data.token) {
+      return { token: data.token, user: data.data };
+    }
+  }
+
+  throw new Error('Admin login failed: Invalid email or password');
 }
 
 async function loginPassenger(label = 'Passenger') {
