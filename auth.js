@@ -52,6 +52,14 @@ function signAccessToken(claims) {
     });
 }
 
+function verifyAccessToken(token) {
+    const raw = token === null || token === undefined ? '' : String(token).trim();
+    if (!raw) {
+        throw new Error('Missing token');
+    }
+    return jwt.verify(raw, jwtSecret);
+}
+
 function getBearerToken(req) {
     const header = req.headers?.authorization || req.headers?.Authorization;
     if (!header) return null;
@@ -104,6 +112,7 @@ module.exports = {
     hashPassword,
     verifyPassword,
     signAccessToken,
+    verifyAccessToken,
     authMiddleware,
     requireAuth,
     requireRole

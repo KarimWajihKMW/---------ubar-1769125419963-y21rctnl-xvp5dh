@@ -460,6 +460,15 @@ async function run() {
   });
   if (!guardianConfirm.res.ok) throw new Error(`Guardian confirm failed: ${guardianConfirm.data.error || guardianConfirm.res.status}`);
 
+  // 9️⃣f) Safety Capsule aggregate
+  console.log('\n9️⃣f Safety Capsule...');
+  const capsule = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/safety/capsule`, { headers: p1Headers });
+  if (!capsule.res.ok) throw new Error(`Safety capsule failed: ${capsule.data.error || capsule.res.status}`);
+  if (!capsule.data.success || !capsule.data.data) throw new Error('Safety capsule missing data');
+  if (!Array.isArray(capsule.data.data.timeline)) throw new Error('Safety capsule missing timeline array');
+  if (!capsule.data.data.handshake) throw new Error('Safety capsule missing handshake');
+  console.log('✅ Safety capsule timeline items:', capsule.data.data.timeline.length);
+
   // 10) Scheduled ride create + confirm + process
   console.log('\n🔟 Scheduled rides...');
   const scheduled = await jsonFetch(`${baseURL}/scheduled-rides`, {

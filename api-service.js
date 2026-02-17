@@ -271,6 +271,10 @@ const ApiService = {
             return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/events`);
         },
 
+        async getSafetyCapsule(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/capsule`);
+        },
+
         async setRouteDeviationConfig(tripId, payload = {}) {
             return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/deviation-config`, {
                 method: 'POST',

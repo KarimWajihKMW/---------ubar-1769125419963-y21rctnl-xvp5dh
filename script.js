@@ -923,6 +923,44 @@ async function loadTripEtaMeta(tripId) {
     }
 }
 
+function subscribeUserRealtime() {
+    try {
+        if (!realtimeSocket || !realtimeSocket.connected) return;
+        const token = (window.ApiService && typeof window.ApiService.getToken === 'function')
+            ? window.ApiService.getToken()
+            : (window.Auth && typeof window.Auth.getToken === 'function' ? window.Auth.getToken() : null);
+        if (!token) return;
+        realtimeSocket.emit('subscribe_user', { token: String(token) });
+    } catch (e) {
+        // ignore
+    }
+}
+
+function clearMatchTimelineUI() {
+    const items = document.getElementById('match-timeline-items');
+    if (items) items.innerHTML = '';
+}
+
+function appendMatchTimelineUI(text) {
+    const items = document.getElementById('match-timeline-items');
+    if (!items) return;
+    const t = String(text || '').trim();
+    if (!t) return;
+    const el = document.createElement('div');
+    el.className = 'flex items-start gap-2';
+    el.innerHTML = `<span class="text-indigo-600">•</span><span class="flex-1">${escapeHtml(t)}</span>`;
+    items.appendChild(el);
+}
+
+function resetMatchTimelineUI() {
+    clearMatchTimelineUI();
+    appendMatchTimelineUI('تم إرسال الطلب للسائقين القريبين');
+}
+
+function isActivePassengerTrip(tripId) {
+    return currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId);
+}
+
 function initRealtimeSocket() {
     if (realtimeSocket || typeof io !== 'function') return;
     try {
@@ -936,6 +974,10 @@ function initRealtimeSocket() {
 
         realtimeSocket.on('connect', () => {
             realtimeConnected = true;
+
+            // Subscribe to user room (match timeline updates)
+            subscribeUserRealtime();
+
             // Re-join rooms after reconnect
             realtimeSubscribedTripIds.forEach((tripId) => {
                 realtimeSocket.emit('subscribe_trip', { trip_id: String(tripId) });
@@ -1039,6 +1081,44 @@ function initRealtimeSocket() {
             const event = payload?.event;
             if (!tripId || !event) return;
             handleSafetyEventRealtime(String(tripId), event);
+        });
+
+        realtimeSocket.on('pending_request_update', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            if (!isActivePassengerTrip(tripId)) return;
+            const msg = payload?.message ? String(payload.message) : null;
+            if (msg) appendMatchTimelineUI(msg);
+        });
+
+        realtimeSocket.on('trip_assigned', async (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            if (!isActivePassengerTrip(tripId)) return;
+
+            appendMatchTimelineUI('تم إسناد الرحلة');
+
+            try {
+                stopPassengerMatchPolling();
+                stopPassengerPickupLiveUpdates();
+            } catch (e) {
+                // ignore
+            }
+
+            const trip = payload?.trip || null;
+            if (trip && trip.driver_id) {
+                await handlePassengerAssignedTrip(trip);
+                return;
+            }
+
+            try {
+                const res = await ApiService.trips.getById(tripId);
+                if (res?.data?.driver_id) {
+                    await handlePassengerAssignedTrip(res.data);
+                }
+            } catch (e) {
+                // ignore
+            }
         });
     } catch (err) {
         console.warn('⚠️ Realtime socket init failed:', err.message || err);
@@ -5310,6 +5390,7 @@ window.requestRide = async function() {
 
     // Show loading (searching for driver)
     switchSection('loading');
+    resetMatchTimelineUI();
     if (activePassengerTripId) {
         fetchNearestDriverPreview(currentPickup, currentCarType);
         startPassengerMatchPolling(activePassengerTripId);
@@ -5328,6 +5409,8 @@ function loginSuccess() {
 function initPassengerMode() {
     currentUserRole = 'passenger';
     window.currentUserRole = 'passenger';
+    // JWT is now available -> subscribe for match timeline updates
+    subscribeUserRealtime();
     document.body.classList.add('role-passenger');
     document.body.classList.remove('role-driver');
     document.getElementById('passenger-ui-container').classList.remove('hidden');
@@ -6193,6 +6276,108 @@ window.filterTrips = function(filter) {
         
         container.insertAdjacentHTML('beforeend', html);
     });
+};
+
+function resetSafetyCapsuleUI() {
+    const err = document.getElementById('safety-capsule-error');
+    const share = document.getElementById('safety-capsule-share');
+    const shareUrl = document.getElementById('safety-capsule-share-url');
+    const tl = document.getElementById('safety-capsule-timeline');
+    const items = document.getElementById('safety-capsule-timeline-items');
+
+    if (err) {
+        err.classList.add('hidden');
+        err.textContent = '';
+    }
+    if (share) share.classList.add('hidden');
+    if (shareUrl) {
+        shareUrl.textContent = '';
+        shareUrl.setAttribute('href', '#');
+    }
+    if (tl) tl.classList.add('hidden');
+    if (items) items.innerHTML = '';
+}
+
+function setSafetyCapsuleError(message) {
+    const err = document.getElementById('safety-capsule-error');
+    if (!err) return;
+    const msg = String(message || '').trim();
+    if (!msg) {
+        err.classList.add('hidden');
+        err.textContent = '';
+        return;
+    }
+    err.textContent = msg;
+    err.classList.remove('hidden');
+}
+
+function renderSafetyCapsuleTimeline(timeline) {
+    const tl = document.getElementById('safety-capsule-timeline');
+    const items = document.getElementById('safety-capsule-timeline-items');
+    if (!tl || !items) return;
+
+    const arr = Array.isArray(timeline) ? timeline : [];
+    if (arr.length === 0) {
+        tl.classList.add('hidden');
+        items.innerHTML = '';
+        return;
+    }
+
+    items.innerHTML = '';
+    for (const it of arr) {
+        const type = String(it?.type || '').toLowerCase();
+        let label = '';
+        if (type === 'safety_event') {
+            label = it?.event_type ? `حدث: ${String(it.event_type)}` : 'حدث أمان';
+            if (it?.message) label += ` — ${String(it.message)}`;
+        } else if (type === 'guardian_checkin') {
+            const st = it?.status ? String(it.status) : 'scheduled';
+            const due = it?.due_at ? new Date(it.due_at) : null;
+            const dueText = due && Number.isFinite(due.getTime()) ? due.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '';
+            label = `Guardian: ${st}${dueText ? ` (موعد ${dueText})` : ''}`;
+        } else {
+            label = 'Timeline item';
+        }
+
+        const row = document.createElement('div');
+        row.className = 'flex items-start gap-2';
+        row.innerHTML = `<span class="text-indigo-600">•</span><span class="flex-1">${escapeHtml(label)}</span>`;
+        items.appendChild(row);
+    }
+
+    tl.classList.remove('hidden');
+}
+
+window.loadSafetyCapsuleForTripDetails = async function() {
+    const btn = document.getElementById('safety-capsule-btn');
+    const tripId = (document.getElementById('trip-detail-id')?.innerText || '').trim();
+    if (!tripId) return;
+
+    resetSafetyCapsuleUI();
+    setSafetyCapsuleError('');
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await ApiService.trips.getSafetyCapsule(tripId);
+        const data = res?.data || null;
+        if (!data) throw new Error('No data');
+
+        // Share link
+        const share = data.share || null;
+        const shareWrap = document.getElementById('safety-capsule-share');
+        const shareUrl = document.getElementById('safety-capsule-share-url');
+        if (share && share.url && shareWrap && shareUrl) {
+            shareUrl.textContent = String(share.url);
+            shareUrl.setAttribute('href', String(share.url));
+            shareWrap.classList.remove('hidden');
+        }
+
+        renderSafetyCapsuleTimeline(data.timeline || []);
+    } catch (e) {
+        setSafetyCapsuleError('❌ تعذر تحميل تقرير الأمان');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 };
 
 // Show trip details
@@ -8214,6 +8399,7 @@ window.showTripDetails = function(tripId) {
     }
     
     // Populate trip details
+    resetSafetyCapsuleUI();
     const statusColors = {
         completed: 'bg-green-100 text-green-700',
         cancelled: 'bg-red-100 text-red-700'

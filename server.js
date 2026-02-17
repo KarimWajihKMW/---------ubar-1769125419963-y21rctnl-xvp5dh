@@ -49,6 +49,7 @@ const {
     hashPassword,
     verifyPassword,
     signAccessToken,
+    verifyAccessToken,
     authMiddleware,
     requireAuth,
     requireRole
@@ -193,6 +194,10 @@ function tripRoom(tripId) {
     return `trip:${String(tripId)}`;
 }
 
+function userRoom(userId) {
+    return `user:${String(userId)}`;
+}
+
 const lastTripDriverWriteAt = new Map();
 const lastTripSafetyCheckAt = new Map();
 const lastTripDeviationEventAt = new Map();
@@ -325,6 +330,33 @@ io.on('connection', (socket) => {
         if (!tripId) return;
         socket.join(tripRoom(tripId));
         socket.emit('subscribed_trip', { trip_id: String(tripId) });
+    });
+
+    // Subscribe to user room using JWT (for match timeline updates before trip rooms exist)
+    socket.on('subscribe_user', (payload) => {
+        try {
+            const token = payload?.token ? String(payload.token) : '';
+            const claims = verifyAccessToken(token);
+            const uid = claims?.uid;
+            if (!uid) {
+                socket.emit('subscribed_user_error', { error: 'invalid_token' });
+                return;
+            }
+            socket.join(userRoom(uid));
+            socket.emit('subscribed_user', { user_id: String(uid), role: claims?.role || null });
+        } catch (e) {
+            socket.emit('subscribed_user_error', { error: 'invalid_token' });
+        }
+    });
+
+    socket.on('unsubscribe_user', (payload) => {
+        try {
+            const userId = payload?.user_id;
+            if (!userId) return;
+            socket.leave(userRoom(userId));
+        } catch (e) {
+            // ignore
+        }
     });
 
     socket.on('unsubscribe_trip', (payload) => {
@@ -3262,6 +3294,128 @@ app.get('/api/trips/:id/safety/events', requireAuth, async (req, res) => {
     }
 });
 
+// Safety Capsule (aggregate share + handshake + guardian check-ins + deviation config + safety events)
+app.get('/api/trips/:id/safety/capsule', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+
+        const tripRes = await pool.query(
+            `SELECT id, status, driver_id, user_id, pickup_verified_at, pickup_verified_by
+             FROM trips
+             WHERE id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        if (authRole === 'passenger' && String(trip.user_id) !== String(authUserId)) {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
+        let share = null;
+        try {
+            const shareRes = await pool.query(
+                `SELECT share_token, expires_at, created_at
+                 FROM trip_shares
+                 WHERE trip_id = $1
+                 ORDER BY created_at DESC
+                 LIMIT 1`,
+                [tripId]
+            );
+            const row = shareRes.rows[0] || null;
+            if (row?.share_token) {
+                share = {
+                    url: `/api/share/${row.share_token}`,
+                    expires_at: row.expires_at,
+                    created_at: row.created_at
+                };
+            }
+        } catch (e) {
+            share = null;
+        }
+
+        let deviationConfig = null;
+        try {
+            const cfgRes = await pool.query(
+                `SELECT enabled, deviation_threshold_km, stop_minutes_threshold, updated_at
+                 FROM trip_route_deviation_configs
+                 WHERE trip_id = $1
+                 LIMIT 1`,
+                [tripId]
+            );
+            deviationConfig = cfgRes.rows[0] || null;
+        } catch (e) {
+            deviationConfig = null;
+        }
+
+        const safetyEventsRes = await pool.query(
+            `SELECT id, event_type, message, created_by_role, created_at
+             FROM trip_safety_events
+             WHERE trip_id = $1
+             ORDER BY created_at ASC
+             LIMIT 200`,
+            [tripId]
+        );
+
+        let guardianRes = { rows: [] };
+        try {
+            guardianRes = await pool.query(
+                `SELECT id, status, due_at, sent_at, created_at
+                 FROM trip_guardian_checkins
+                 WHERE trip_id = $1
+                 ORDER BY created_at ASC
+                 LIMIT 200`,
+                [tripId]
+            );
+        } catch (e) {
+            guardianRes = { rows: [] };
+        }
+
+        const timeline = [];
+        for (const ev of safetyEventsRes.rows || []) {
+            timeline.push({
+                type: 'safety_event',
+                event_type: ev.event_type,
+                message: ev.message,
+                created_by_role: ev.created_by_role,
+                created_at: ev.created_at
+            });
+        }
+
+        for (const gc of guardianRes.rows || []) {
+            timeline.push({
+                type: 'guardian_checkin',
+                status: gc.status,
+                due_at: gc.due_at,
+                sent_at: gc.sent_at,
+                created_at: gc.created_at
+            });
+        }
+
+        timeline.sort((a, b) => {
+            const ta = new Date(a.created_at || a.sent_at || a.due_at || 0).getTime();
+            const tb = new Date(b.created_at || b.sent_at || b.due_at || 0).getTime();
+            return ta - tb;
+        });
+
+        return res.json({
+            success: true,
+            data: {
+                trip: { id: trip.id, status: trip.status, driver_id: trip.driver_id },
+                handshake: { verified_at: trip.pickup_verified_at, verified_by: trip.pickup_verified_by },
+                share,
+                deviation_config: deviationConfig,
+                timeline
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // --- Route deviation guardian ---
 
 app.post('/api/trips/:id/safety/deviation-config', requireRole('passenger', 'admin'), async (req, res) => {
@@ -4276,6 +4430,19 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                 }
 
                 console.log(`✅ تم إضافة الطلب ${requestId} إلى pending_ride_requests للرحلة ${tripId}`);
+
+                // Live Match Timeline (Socket.io)
+                try {
+                    io.to(userRoom(effectiveRiderId)).emit('pending_request_update', {
+                        trip_id: String(tripId),
+                        request_id: String(requestId),
+                        stage: 'request_sent',
+                        message: 'تم إرسال الطلب للسائقين القريبين',
+                        created_at: new Date().toISOString()
+                    });
+                } catch (e) {
+                    // ignore
+                }
             } catch (pendingErr) {
                 console.error('⚠️ خطأ في إضافة الطلب إلى pending_ride_requests:', pendingErr.message);
                 // لا نوقف العملية، فقط نسجل الخطأ
@@ -5658,7 +5825,42 @@ app.patch('/api/trips/:id/assign', requireRole('driver', 'admin'), async (req, r
             return res.status(404).json({ success: false, error: 'Trip not found or already assigned' });
         }
 
-        res.json({ success: true, data: result.rows[0] });
+        const trip = result.rows[0];
+
+        // Keep pending_ride_requests in sync
+        try {
+            await pool.query(
+                `UPDATE pending_ride_requests
+                 SET status = 'accepted',
+                     assigned_driver_id = $1,
+                     assigned_at = COALESCE(assigned_at, CURRENT_TIMESTAMP),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE trip_id = $2 AND status = 'waiting'`,
+                [trip.driver_id || null, trip.id]
+            );
+        } catch (e) {
+            // non-blocking
+        }
+
+        // Live Match Timeline (Socket.io)
+        try {
+            if (trip.user_id) {
+                io.to(userRoom(trip.user_id)).emit('pending_request_update', {
+                    trip_id: String(trip.id),
+                    stage: 'driver_accepted',
+                    message: 'سائق قبل الطلب',
+                    created_at: new Date().toISOString()
+                });
+                io.to(userRoom(trip.user_id)).emit('trip_assigned', {
+                    trip_id: String(trip.id),
+                    trip
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        res.json({ success: true, data: trip });
     } catch (err) {
         console.error('Error assigning driver:', err);
         res.status(500).json({ success: false, error: err.message });
@@ -5699,7 +5901,38 @@ app.patch('/api/trips/:id/reject', requireRole('driver', 'admin'), async (req, r
             return res.status(404).json({ success: false, error: 'Trip not found or not pending' });
         }
 
-        res.json({ success: true, data: result.rows[0] });
+        const trip = result.rows[0];
+
+        // Keep pending_ride_requests in sync (return to waiting)
+        try {
+            await pool.query(
+                `UPDATE pending_ride_requests
+                 SET status = 'waiting',
+                     assigned_driver_id = NULL,
+                     assigned_at = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE trip_id = $1 AND status IN ('accepted','waiting')`,
+                [trip.id]
+            );
+        } catch (e) {
+            // non-blocking
+        }
+
+        // Live Match Timeline (Socket.io)
+        try {
+            if (trip.user_id) {
+                io.to(userRoom(trip.user_id)).emit('pending_request_update', {
+                    trip_id: String(trip.id),
+                    stage: 'driver_rejected',
+                    message: 'سائق رفض الطلب',
+                    created_at: new Date().toISOString()
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        res.json({ success: true, data: trip });
     } catch (err) {
         console.error('Error rejecting trip:', err);
         res.status(500).json({ success: false, error: err.message });
@@ -8339,6 +8572,8 @@ app.post('/api/pending-rides/:request_id/accept', requireRole('driver', 'admin')
 
         const pendingRequest = result.rows[0];
 
+        let assignedTripId = null;
+
         // ✨ إنشاء أو تحديث الرحلة في جدول trips
         try {
             // البحث عن رحلة مطابقة للطلب
@@ -8356,6 +8591,7 @@ app.post('/api/pending-rides/:request_id/accept', requireRole('driver', 'admin')
             if (existingTripResult.rows.length > 0) {
                 // تحديث الرحلة الموجودة بتعيين السائق
                 const tripId = existingTripResult.rows[0].id;
+                assignedTripId = tripId;
                 
                 // الحصول على معلومات السائق
                 const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [effectiveDriverId]);
@@ -8368,12 +8604,13 @@ app.post('/api/pending-rides/:request_id/accept', requireRole('driver', 'admin')
                         status = 'assigned',
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = $3
-                `, [driver_id, driverName, tripId]);
+                `, [effectiveDriverId, driverName, tripId]);
 
                 console.log(`✅ تم تحديث الرحلة ${tripId} بتعيين السائق ${effectiveDriverId}`);
             } else {
                 // إنشاء رحلة جديدة إذا لم توجد
                 const tripId = 'TR-' + Date.now();
+                assignedTripId = tripId;
                 
                 // الحصول على معلومات السائق
                 const driverResult = await pool.query('SELECT name FROM drivers WHERE id = $1', [effectiveDriverId]);
@@ -8402,6 +8639,27 @@ app.post('/api/pending-rides/:request_id/accept', requireRole('driver', 'admin')
             }
         } catch (tripErr) {
             console.error('⚠️ خطأ في تحديث/إنشاء الرحلة في trips:', tripErr.message);
+        }
+
+        // Live Match Timeline (Socket.io)
+        try {
+            io.to(userRoom(pendingRequest.user_id)).emit('pending_request_update', {
+                trip_id: pendingRequest.trip_id ? String(pendingRequest.trip_id) : (assignedTripId ? String(assignedTripId) : null),
+                request_id: String(request_id),
+                stage: 'driver_accepted',
+                message: 'سائق قبل الطلب',
+                created_at: new Date().toISOString()
+            });
+
+            if (assignedTripId) {
+                const tripRow = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [assignedTripId]);
+                const trip = tripRow.rows[0] || null;
+                if (trip) {
+                    io.to(userRoom(pendingRequest.user_id)).emit('trip_assigned', { trip_id: String(trip.id), trip });
+                }
+            }
+        } catch (e) {
+            // ignore
         }
 
         res.json({
@@ -8458,6 +8716,23 @@ app.post('/api/pending-rides/:request_id/reject', requireRole('driver', 'admin')
             WHERE request_id = $2
             RETURNING *
         `, [effectiveDriverId, request_id]);
+
+        // Live Match Timeline (Socket.io)
+        try {
+            const row = result.rows[0] || null;
+            if (row?.user_id) {
+                io.to(userRoom(row.user_id)).emit('pending_request_update', {
+                    trip_id: row.trip_id ? String(row.trip_id) : null,
+                    request_id: String(request_id),
+                    stage: 'driver_rejected',
+                    message: 'سائق رفض الطلب',
+                    created_at: new Date().toISOString(),
+                    rejection_count: row.rejection_count
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
 
         res.json({
             success: true,
