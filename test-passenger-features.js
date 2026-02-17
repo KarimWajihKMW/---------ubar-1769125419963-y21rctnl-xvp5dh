@@ -122,6 +122,25 @@ async function run() {
   const p1Headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${p1.token}` };
   const p2Headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${p2.token}` };
 
+  // 0) OAuth endpoints (optional) - should be safe when not configured
+  console.log('\n0️⃣ OAuth (optional)...');
+  const gLogin = await fetch(`${baseURL}/oauth/google/login`, { redirect: 'manual' });
+  if (![501, 302, 303].includes(gLogin.status)) {
+    throw new Error(`Google oauth login unexpected status: ${gLogin.status}`);
+  }
+  const aLogin = await fetch(`${baseURL}/oauth/apple/login`, { redirect: 'manual' });
+  if (![501, 302, 303].includes(aLogin.status)) {
+    throw new Error(`Apple oauth login unexpected status: ${aLogin.status}`);
+  }
+
+  const gLink = await jsonFetch(`${baseURL}/oauth/google/link`, { method: 'POST', headers: p1Headers, body: JSON.stringify({}) });
+  if (![501, 200].includes(gLink.res.status)) {
+    throw new Error(`Google oauth link unexpected status: ${gLink.res.status}`);
+  }
+  if (gLink.res.status === 200 && (!gLink.data.success || !gLink.data.url)) {
+    throw new Error('Google oauth link missing url');
+  }
+
   const driverId = await ensureDriver(adminHeaders);
   console.log('✅ Driver ready:', driverId);
 

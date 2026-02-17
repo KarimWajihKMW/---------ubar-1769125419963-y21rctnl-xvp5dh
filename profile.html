@@ -303,6 +303,11 @@
                         <button id="btnPhoneVerify" class="py-2 rounded-xl bg-white text-indigo-700 font-extrabold border border-indigo-200 hover:bg-indigo-50 transition-colors">توثيق الجوال</button>
                     </div>
 
+                    <div class="grid grid-cols-2 gap-2 mt-2">
+                        <button id="btnLinkGoogle" class="py-2 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-50 transition-colors">ربط Google</button>
+                        <button id="btnLinkApple" class="py-2 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-50 transition-colors">ربط Apple</button>
+                    </div>
+
                     <div class="mt-4 pt-4 border-t border-gray-200">
                         <p class="text-xs text-gray-600 font-bold mb-2">Strong Verification (هوية + سيلفي)</p>
                         <div class="grid grid-cols-1 gap-2">
@@ -749,6 +754,78 @@
             });
         }
 
+        let oauthListenerBound = false;
+        let lastOauthPopup = null;
+
+        function getJwtToken() {
+            // Same key used by script.js Auth wrapper
+            return SafeStorage.getItem('akwadra_token');
+        }
+
+        function openOauthPopup(url) {
+            try {
+                const w = 520;
+                const h = 720;
+                const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
+                const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
+                const features = `popup=yes,width=${w},height=${h},left=${left},top=${top}`;
+                lastOauthPopup = window.open(url, 'oauth_popup', features);
+                if (!lastOauthPopup) {
+                    window.location.href = url;
+                }
+            } catch (e) {
+                window.location.href = url;
+            }
+        }
+
+        function bindOauthMessageListenerOnce() {
+            if (oauthListenerBound) return;
+            oauthListenerBound = true;
+            window.addEventListener('message', async (event) => {
+                const msg = event?.data;
+                if (!msg || msg.type !== 'oauth_result') return;
+                const payload = msg.payload || null;
+                if (!payload || !payload.success) {
+                    alert('❌ فشل الربط عبر OAuth');
+                    return;
+                }
+                if (payload.token) {
+                    SafeStorage.setItem('akwadra_token', payload.token);
+                }
+                try { if (lastOauthPopup && !lastOauthPopup.closed) lastOauthPopup.close(); } catch (e) {}
+                alert('✅ تم ربط الحساب');
+                try { await refreshPassengerSafetyTrust(); } catch (e) {}
+            });
+        }
+
+        async function startOauthLink(provider) {
+            const p = String(provider || '').toLowerCase();
+            const token = getJwtToken();
+            if (!token) {
+                alert('⚠️ سجّل دخولك أولاً');
+                return;
+            }
+            bindOauthMessageListenerOnce();
+            try {
+                const res = await fetch(`/api/oauth/${encodeURIComponent(p)}/link`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`
+                    },
+                    body: JSON.stringify({})
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success || !data.url) {
+                    alert('❌ تعذر بدء الربط (تأكد من إعداد OAuth في السيرفر)');
+                    return;
+                }
+                openOauthPopup(data.url);
+            } catch (e) {
+                alert('❌ تعذر بدء الربط');
+            }
+        }
+
         function bindPassengerSafetyTrustActions() {
             if (passengerSafetyTrustBound) return;
             passengerSafetyTrustBound = true;
@@ -788,6 +865,16 @@
                         alert('تعذر توثيق الجوال');
                     }
                 });
+            }
+
+            const btnLinkGoogle = document.getElementById('btnLinkGoogle');
+            if (btnLinkGoogle) {
+                btnLinkGoogle.addEventListener('click', () => startOauthLink('google'));
+            }
+
+            const btnLinkApple = document.getElementById('btnLinkApple');
+            if (btnLinkApple) {
+                btnLinkApple.addEventListener('click', () => startOauthLink('apple'));
             }
 
             const btnStrong = document.getElementById('btnStrongVerify');

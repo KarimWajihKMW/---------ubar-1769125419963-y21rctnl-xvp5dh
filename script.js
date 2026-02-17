@@ -4010,6 +4010,92 @@ window.loginWithEmail = async function() {
     }
 };
 
+let lastOauthPopup = null;
+
+function openOauthPopup(url) {
+    try {
+        const w = 520;
+        const h = 720;
+        const left = window.screenX + Math.max(0, (window.outerWidth - w) / 2);
+        const top = window.screenY + Math.max(0, (window.outerHeight - h) / 2);
+        const features = `popup=yes,width=${w},height=${h},left=${left},top=${top}`;
+        lastOauthPopup = window.open(url, 'oauth_popup', features);
+        if (!lastOauthPopup) {
+            window.location.href = url;
+        }
+    } catch (e) {
+        window.location.href = url;
+    }
+}
+
+window.oauthLogin = function(provider) {
+    const p = String(provider || '').toLowerCase();
+    if (!p) return;
+    showToast('⏳ جاري فتح تسجيل OAuth...');
+    openOauthPopup(`/api/oauth/${encodeURIComponent(p)}/login`);
+};
+
+window.oauthLink = async function(provider) {
+    const p = String(provider || '').toLowerCase();
+    if (!p) return;
+    const token = window.Auth.getToken();
+    if (!token) {
+        showToast('⚠️ سجّل دخولك أولاً');
+        return;
+    }
+    try {
+        const res = await fetch(`/api/oauth/${encodeURIComponent(p)}/link`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({})
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success || !data.url) {
+            showToast('❌ تعذر بدء الربط');
+            return;
+        }
+        showToast('⏳ جاري فتح صفحة الربط...');
+        openOauthPopup(data.url);
+    } catch (e) {
+        showToast('❌ تعذر بدء الربط');
+    }
+};
+
+window.addEventListener('message', (event) => {
+    const msg = event?.data;
+    if (!msg || msg.type !== 'oauth_result') return;
+
+    const payload = msg.payload || null;
+    if (!payload || !payload.success) {
+        showToast('❌ فشل OAuth');
+        return;
+    }
+
+    const token = payload.token;
+    const user = payload.data;
+    if (!token || !user) {
+        showToast('❌ OAuth: بيانات ناقصة');
+        return;
+    }
+
+    window.Auth.setToken(token);
+    DB.currentUser = user;
+    DB.setUser(user);
+    DB.saveSession();
+    showToast('✅ تم تسجيل الدخول عبر OAuth');
+    try { if (lastOauthPopup && !lastOauthPopup.closed) lastOauthPopup.close(); } catch (e) {}
+
+    if (String(user.role || '').toLowerCase() === 'passenger') {
+        loginSuccess();
+    } else {
+        // Keep current behavior: only passenger OAuth is supported
+        showToast('⚠️ OAuth للراكب فقط');
+    }
+});
+
 window.selectCar = function(element, type) {
     document.querySelectorAll('.car-select').forEach(el => {
         el.classList.remove('selected', 'ring-2', 'ring-indigo-500');

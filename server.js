@@ -10,7 +10,26 @@ const { Server: SocketIOServer } = require('socket.io');
 const cron = require('node-cron');
 const QRCode = require('qrcode');
 const nodemailer = require('nodemailer');
+const { Issuer, generators } = require('openid-client');
 require('dotenv').config();
+
+const oauthStateStore = new Map();
+function oauthPutState(state, record) {
+    oauthStateStore.set(state, record);
+}
+function oauthTakeState(state) {
+    const rec = oauthStateStore.get(state);
+    oauthStateStore.delete(state);
+    return rec || null;
+}
+function oauthPruneStates() {
+    const now = Date.now();
+    for (const [k, v] of oauthStateStore.entries()) {
+        if (!v || !v.expiresAtMs || v.expiresAtMs <= now) {
+            oauthStateStore.delete(k);
+        }
+    }
+}
 
 let twilioClient = null;
 try {
@@ -1065,6 +1084,21 @@ async function ensurePassengerFeatureTables() {
         `);
         await pool.query('CREATE INDEX IF NOT EXISTS idx_user_verification_tokens_user ON user_verification_tokens(user_id, token_type, created_at DESC);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_user_verification_tokens_token ON user_verification_tokens(token_type, token);');
+
+        // Optional OAuth identities (Google/Apple): link provider account to existing user
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_oauth_identities (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                provider VARCHAR(20) NOT NULL,
+                provider_sub TEXT NOT NULL,
+                email TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (provider, provider_sub)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_user_oauth_identities_user ON user_oauth_identities(user_id, provider, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_user_oauth_identities_email ON user_oauth_identities(provider, email);');
 
         // Strong verification requests (manual admin review)
         await pool.query(`
@@ -7220,6 +7254,316 @@ app.get('/api/passengers/:id/trips', requireAuth, async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 });
+
+// ==================== OPTIONAL OAUTH (Google / Apple) ====================
+// Enabled only when env vars are provided. When not configured, endpoints return 501.
+
+function getOAuthProviderConfig(provider) {
+    const p = String(provider || '').toLowerCase();
+    if (p === 'google') {
+        return {
+            provider: 'google',
+            issuerUrl: 'https://accounts.google.com',
+            clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+            redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI
+        };
+    }
+    if (p === 'apple') {
+        return {
+            provider: 'apple',
+            issuerUrl: 'https://appleid.apple.com',
+            clientId: process.env.APPLE_OAUTH_CLIENT_ID,
+            clientSecret: process.env.APPLE_OAUTH_CLIENT_SECRET,
+            redirectUri: process.env.APPLE_OAUTH_REDIRECT_URI
+        };
+    }
+    return null;
+}
+
+function isOAuthConfigured(provider) {
+    const cfg = getOAuthProviderConfig(provider);
+    return Boolean(cfg?.clientId && cfg?.clientSecret && cfg?.redirectUri);
+}
+
+let googleClientPromise = null;
+let appleClientPromise = null;
+async function getOAuthClient(provider) {
+    const p = String(provider || '').toLowerCase();
+    const cfg = getOAuthProviderConfig(p);
+    if (!cfg) throw new Error('Unsupported provider');
+    if (!isOAuthConfigured(p)) throw new Error('OAuth not configured');
+
+    if (p === 'google') {
+        if (!googleClientPromise) {
+            googleClientPromise = (async () => {
+                const issuer = await Issuer.discover(cfg.issuerUrl);
+                return new issuer.Client({
+                    client_id: cfg.clientId,
+                    client_secret: cfg.clientSecret,
+                    redirect_uris: [cfg.redirectUri],
+                    response_types: ['code']
+                });
+            })();
+        }
+        return googleClientPromise;
+    }
+
+    if (p === 'apple') {
+        if (!appleClientPromise) {
+            appleClientPromise = (async () => {
+                const issuer = await Issuer.discover(cfg.issuerUrl);
+                return new issuer.Client({
+                    client_id: cfg.clientId,
+                    client_secret: cfg.clientSecret,
+                    redirect_uris: [cfg.redirectUri],
+                    response_types: ['code']
+                });
+            })();
+        }
+        return appleClientPromise;
+    }
+
+    throw new Error('Unsupported provider');
+}
+
+function makeOAuthPopupHtml(payload) {
+    const safe = JSON.stringify(payload || {});
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OAuth Complete</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 16px;">
+    <p>OAuth completed. You can close this window.</p>
+    <script>
+      (function() {
+        var payload = ${safe};
+        try {
+          if (window.opener && typeof window.opener.postMessage === 'function') {
+            window.opener.postMessage({ type: 'oauth_result', payload: payload }, '*');
+            window.close();
+            return;
+          }
+        } catch (e) {}
+        try {
+          document.body.innerText = JSON.stringify(payload);
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>`;
+}
+
+async function findOrCreateUserFromOAuth({ provider, providerSub, email, name, linkUserId = null }) {
+    const p = String(provider || '').toLowerCase();
+    const sub = String(providerSub || '').trim();
+    const normEmail = email ? String(email).trim().toLowerCase() : null;
+    const displayName = name && String(name).trim() ? String(name).trim() : 'راكب جديد';
+    if (!sub) throw new Error('Missing provider_sub');
+
+    // 1) Existing identity
+    const existingIdentity = await pool.query(
+        `SELECT user_id
+         FROM user_oauth_identities
+         WHERE provider = $1 AND provider_sub = $2
+         LIMIT 1`,
+        [p, sub]
+    );
+    if (existingIdentity.rows.length > 0) {
+        const userId = existingIdentity.rows[0].user_id;
+        const userRes = await pool.query('SELECT id, phone, name, email, role, created_at FROM users WHERE id = $1 LIMIT 1', [userId]);
+        const user = userRes.rows[0] || null;
+        if (!user) throw new Error('Linked user not found');
+        if (String(user.role || '').toLowerCase() !== 'passenger') throw new Error('OAuth is supported for passenger only');
+        // Mark email as verified if present
+        if (user.email) {
+            try { await pool.query('UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE id = $1', [user.id]); } catch (e) {}
+        }
+        return { user, created: false, linked: true };
+    }
+
+    // 2) Link to an existing logged-in user
+    if (linkUserId) {
+        const userRes = await pool.query('SELECT id, phone, name, email, role, created_at FROM users WHERE id = $1 LIMIT 1', [linkUserId]);
+        const user = userRes.rows[0] || null;
+        if (!user) throw new Error('User not found');
+        if (String(user.role || '').toLowerCase() !== 'passenger') throw new Error('OAuth link is supported for passenger only');
+        if (normEmail) {
+            try {
+                await pool.query('UPDATE users SET email = COALESCE(email, $1), email_verified_at = COALESCE(email_verified_at, NOW()) WHERE id = $2', [normEmail, user.id]);
+            } catch (e) {
+                // ignore
+            }
+        }
+        await pool.query(
+            `INSERT INTO user_oauth_identities (user_id, provider, provider_sub, email)
+             VALUES ($1,$2,$3,$4)
+             ON CONFLICT (provider, provider_sub) DO NOTHING`,
+            [user.id, p, sub, normEmail]
+        );
+        return { user: { ...user, email: user.email || normEmail }, created: false, linked: true };
+    }
+
+    // 3) Try match by email
+    if (normEmail) {
+        const userRes = await pool.query(
+            'SELECT id, phone, name, email, role, created_at FROM users WHERE LOWER(email) = $1 LIMIT 1',
+            [normEmail]
+        );
+        if (userRes.rows.length > 0) {
+            const user = userRes.rows[0];
+            if (String(user.role || '').toLowerCase() !== 'passenger') throw new Error('OAuth is supported for passenger only');
+            try {
+                await pool.query('UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()) WHERE id = $1', [user.id]);
+            } catch (e) {}
+            await pool.query(
+                `INSERT INTO user_oauth_identities (user_id, provider, provider_sub, email)
+                 VALUES ($1,$2,$3,$4)
+                 ON CONFLICT (provider, provider_sub) DO NOTHING`,
+                [user.id, p, sub, normEmail]
+            );
+            return { user, created: false, linked: true };
+        }
+    }
+
+    // 4) Create a new passenger
+    const digits = Date.now().toString().slice(-9);
+    const phone = `9${digits}${Math.floor(Math.random() * 90 + 10)}`;
+    const password = await hashPassword(crypto.randomBytes(12).toString('hex'));
+    const created = await pool.query(
+        `INSERT INTO users (phone, name, email, password, role, email_verified_at)
+         VALUES ($1,$2,$3,$4,'passenger', NOW())
+         RETURNING id, phone, name, email, role, created_at`,
+        [phone, displayName, normEmail || `oauth_${p}_${Date.now()}@ubar.sa`, password]
+    );
+    const user = created.rows[0];
+    await pool.query(
+        `INSERT INTO user_oauth_identities (user_id, provider, provider_sub, email)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (provider, provider_sub) DO NOTHING`,
+        [user.id, p, sub, normEmail]
+    );
+    return { user, created: true, linked: true };
+}
+
+async function oauthStartLogin(provider, req, res) {
+    if (!isOAuthConfigured(provider)) {
+        return res.status(501).json({ success: false, error: 'oauth_not_configured' });
+    }
+    oauthPruneStates();
+    const client = await getOAuthClient(provider);
+    const cfg = getOAuthProviderConfig(provider);
+    const state = crypto.randomBytes(16).toString('hex');
+    const codeVerifier = generators.codeVerifier();
+    const codeChallenge = generators.codeChallenge(codeVerifier);
+    oauthPutState(state, {
+        provider: String(provider).toLowerCase(),
+        mode: 'login',
+        userId: null,
+        codeVerifier,
+        createdAtMs: Date.now(),
+        expiresAtMs: Date.now() + 10 * 60 * 1000
+    });
+    const url = client.authorizationUrl({
+        scope: 'openid email profile',
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        redirect_uri: cfg.redirectUri
+    });
+    return res.redirect(url);
+}
+
+async function oauthStartLink(provider, req, res) {
+    if (!isOAuthConfigured(provider)) {
+        return res.status(501).json({ success: false, error: 'oauth_not_configured' });
+    }
+    const userId = req.auth?.uid;
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+    oauthPruneStates();
+    const client = await getOAuthClient(provider);
+    const cfg = getOAuthProviderConfig(provider);
+    const state = crypto.randomBytes(16).toString('hex');
+    const codeVerifier = generators.codeVerifier();
+    const codeChallenge = generators.codeChallenge(codeVerifier);
+    oauthPutState(state, {
+        provider: String(provider).toLowerCase(),
+        mode: 'link',
+        userId,
+        codeVerifier,
+        createdAtMs: Date.now(),
+        expiresAtMs: Date.now() + 10 * 60 * 1000
+    });
+    const url = client.authorizationUrl({
+        scope: 'openid email profile',
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        redirect_uri: cfg.redirectUri
+    });
+    return res.json({ success: true, url });
+}
+
+async function oauthCallback(provider, req, res) {
+    try {
+        if (!isOAuthConfigured(provider)) {
+            return res.status(501).send(makeOAuthPopupHtml({ success: false, error: 'oauth_not_configured' }));
+        }
+        const client = await getOAuthClient(provider);
+        const cfg = getOAuthProviderConfig(provider);
+
+        const params = client.callbackParams(req);
+        const state = params?.state ? String(params.state) : '';
+        const st = oauthTakeState(state);
+        if (!st) {
+            return res.status(400).send(makeOAuthPopupHtml({ success: false, error: 'invalid_state' }));
+        }
+        if (st.provider !== String(provider).toLowerCase()) {
+            return res.status(400).send(makeOAuthPopupHtml({ success: false, error: 'state_provider_mismatch' }));
+        }
+        if (st.expiresAtMs && st.expiresAtMs <= Date.now()) {
+            return res.status(400).send(makeOAuthPopupHtml({ success: false, error: 'state_expired' }));
+        }
+
+        const tokenSet = await client.callback(cfg.redirectUri, params, { state, code_verifier: st.codeVerifier });
+        const claims = tokenSet.claims();
+        const email = claims?.email ? String(claims.email) : null;
+        const sub = claims?.sub ? String(claims.sub) : null;
+        const name = claims?.name ? String(claims.name) : (claims?.given_name ? String(claims.given_name) : null);
+        if (!sub) {
+            return res.status(400).send(makeOAuthPopupHtml({ success: false, error: 'missing_sub' }));
+        }
+
+        const linkUserId = st.mode === 'link' ? st.userId : null;
+        const { user, created } = await findOrCreateUserFromOAuth({ provider, providerSub: sub, email, name, linkUserId });
+
+        const token = signAccessToken({
+            sub: String(user.id),
+            uid: user.id,
+            role: user.role,
+            email: user.email,
+            phone: user.phone,
+            name: user.name
+        });
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.status(200).send(makeOAuthPopupHtml({ success: true, provider, created, data: user, token }));
+    } catch (err) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.status(500).send(makeOAuthPopupHtml({ success: false, error: err.message }));
+    }
+}
+
+app.get('/api/oauth/google/login', (req, res) => oauthStartLogin('google', req, res));
+app.get('/api/oauth/google/callback', (req, res) => oauthCallback('google', req, res));
+app.post('/api/oauth/google/link', requireAuth, (req, res) => oauthStartLink('google', req, res));
+
+app.get('/api/oauth/apple/login', (req, res) => oauthStartLogin('apple', req, res));
+app.get('/api/oauth/apple/callback', (req, res) => oauthCallback('apple', req, res));
+app.post('/api/oauth/apple/link', requireAuth, (req, res) => oauthStartLink('apple', req, res));
 
 // Login with email and password
 app.post('/api/auth/login', async (req, res) => {
