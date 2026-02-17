@@ -271,6 +271,160 @@ async function run() {
   if (!tRes.ok || !tData.success) throw new Error(`Support ticket failed: ${tData.error || tRes.status}`);
   console.log('✅ Ticket created:', tData.data.id);
 
+  // 9️⃣b) Trusted contacts
+  console.log('\n9️⃣b Trusted contacts...');
+  const addContact = await jsonFetch(`${baseURL}/passengers/me/trusted-contacts`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ name: 'Guardian Test', channel: 'whatsapp', value: '+966500000000' })
+  });
+  if (!addContact.res.ok) throw new Error(`Add trusted contact failed: ${addContact.data.error || addContact.res.status}`);
+  const contactId = addContact.data.data.id;
+
+  const listContacts = await jsonFetch(`${baseURL}/passengers/me/trusted-contacts`, { headers: p1Headers });
+  if (!listContacts.res.ok) throw new Error(`List trusted contacts failed: ${listContacts.data.error || listContacts.res.status}`);
+  console.log('✅ Trusted contacts count:', listContacts.data.count);
+
+  const delContact = await jsonFetch(`${baseURL}/passengers/me/trusted-contacts/${encodeURIComponent(contactId)}`, {
+    method: 'DELETE',
+    headers: p1Headers
+  });
+  if (!delContact.res.ok) throw new Error(`Delete trusted contact failed: ${delContact.data.error || delContact.res.status}`);
+
+  // 9️⃣c) Basic verification (email + phone)
+  console.log('\n9️⃣c Verification (basic)...');
+  const emailReq = await jsonFetch(`${baseURL}/users/me/verify/email/request`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${p1.token}` }
+  });
+  if (!emailReq.res.ok) throw new Error(`Email verify request failed: ${emailReq.data.error || emailReq.res.status}`);
+  const emailToken = emailReq.data.data.token;
+
+  const emailConfirm = await jsonFetch(`${baseURL}/users/me/verify/email/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p1.token}` },
+    body: JSON.stringify({ token: emailToken })
+  });
+  if (!emailConfirm.res.ok) throw new Error(`Email verify confirm failed: ${emailConfirm.data.error || emailConfirm.res.status}`);
+
+  const phoneReq = await jsonFetch(`${baseURL}/users/me/verify/phone/request`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${p1.token}` }
+  });
+  if (!phoneReq.res.ok) throw new Error(`Phone verify request failed: ${phoneReq.data.error || phoneReq.res.status}`);
+  const otp = phoneReq.data.data.otp;
+
+  const phoneConfirm = await jsonFetch(`${baseURL}/users/me/verify/phone/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p1.token}` },
+    body: JSON.stringify({ otp })
+  });
+  if (!phoneConfirm.res.ok) throw new Error(`Phone verify confirm failed: ${phoneConfirm.data.error || phoneConfirm.res.status}`);
+
+  const vStatus1 = await jsonFetch(`${baseURL}/passengers/me/verification/status`, { headers: p1Headers });
+  if (!vStatus1.res.ok) throw new Error(`Verification status failed: ${vStatus1.data.error || vStatus1.res.status}`);
+  console.log('✅ Verified level (after basic):', vStatus1.data.data.verified_level);
+
+  // 9️⃣d) Strong verification request + upload + admin approve
+  console.log('\n9️⃣d Verification (strong)...');
+  const strongReq = await jsonFetch(`${baseURL}/passengers/me/verification/request`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ level: 'strong' })
+  });
+  if (!strongReq.res.ok) throw new Error(`Strong verification request failed: ${strongReq.data.error || strongReq.res.status}`);
+  const verificationId = strongReq.data.data.id;
+
+  const fdStrong = new FormData();
+  fdStrong.append('verification_id', String(verificationId));
+  fdStrong.append('id_document', new Blob(['id'], { type: 'image/png' }), 'id.png');
+  fdStrong.append('selfie', new Blob(['selfie'], { type: 'image/png' }), 'selfie.png');
+
+  const upRes = await fetch(`${baseURL}/passengers/me/verification/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${p1.token}` },
+    body: fdStrong
+  });
+  const upData = await upRes.json().catch(() => ({}));
+  if (!upRes.ok || !upData.success) throw new Error(`Strong verification upload failed: ${upData.error || upRes.status}`);
+
+  const pendingList = await jsonFetch(`${baseURL}/admin/passenger-verifications?status=pending`, { headers: adminHeaders });
+  if (!pendingList.res.ok) throw new Error(`Admin pending list failed: ${pendingList.data.error || pendingList.res.status}`);
+  const found = pendingList.data.data.find((x) => String(x.id) === String(verificationId));
+  if (!found) throw new Error('Strong verification not found in pending list');
+
+  const approve = await jsonFetch(`${baseURL}/admin/passenger-verifications/${encodeURIComponent(verificationId)}`, {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: JSON.stringify({ status: 'approved' })
+  });
+  if (!approve.res.ok) throw new Error(`Admin approve failed: ${approve.data.error || approve.res.status}`);
+
+  const vStatus2 = await jsonFetch(`${baseURL}/passengers/me/verification/status`, { headers: p1Headers });
+  if (!vStatus2.res.ok) throw new Error(`Verification status 2 failed: ${vStatus2.data.error || vStatus2.res.status}`);
+  console.log('✅ Verified level (after strong):', vStatus2.data.data.verified_level);
+
+  // 9️⃣e) Pickup handshake + safety OK/Help + guardian check-ins
+  console.log('\n9️⃣e Pickup handshake + guardian + safety...');
+  const assignTrip = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/assign`, {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: JSON.stringify({ driver_id: driverId, driver_name: 'Test Driver' })
+  });
+  if (!assignTrip.res.ok) throw new Error(`Assign main trip failed: ${assignTrip.data.error || assignTrip.res.status}`);
+
+  const handshake = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/pickup-handshake`, { headers: p1Headers });
+  if (!handshake.res.ok) throw new Error(`Pickup handshake GET failed: ${handshake.data.error || handshake.res.status}`);
+  const code = handshake.data.data.pickup_phrase;
+
+  const verify = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/pickup-handshake/verify`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ code })
+  });
+  if (!verify.res.ok) throw new Error(`Pickup handshake verify failed: ${verify.data.error || verify.res.status}`);
+
+  const deviationCfg = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/safety/deviation-config`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ enabled: true, deviation_threshold_km: 1.5, stop_minutes_threshold: 5 })
+  });
+  if (!deviationCfg.res.ok) throw new Error(`Deviation config failed: ${deviationCfg.data.error || deviationCfg.res.status}`);
+
+  const okEvt = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/safety/ok`, {
+    method: 'POST',
+    headers: p1Headers
+  });
+  if (!okEvt.res.ok) throw new Error(`Safety OK failed: ${okEvt.data.error || okEvt.res.status}`);
+
+  const helpEvt = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/safety/help`, {
+    method: 'POST',
+    headers: p1Headers
+  });
+  if (!helpEvt.res.ok) throw new Error(`Safety Help failed: ${helpEvt.data.error || helpEvt.res.status}`);
+  console.log('✅ Safety help share url:', helpEvt.data.share_url);
+
+  const guardianSchedule = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/guardian/checkin`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ due_at: new Date(Date.now() - 60 * 1000).toISOString() })
+  });
+  if (!guardianSchedule.res.ok) throw new Error(`Guardian schedule failed: ${guardianSchedule.data.error || guardianSchedule.res.status}`);
+
+  const guardianProcess = await jsonFetch(`${baseURL}/admin/jobs/guardian-checkins/process`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ limit: 20 })
+  });
+  if (!guardianProcess.res.ok) throw new Error(`Guardian process failed: ${guardianProcess.data.error || guardianProcess.res.status}`);
+  console.log('✅ Guardian processed:', guardianProcess.data.processed);
+
+  const guardianConfirm = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/guardian/confirm`, {
+    method: 'POST',
+    headers: p1Headers
+  });
+  if (!guardianConfirm.res.ok) throw new Error(`Guardian confirm failed: ${guardianConfirm.data.error || guardianConfirm.res.status}`);
+
   // 10) Scheduled ride create + confirm + process
   console.log('\n🔟 Scheduled rides...');
   const scheduled = await jsonFetch(`${baseURL}/scheduled-rides`, {

@@ -1033,12 +1033,155 @@ function initRealtimeSocket() {
                 showToast(decision === 'accepted' ? '✅ الراكب وافق على نقطة التجمع' : '❌ الراكب رفض نقطة التجمع');
             }
         });
+
+        realtimeSocket.on('safety_event', (payload) => {
+            const tripId = payload?.trip_id;
+            const event = payload?.event;
+            if (!tripId || !event) return;
+            handleSafetyEventRealtime(String(tripId), event);
+        });
     } catch (err) {
         console.warn('⚠️ Realtime socket init failed:', err.message || err);
         realtimeSocket = null;
         realtimeConnected = false;
     }
 }
+
+function showPassengerSafetyBanner(text) {
+    const banner = document.getElementById('passenger-safety-banner');
+    const t = document.getElementById('passenger-safety-banner-text');
+    if (t) t.textContent = text || 'تم رصد سلوك غير طبيعي في المسار.';
+    if (banner) banner.classList.remove('hidden');
+}
+
+window.hidePassengerSafetyBanner = function() {
+    const banner = document.getElementById('passenger-safety-banner');
+    if (banner) banner.classList.add('hidden');
+};
+
+function handleSafetyEventRealtime(tripId, event) {
+    if (!tripId || !event) return;
+    const type = String(event.event_type || '').toLowerCase();
+
+    // Passenger-only banner for the active trip
+    if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+        if (type === 'route_deviation_detected') {
+            showPassengerSafetyBanner('⚠️ تم رصد انحراف محتمل عن المسار. هل كل شيء تمام؟');
+            showToast('🛡️ تنبيه أمان: انحراف مسار');
+            return;
+        }
+        if (type === 'unexpected_stop_detected') {
+            showPassengerSafetyBanner('⚠️ تم رصد توقف غير طبيعي. هل كل شيء تمام؟');
+            showToast('🛡️ تنبيه أمان: توقف غير طبيعي');
+            return;
+        }
+        if (type === 'rider_ok_confirmed') {
+            window.hidePassengerSafetyBanner();
+            return;
+        }
+        if (type === 'rider_help_requested') {
+            showToast('✅ تم تسجيل طلب المساعدة');
+            return;
+        }
+    }
+}
+
+window.passengerSafetyOk = async function() {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) return;
+    try {
+        await ApiService.trips.safetyOk(activePassengerTripId);
+        window.hidePassengerSafetyBanner();
+        showToast('✅ تمام');
+    } catch (e) {
+        showToast('❌ تعذر إرسال التأكيد');
+    }
+};
+
+window.passengerSafetyHelp = async function() {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) return;
+    try {
+        const res = await ApiService.trips.safetyHelp(activePassengerTripId);
+        window.hidePassengerSafetyBanner();
+        if (res?.message) {
+            try {
+                await navigator.clipboard.writeText(String(res.message));
+                showToast('📋 تم نسخ رسالة المساعدة');
+            } catch (e) {
+                showToast('✅ تم تجهيز رسالة المساعدة');
+            }
+        } else {
+            showToast('✅ تم تسجيل طلب المساعدة');
+        }
+    } catch (e) {
+        showToast('❌ تعذر طلب المساعدة');
+    }
+};
+
+window.refreshPickupHandshake = async function() {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) return;
+    try {
+        const res = await ApiService.trips.getPickupHandshake(activePassengerTripId);
+        const d = res?.data || null;
+        if (!d) return;
+        const card = document.getElementById('passenger-pickup-handshake-card');
+        const codeEl = document.getElementById('passenger-pickup-handshake-code');
+        const expEl = document.getElementById('passenger-pickup-handshake-expires');
+
+        if (codeEl) codeEl.textContent = String(d.pickup_phrase || '------');
+        if (expEl) {
+            const dt = d.expires_at ? new Date(d.expires_at) : null;
+            expEl.textContent = dt && Number.isFinite(dt.getTime())
+                ? dt.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+                : '--:--';
+        }
+        if (card) card.classList.remove('hidden');
+    } catch (e) {
+        // non-blocking
+    }
+};
+
+window.scheduleGuardianCheckin = async function() {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) {
+        showToast('لا توجد رحلة نشطة');
+        return;
+    }
+    const minsEl = document.getElementById('guardian-minutes');
+    const mins = minsEl ? Number(minsEl.value) : 15;
+    const statusEl = document.getElementById('guardian-status');
+    try {
+        const res = await ApiService.trips.scheduleGuardianCheckin(activePassengerTripId, { minutes_from_now: mins });
+        if (statusEl) {
+            const due = res?.data?.due_at ? new Date(res.data.due_at) : null;
+            statusEl.textContent = due && Number.isFinite(due.getTime())
+                ? `✅ تم الجدولة: ${due.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`
+                : '✅ تم الجدولة';
+            statusEl.classList.remove('hidden');
+        }
+        showToast('✅ تم جدولة Guardian');
+    } catch (e) {
+        showToast('❌ تعذر جدولة Guardian');
+    }
+};
+
+window.confirmGuardianCheckin = async function() {
+    if (currentUserRole !== 'passenger') return;
+    if (!activePassengerTripId) return;
+    const statusEl = document.getElementById('guardian-status');
+    try {
+        await ApiService.trips.confirmGuardianCheckin(activePassengerTripId);
+        if (statusEl) {
+            statusEl.textContent = '✅ تم التأكيد: أنا بخير';
+            statusEl.classList.remove('hidden');
+        }
+        showToast('✅ تم التأكيد');
+    } catch (e) {
+        showToast('❌ تعذر التأكيد');
+    }
+};
 
 window.hidePassengerPickupSuggestion = function() {
     const card = document.getElementById('passenger-pickup-suggestion-card');
@@ -2663,6 +2806,8 @@ async function refreshPassengerLiveTripTracking() {
             if (trip.status === 'assigned') {
                 switchSection('driver');
                 preparePassengerDriverMapView();
+                // Show pickup handshake code for the driver
+                try { window.refreshPickupHandshake(); } catch (e) {}
             }
             if (trip.status === 'ongoing') {
                 if (!passengerOngoingToastShown) {
@@ -2670,6 +2815,11 @@ async function refreshPassengerLiveTripTracking() {
                     showToast('🚗 بدأت الرحلة');
                 }
                 switchSection('in-ride');
+                // Hide handshake card once ride starts
+                try {
+                    const card = document.getElementById('passenger-pickup-handshake-card');
+                    if (card) card.classList.add('hidden');
+                } catch (e) {}
                 const destTextEl = document.getElementById('ride-dest-text');
                 if (destTextEl) destTextEl.innerText = trip.dropoff_location || currentDestination?.label || 'الوجهة';
             }
@@ -4337,6 +4487,21 @@ window.driverStartTrip = async function() {
     }
     if (!activeDriverTripId) {
         showToast('لا توجد رحلة نشطة لبدئها');
+        return;
+    }
+
+    // Pickup Handshake required before starting
+    const code = window.prompt('🔐 أدخل كود الاستلام من الراكب');
+    if (!code) {
+        showToast('تم إلغاء بدء الرحلة');
+        return;
+    }
+
+    try {
+        await ApiService.trips.verifyPickupHandshake(activeDriverTripId, String(code).trim());
+    } catch (e) {
+        console.error('Pickup handshake verify failed:', e);
+        showToast('❌ كود الاستلام غير صحيح');
         return;
     }
 

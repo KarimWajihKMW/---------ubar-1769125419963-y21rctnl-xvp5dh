@@ -265,6 +265,83 @@
             </div>
         </div>
 
+        <!-- Passenger Safety & Trust (Opt-in) -->
+        <div id="passengerSafetyTrustSection" class="hidden bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-8">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
+                <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">🛡️ الأمان والثقة</h2>
+                <button id="passengerSafetyTrustRefresh" class="text-sm text-gray-500 hover:text-gray-700">تحديث</button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Verification -->
+                <div class="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <p class="font-extrabold text-gray-800">✅ توثيق الحساب</p>
+                            <p class="text-xs text-gray-500 mt-1">Opt-in للبيانات الحساسة</p>
+                        </div>
+                        <span id="verifiedLevelBadge" class="text-xs font-bold px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700">--</span>
+                    </div>
+
+                    <div class="mt-4 space-y-2 text-sm">
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-600">البريد</span>
+                            <span id="emailVerifyStatus" class="font-bold text-gray-800">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-600">الجوال</span>
+                            <span id="phoneVerifyStatus" class="font-bold text-gray-800">--</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-600">Strong</span>
+                            <span id="strongVerifyStatus" class="font-bold text-gray-800">--</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 mt-4">
+                        <button id="btnEmailVerify" class="py-2 rounded-xl bg-white text-indigo-700 font-extrabold border border-indigo-200 hover:bg-indigo-50 transition-colors">توثيق البريد</button>
+                        <button id="btnPhoneVerify" class="py-2 rounded-xl bg-white text-indigo-700 font-extrabold border border-indigo-200 hover:bg-indigo-50 transition-colors">توثيق الجوال</button>
+                    </div>
+
+                    <div class="mt-4 pt-4 border-t border-gray-200">
+                        <p class="text-xs text-gray-600 font-bold mb-2">Strong Verification (هوية + سيلفي)</p>
+                        <div class="grid grid-cols-1 gap-2">
+                            <input id="idDocumentFile" type="file" accept="image/*,.pdf" class="w-full text-xs font-bold" />
+                            <input id="selfieFile" type="file" accept="image/*" class="w-full text-xs font-bold" />
+                            <button id="btnStrongVerify" class="py-2 rounded-xl bg-indigo-600 text-white font-extrabold hover:bg-indigo-700 transition-colors">إرسال طلب توثيق قوي</button>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-2">* الملفات تُرفع بشكل آمن ولا تُعرض كروابط عامة</p>
+                    </div>
+                </div>
+
+                <!-- Trusted contacts -->
+                <div class="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <p class="font-extrabold text-gray-800">🧑‍🤝‍🧑 جهات موثوقة</p>
+                            <p class="text-xs text-gray-500 mt-1">Guardian Check‑In يعتمد عليها</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-2 mt-4">
+                        <input id="trustedName" type="text" placeholder="الاسم" class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold outline-none" />
+                        <select id="trustedChannel" class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold outline-none">
+                            <option value="whatsapp" selected>WhatsApp</option>
+                            <option value="email">Email</option>
+                            <option value="sms">SMS</option>
+                        </select>
+                        <input id="trustedValue" type="text" placeholder="رقم/إيميل" class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold outline-none" />
+                        <button id="btnAddTrusted" class="py-2 rounded-xl bg-white text-emerald-700 font-extrabold border border-emerald-200 hover:bg-emerald-50 transition-colors">إضافة</button>
+                    </div>
+
+                    <div class="mt-4">
+                        <p class="text-xs text-gray-600 font-bold mb-2">القائمة</p>
+                        <div id="trustedList" class="space-y-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="ratingsSection" class="hidden bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-8">
             <div class="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
                 <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -303,6 +380,7 @@
     <script>
         let currentUser = null;
         let originalValues = {};
+        let passengerSafetyTrustBound = false;
         const USER_KEY = 'akwadra_user';
         const PROFILE_OVERRIDES_KEY = 'akwadra_profile_overrides';
 
@@ -571,6 +649,14 @@
                     console.log('👤 المستخدم ليس سائقاً - إخفاء بيانات الأرباح');
                 }
 
+                // Passenger safety & trust section
+                if (String(currentUser.role || '').toLowerCase() === 'passenger') {
+                    const sec = document.getElementById('passengerSafetyTrustSection');
+                    if (sec) sec.classList.remove('hidden');
+                    bindPassengerSafetyTrustActions();
+                    refreshPassengerSafetyTrust().catch(() => {});
+                }
+
                 // Apply local overrides (fields not stored in users table)
                 const phoneKey = normalizePhoneKey(currentUser.phone || userData.phone);
                 applyProfileOverrides(userId, phoneKey);
@@ -583,6 +669,174 @@
             } catch (error) {
                 console.error('❌ خطأ في تحميل بيانات المستخدم:', error);
                 alert('خطأ في تحميل بيانات المستخدم: ' + error.message);
+            }
+        }
+
+        function setBadge(el, text, tone = 'gray') {
+            if (!el) return;
+            el.textContent = text;
+            const map = {
+                gray: 'bg-white border border-gray-200 text-gray-700',
+                green: 'bg-emerald-50 border border-emerald-200 text-emerald-700',
+                blue: 'bg-indigo-50 border border-indigo-200 text-indigo-700',
+                red: 'bg-red-50 border border-red-200 text-red-700'
+            };
+            el.className = `text-xs font-bold px-3 py-1 rounded-full ${map[tone] || map.gray}`;
+        }
+
+        async function refreshPassengerSafetyTrust() {
+            const badge = document.getElementById('verifiedLevelBadge');
+            const emailSt = document.getElementById('emailVerifyStatus');
+            const phoneSt = document.getElementById('phoneVerifyStatus');
+            const strongSt = document.getElementById('strongVerifyStatus');
+
+            try {
+                const resp = await ApiService.passenger.getVerificationStatus();
+                const d = resp?.data || null;
+                if (!d) return;
+
+                const level = String(d.verified_level || 'none').toLowerCase();
+                if (level === 'strong') setBadge(badge, 'Strong', 'green');
+                else if (level === 'basic') setBadge(badge, 'Basic', 'blue');
+                else setBadge(badge, 'None', 'gray');
+
+                if (emailSt) emailSt.textContent = d.basic?.email_verified_at ? 'موثّق' : 'غير موثّق';
+                if (phoneSt) phoneSt.textContent = d.basic?.phone_verified_at ? 'موثّق' : 'غير موثّق';
+                if (strongSt) strongSt.textContent = d.strong?.status ? String(d.strong.status) : 'لا يوجد';
+            } catch (e) {
+                setBadge(badge, '--', 'gray');
+            }
+
+            try {
+                const list = await ApiService.passenger.listTrustedContacts();
+                renderTrustedContacts(list?.data || []);
+            } catch (e) {
+                renderTrustedContacts([]);
+            }
+        }
+
+        function renderTrustedContacts(items) {
+            const wrap = document.getElementById('trustedList');
+            if (!wrap) return;
+            wrap.innerHTML = '';
+            const arr = Array.isArray(items) ? items : [];
+            if (arr.length === 0) {
+                wrap.innerHTML = '<div class="text-xs text-gray-500">لا توجد جهات موثوقة</div>';
+                return;
+            }
+            arr.forEach((c) => {
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between bg-white border border-gray-200 rounded-xl px-3 py-2';
+                row.innerHTML = `
+                    <div>
+                        <div class="text-sm font-bold text-gray-800">${String(c.name || '')}</div>
+                        <div class="text-[11px] text-gray-500">${String(c.channel || '')} · ${String(c.value || '')}</div>
+                    </div>
+                    <button data-id="${String(c.id)}" class="text-xs font-extrabold text-red-600 hover:text-red-700">حذف</button>
+                `;
+                const btn = row.querySelector('button');
+                if (btn) {
+                    btn.addEventListener('click', async () => {
+                        try {
+                            await ApiService.passenger.deleteTrustedContact(c.id);
+                            await refreshPassengerSafetyTrust();
+                        } catch (e) {
+                            alert('تعذر حذف الجهة');
+                        }
+                    });
+                }
+                wrap.appendChild(row);
+            });
+        }
+
+        function bindPassengerSafetyTrustActions() {
+            if (passengerSafetyTrustBound) return;
+            passengerSafetyTrustBound = true;
+
+            const refreshBtn = document.getElementById('passengerSafetyTrustRefresh');
+            if (refreshBtn) refreshBtn.addEventListener('click', () => refreshPassengerSafetyTrust().catch(() => {}));
+
+            const btnEmail = document.getElementById('btnEmailVerify');
+            if (btnEmail) {
+                btnEmail.addEventListener('click', async () => {
+                    try {
+                        const r = await ApiService.passenger.requestEmailVerification();
+                        const token = r?.data?.token;
+                        const entered = window.prompt('📧 تم إنشاء Token توثيق البريد (MVP). انسخه ثم الصقه للتأكيد:', token ? String(token) : '');
+                        if (!entered) return;
+                        await ApiService.passenger.confirmEmailVerification(String(entered).trim());
+                        await refreshPassengerSafetyTrust();
+                        alert('✅ تم توثيق البريد');
+                    } catch (e) {
+                        alert('تعذر توثيق البريد');
+                    }
+                });
+            }
+
+            const btnPhone = document.getElementById('btnPhoneVerify');
+            if (btnPhone) {
+                btnPhone.addEventListener('click', async () => {
+                    try {
+                        const r = await ApiService.passenger.requestPhoneVerification();
+                        const otp = r?.data?.otp;
+                        const entered = window.prompt('📱 تم إنشاء OTP توثيق الجوال (MVP). انسخه ثم الصقه للتأكيد:', otp ? String(otp) : '');
+                        if (!entered) return;
+                        await ApiService.passenger.confirmPhoneVerification(String(entered).trim());
+                        await refreshPassengerSafetyTrust();
+                        alert('✅ تم توثيق الجوال');
+                    } catch (e) {
+                        alert('تعذر توثيق الجوال');
+                    }
+                });
+            }
+
+            const btnStrong = document.getElementById('btnStrongVerify');
+            if (btnStrong) {
+                btnStrong.addEventListener('click', async () => {
+                    try {
+                        const reqRes = await ApiService.passenger.requestStrongVerification('strong');
+                        const vid = reqRes?.data?.id;
+                        if (!vid) throw new Error('missing verification id');
+
+                        const idDoc = document.getElementById('idDocumentFile')?.files?.[0] || null;
+                        const selfie = document.getElementById('selfieFile')?.files?.[0] || null;
+                        if (!idDoc || !selfie) {
+                            alert('اختر ملف الهوية + السيلفي أولاً');
+                            return;
+                        }
+
+                        const fd = new FormData();
+                        fd.append('verification_id', String(vid));
+                        fd.append('id_document', idDoc);
+                        fd.append('selfie', selfie);
+                        await ApiService.passenger.uploadStrongVerification(fd);
+                        await refreshPassengerSafetyTrust();
+                        alert('✅ تم إرسال طلب التوثيق');
+                    } catch (e) {
+                        alert('تعذر إرسال طلب التوثيق');
+                    }
+                });
+            }
+
+            const btnAdd = document.getElementById('btnAddTrusted');
+            if (btnAdd) {
+                btnAdd.addEventListener('click', async () => {
+                    const name = String(document.getElementById('trustedName')?.value || '').trim();
+                    const channel = String(document.getElementById('trustedChannel')?.value || 'whatsapp').trim();
+                    const value = String(document.getElementById('trustedValue')?.value || '').trim();
+                    if (!name || !value) {
+                        alert('اكتب الاسم والقيمة');
+                        return;
+                    }
+                    try {
+                        await ApiService.passenger.addTrustedContact({ name, channel, value });
+                        document.getElementById('trustedName').value = '';
+                        document.getElementById('trustedValue').value = '';
+                        await refreshPassengerSafetyTrust();
+                    } catch (e) {
+                        alert('تعذر إضافة جهة موثوقة');
+                    }
+                });
             }
         }
 

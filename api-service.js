@@ -271,6 +271,49 @@ const ApiService = {
             return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/events`);
         },
 
+        async setRouteDeviationConfig(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/deviation-config`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async safetyOk(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/ok`, {
+                method: 'POST'
+            });
+        },
+
+        async safetyHelp(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/help`, {
+                method: 'POST'
+            });
+        },
+
+        async getPickupHandshake(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/pickup-handshake`);
+        },
+
+        async verifyPickupHandshake(tripId, code) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/pickup-handshake/verify`, {
+                method: 'POST',
+                body: JSON.stringify({ code })
+            });
+        },
+
+        async scheduleGuardianCheckin(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/guardian/checkin`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async confirmGuardianCheckin(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/guardian/confirm`, {
+                method: 'POST'
+            });
+        },
+
         async getReceipt(tripId) {
             return ApiService.request(`/trips/${encodeURIComponent(tripId)}/receipt`);
         }
@@ -332,6 +375,75 @@ const ApiService = {
         },
         async deleteFamilyMember(id) {
             return ApiService.request(`/passengers/me/family/${encodeURIComponent(id)}`, {
+                method: 'DELETE'
+            });
+        },
+
+        async getVerificationStatus() {
+            return ApiService.request('/passengers/me/verification/status');
+        },
+
+        async requestStrongVerification(level = 'strong') {
+            return ApiService.request('/passengers/me/verification/request', {
+                method: 'POST',
+                body: JSON.stringify({ level })
+            });
+        },
+
+        async uploadStrongVerification(formData) {
+            const token = ApiService.getToken();
+            const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
+            const response = await fetch(`${API_BASE_URL}/passengers/me/verification/upload`, {
+                method: 'POST',
+                headers: {
+                    ...authHeader
+                },
+                body: formData
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Request failed');
+            return data;
+        },
+
+        async requestEmailVerification() {
+            return ApiService.request('/users/me/verify/email/request', {
+                method: 'POST'
+            });
+        },
+
+        async confirmEmailVerification(token) {
+            return ApiService.request('/users/me/verify/email/confirm', {
+                method: 'POST',
+                body: JSON.stringify({ token })
+            });
+        },
+
+        async requestPhoneVerification() {
+            return ApiService.request('/users/me/verify/phone/request', {
+                method: 'POST'
+            });
+        },
+
+        async confirmPhoneVerification(otp) {
+            return ApiService.request('/users/me/verify/phone/confirm', {
+                method: 'POST',
+                body: JSON.stringify({ otp })
+            });
+        },
+
+        async listTrustedContacts() {
+            return ApiService.request('/passengers/me/trusted-contacts');
+        },
+
+        async addTrustedContact(payload) {
+            return ApiService.request('/passengers/me/trusted-contacts', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async deleteTrustedContact(id) {
+            return ApiService.request(`/passengers/me/trusted-contacts/${encodeURIComponent(id)}`, {
                 method: 'DELETE'
             });
         }

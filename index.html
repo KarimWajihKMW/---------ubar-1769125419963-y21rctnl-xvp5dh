@@ -1332,6 +1332,30 @@
                         <p class="text-[11px] text-gray-500 mt-3" id="passenger-pickup-suggestion-status"></p>
                     </div>
 
+                    <!-- Pickup Handshake (Passenger shows code to driver) -->
+                    <div id="passenger-pickup-handshake-card" class="hidden mb-6 bg-indigo-50 border border-indigo-200 rounded-2xl p-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="text-xs text-indigo-700 font-extrabold">🔐 إثبات الاستلام قبل بدء الرحلة</p>
+                                <p class="text-[11px] text-gray-600 mt-1">اعرض الكود للكابتن ليبدأ الرحلة</p>
+                            </div>
+                            <button type="button" class="text-indigo-700/70 hover:text-indigo-800" onclick="refreshPickupHandshake()">
+                                <i class="fas fa-rotate"></i>
+                            </button>
+                        </div>
+                        <div class="mt-4 flex items-center justify-between bg-white border border-indigo-100 rounded-2xl px-4 py-3">
+                            <div>
+                                <p class="text-[10px] text-gray-500 font-bold">الكود</p>
+                                <p id="passenger-pickup-handshake-code" class="text-2xl font-extrabold text-indigo-700 tracking-widest">------</p>
+                            </div>
+                            <div class="text-left">
+                                <p class="text-[10px] text-gray-500 font-bold">ينتهي</p>
+                                <p id="passenger-pickup-handshake-expires" class="text-xs font-bold text-gray-700">--:--</p>
+                            </div>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-3">* الكود يتغير تلقائيًا كل عدة دقائق</p>
+                    </div>
+
                     <!-- Action Buttons -->
                     <div class="grid grid-cols-2 gap-3 mb-4">
                         <button onclick="callDriver()" class="bg-green-500 text-white py-3 sm:py-3.5 rounded-xl font-bold hover:bg-green-600 transition-all shadow-lg shadow-green-200 hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
@@ -1383,6 +1407,44 @@
                      </div>
                  </div>
                  <div class="p-6">
+                      <!-- Safety banner (route deviation / stop) -->
+                      <div id="passenger-safety-banner" class="hidden mb-5 bg-red-50 border border-red-200 rounded-2xl p-4">
+                          <div class="flex items-start justify-between gap-3">
+                              <div class="flex-1">
+                                  <p class="text-xs text-red-700 font-extrabold">🛡️ هل كل شيء تمام؟</p>
+                                  <p id="passenger-safety-banner-text" class="text-[11px] text-gray-700 mt-1">تم رصد سلوك غير طبيعي في المسار.</p>
+                              </div>
+                              <button type="button" class="text-red-700/70 hover:text-red-800" onclick="hidePassengerSafetyBanner()">
+                                  <i class="fas fa-times"></i>
+                              </button>
+                          </div>
+                          <div class="grid grid-cols-2 gap-3 mt-4">
+                              <button type="button" onclick="passengerSafetyOk()" class="py-3 rounded-xl bg-white text-emerald-700 font-extrabold border border-emerald-200 hover:bg-emerald-50 transition-colors">أنا بخير</button>
+                              <button type="button" onclick="passengerSafetyHelp()" class="py-3 rounded-xl bg-red-600 text-white font-extrabold hover:bg-red-700 transition-colors">محتاج مساعدة</button>
+                          </div>
+                      </div>
+
+                      <!-- Guardian Check-In -->
+                      <div id="passenger-guardian-card" class="mb-5 bg-white border border-gray-200 rounded-2xl p-4">
+                          <div class="flex items-center justify-between">
+                              <div>
+                                  <p class="text-xs text-gray-700 font-extrabold">🧑‍🤝‍🧑 اطمن عليّا (Guardian)</p>
+                                  <p class="text-[11px] text-gray-500 mt-1">جدولة تذكير أمان لو ما أكدتش خلال وقت معين</p>
+                              </div>
+                              <select id="guardian-minutes" class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold text-gray-800">
+                                  <option value="10">10 دق</option>
+                                  <option value="15" selected>15 دق</option>
+                                  <option value="20">20 دق</option>
+                                  <option value="30">30 دق</option>
+                              </select>
+                          </div>
+                          <div class="grid grid-cols-2 gap-3 mt-4">
+                              <button type="button" onclick="scheduleGuardianCheckin()" class="py-3 rounded-xl bg-indigo-600 text-white font-extrabold hover:bg-indigo-700 transition-colors">جدولة</button>
+                              <button type="button" onclick="confirmGuardianCheckin()" class="py-3 rounded-xl bg-white text-indigo-700 font-extrabold border border-indigo-200 hover:bg-indigo-50 transition-colors">أنا بخير</button>
+                          </div>
+                          <p id="guardian-status" class="text-[11px] text-gray-500 mt-3 hidden"></p>
+                      </div>
+
                       <div class="border-l-2 border-dashed border-gray-200 ml-3 pl-6 space-y-6 relative">
                           <div class="relative">
                               <div class="absolute -right-[31px] top-1 w-4 h-4 rounded-full bg-indigo-600 border-4 border-white shadow-sm"></div>

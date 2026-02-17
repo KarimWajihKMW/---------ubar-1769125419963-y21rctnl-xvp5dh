@@ -65,6 +65,130 @@ function tripRoom(tripId) {
 }
 
 const lastTripDriverWriteAt = new Map();
+const lastTripSafetyCheckAt = new Map();
+const lastTripDeviationEventAt = new Map();
+const tripStopState = new Map();
+
+async function checkTripSafetyFromDriverLocationUpdate(tripId, coords) {
+    try {
+        const now = Date.now();
+        const key = String(tripId);
+        const last = lastTripSafetyCheckAt.get(key) || 0;
+        if (now - last < 10000) return; // throttle safety checks
+        lastTripSafetyCheckAt.set(key, now);
+
+        const tripRes = await pool.query(
+            `SELECT id, status, driver_id,
+                    pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
+             FROM trips
+             WHERE id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return;
+        if (String(trip.status || '').toLowerCase() !== 'ongoing') return;
+
+        const pickupLat = trip.pickup_lat !== null && trip.pickup_lat !== undefined ? Number(trip.pickup_lat) : null;
+        const pickupLng = trip.pickup_lng !== null && trip.pickup_lng !== undefined ? Number(trip.pickup_lng) : null;
+        const dropoffLat = trip.dropoff_lat !== null && trip.dropoff_lat !== undefined ? Number(trip.dropoff_lat) : null;
+        const dropoffLng = trip.dropoff_lng !== null && trip.dropoff_lng !== undefined ? Number(trip.dropoff_lng) : null;
+        if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng)) {
+            return;
+        }
+
+        let cfg = null;
+        try {
+            const cfgRes = await pool.query(
+                `SELECT enabled, deviation_threshold_km, stop_minutes_threshold
+                 FROM trip_route_deviation_configs
+                 WHERE trip_id = $1
+                 LIMIT 1`,
+                [tripId]
+            );
+            cfg = cfgRes.rows[0] || null;
+        } catch (e) {
+            cfg = null;
+        }
+
+        const enabled = cfg?.enabled === undefined || cfg?.enabled === null ? true : Boolean(cfg.enabled);
+        if (!enabled) return;
+
+        const tripDistanceKm = haversineKm({ lat: pickupLat, lng: pickupLng }, { lat: dropoffLat, lng: dropoffLng });
+        let thresholdKm = cfg?.deviation_threshold_km !== undefined && cfg?.deviation_threshold_km !== null
+            ? Number(cfg.deviation_threshold_km)
+            : (tripDistanceKm <= 6 ? 1.2 : 2.0);
+        if (!Number.isFinite(thresholdKm) || thresholdKm <= 0) thresholdKm = 1.5;
+        thresholdKm = Math.max(0.5, Math.min(10, thresholdKm));
+
+        const deviationKm = pointToSegmentDistanceKm(
+            { lat: Number(coords.lat), lng: Number(coords.lng) },
+            { lat: pickupLat, lng: pickupLng },
+            { lat: dropoffLat, lng: dropoffLng }
+        );
+
+        if (Number.isFinite(deviationKm) && deviationKm > thresholdKm) {
+            const lastEvent = lastTripDeviationEventAt.get(key) || 0;
+            if (now - lastEvent > 5 * 60 * 1000) {
+                lastTripDeviationEventAt.set(key, now);
+                const msg = `deviation_km=${deviationKm.toFixed(2)} threshold_km=${thresholdKm.toFixed(2)}`;
+                const insert = await pool.query(
+                    `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, created_by_driver_id, event_type, message)
+                     VALUES ($1,'system',NULL,$2,'route_deviation_detected',$3)
+                     RETURNING *`,
+                    [tripId, trip.driver_id || null, msg]
+                );
+                try {
+                    io.to(tripRoom(tripId)).emit('safety_event', { trip_id: String(tripId), event: insert.rows[0] });
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+
+        const stopThresholdMinutes = cfg?.stop_minutes_threshold !== undefined && cfg?.stop_minutes_threshold !== null
+            ? Number(cfg.stop_minutes_threshold)
+            : 5;
+        const stopMins = Number.isFinite(stopThresholdMinutes) ? Math.max(2, Math.min(60, stopThresholdMinutes)) : 5;
+
+        const state = tripStopState.get(key) || {
+            lastCoords: { lat: Number(coords.lat), lng: Number(coords.lng) },
+            lastMovedAt: now,
+            lastStopEventAt: 0
+        };
+
+        const movedKm = haversineKm(
+            { lat: state.lastCoords.lat, lng: state.lastCoords.lng },
+            { lat: Number(coords.lat), lng: Number(coords.lng) }
+        );
+
+        if (Number.isFinite(movedKm) && movedKm >= 0.05) {
+            state.lastCoords = { lat: Number(coords.lat), lng: Number(coords.lng) };
+            state.lastMovedAt = now;
+        }
+
+        if (now - state.lastMovedAt > stopMins * 60 * 1000 && now - (state.lastStopEventAt || 0) > stopMins * 60 * 1000) {
+            state.lastStopEventAt = now;
+            const msg = `stop_minutes>=${stopMins}`;
+            const insert = await pool.query(
+                `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, created_by_driver_id, event_type, message)
+                 VALUES ($1,'system',NULL,$2,'unexpected_stop_detected',$3)
+                 RETURNING *`,
+                [tripId, trip.driver_id || null, msg]
+            );
+            try {
+                io.to(tripRoom(tripId)).emit('safety_event', { trip_id: String(tripId), event: insert.rows[0] });
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        tripStopState.set(key, state);
+    } catch (err) {
+        // Non-blocking
+        console.warn('⚠️ checkTripSafetyFromDriverLocationUpdate failed:', err.message);
+    }
+}
 
 io.on('connection', (socket) => {
     socket.on('subscribe_trip', (payload) => {
@@ -112,6 +236,9 @@ io.on('connection', (socket) => {
                  WHERE id = $3`,
                 [lat, lng, driverId]
             );
+
+            // Route deviation guardian checks (non-blocking/throttled)
+            checkTripSafetyFromDriverLocationUpdate(String(tripId), { lat, lng });
         } catch (err) {
             console.warn('⚠️ driver_location_update failed:', err.message);
         }
@@ -122,6 +249,12 @@ io.on('connection', (socket) => {
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Secure uploads (NOT served statically) for sensitive opt-in documents
+const secureUploadsDir = path.join(__dirname, 'secure_uploads');
+if (!fs.existsSync(secureUploadsDir)) {
+    fs.mkdirSync(secureUploadsDir, { recursive: true });
 }
 
 // Configure multer for file uploads
@@ -143,6 +276,32 @@ const upload = multer({
         const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
         const mimetype = allowedTypes.test(file.mimetype);
         
+        if (mimetype && extname) {
+            return cb(null, true);
+        } else {
+            cb(new Error('Only .png, .jpg, .jpeg and .pdf files are allowed!'));
+        }
+    }
+});
+
+const secureStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, secureUploadsDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const secureUpload = multer({
+    storage: secureStorage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = /jpeg|jpg|png|pdf/;
+        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        const mimetype = allowedTypes.test(file.mimetype);
+
         if (mimetype && extname) {
             return cb(null, true);
         } else {
@@ -779,6 +938,89 @@ async function ensurePassengerFeatureTables() {
         `);
         await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_safety_events_trip ON trip_safety_events(trip_id, created_at DESC);');
 
+        // --- Safety & trust (Mlf_a8tra7at_haged_uber2) ---
+
+        // Basic verification state (opt-in tokens are handled at API level)
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP;');
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP;');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS user_verification_tokens (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                token_type VARCHAR(20) NOT NULL,
+                token VARCHAR(120) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                consumed_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_user_verification_tokens_user ON user_verification_tokens(user_id, token_type, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_user_verification_tokens_token ON user_verification_tokens(token_type, token);');
+
+        // Strong verification requests (manual admin review)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_verifications (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                level VARCHAR(10) NOT NULL DEFAULT 'strong',
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                reject_reason TEXT,
+                id_document_path TEXT,
+                selfie_path TEXT
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_verifications_user ON passenger_verifications(user_id, submitted_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_verifications_status ON passenger_verifications(status, submitted_at ASC);');
+
+        // Trusted contacts (guardian)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_trusted_contacts (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                name VARCHAR(120) NOT NULL,
+                channel VARCHAR(20) NOT NULL DEFAULT 'whatsapp',
+                value TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_trusted_contacts_user ON passenger_trusted_contacts(user_id, created_at DESC);');
+
+        // Scheduled guardian check-ins per trip
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_guardian_checkins (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                due_at TIMESTAMP NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_guardian_checkins_due ON trip_guardian_checkins(status, due_at ASC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_guardian_checkins_trip ON trip_guardian_checkins(trip_id, created_at DESC);');
+
+        // Route deviation guardian (optional per-trip config)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_route_deviation_configs (
+                trip_id VARCHAR(50) PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                deviation_threshold_km DECIMAL(10, 3),
+                stop_minutes_threshold INTEGER,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Pickup handshake fields on trips
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_code_hash TEXT;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_code_expires_at TIMESTAMP;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_verified_at TIMESTAMP;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_verified_by INTEGER REFERENCES drivers(id) ON DELETE SET NULL;');
+
         // --- In-app support ---
         await pool.query(`
             CREATE TABLE IF NOT EXISTS support_tickets (
@@ -957,6 +1199,73 @@ function getLoyaltyTier({ completedTrips, cancelledTrips, hubComplianceTrips }) 
 
 function makeShareToken() {
     return crypto.randomBytes(24).toString('hex');
+}
+
+function sha256Hex(input) {
+    return crypto.createHash('sha256').update(String(input)).digest('hex');
+}
+
+function computePassengerVerifiedLevel({ email_verified_at, phone_verified_at, strong_verification_status }) {
+    const strong = String(strong_verification_status || '').toLowerCase();
+    if (strong === 'approved') return 'strong';
+    if (email_verified_at && phone_verified_at) return 'basic';
+    return 'none';
+}
+
+function pickupHandshakeWindowStartMs(nowMs, windowMinutes) {
+    const w = Math.max(1, Number(windowMinutes) || 10) * 60 * 1000;
+    return Math.floor(nowMs / w) * w;
+}
+
+function computePickupHandshakeCode({ tripId, windowStartMs, digits = 6 }) {
+    const secret = process.env.PICKUP_HANDSHAKE_SECRET || process.env.JWT_SECRET || 'pickup_handshake_secret';
+    const msg = `${String(tripId)}:${String(windowStartMs)}`;
+    const h = crypto.createHmac('sha256', secret).update(msg).digest();
+
+    // Take 4 bytes -> uint32 -> mod 10^digits
+    const n = h.readUInt32BE(0);
+    const mod = Math.pow(10, Math.max(4, Math.min(8, Number(digits) || 6)));
+    const code = String(n % mod).padStart(Math.round(Math.log10(mod)), '0');
+    return code;
+}
+
+// Equirectangular projection helpers for small-distance calculations
+function degToRad(d) {
+    return (Number(d) * Math.PI) / 180;
+}
+
+function pointToSegmentDistanceKm(p, a, b) {
+    // Approximate on a plane around point A
+    const lat0 = degToRad(a.lat);
+    const x = (lng) => degToRad(lng) * Math.cos(lat0) * 6371;
+    const y = (lat) => degToRad(lat) * 6371;
+
+    const ax = x(a.lng);
+    const ay = y(a.lat);
+    const bx = x(b.lng);
+    const by = y(b.lat);
+    const px = x(p.lng);
+    const py = y(p.lat);
+
+    const abx = bx - ax;
+    const aby = by - ay;
+    const apx = px - ax;
+    const apy = py - ay;
+
+    const abLen2 = abx * abx + aby * aby;
+    if (abLen2 <= 1e-12) {
+        const dx = px - ax;
+        const dy = py - ay;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    let t = (apx * abx + apy * aby) / abLen2;
+    t = Math.max(0, Math.min(1, t));
+    const cx = ax + t * abx;
+    const cy = ay + t * aby;
+    const dx = px - cx;
+    const dy = py - cy;
+    return Math.sqrt(dx * dx + dy * dy);
 }
 
 function computeSimplePrice({ pickupLat, pickupLng, dropoffLat, dropoffLng, carType }) {
@@ -1505,6 +1814,602 @@ app.get('/api/passengers/me/loyalty', requireRole('passenger', 'admin'), async (
                 ...tierInfo
             }
         });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== SAFETY & TRUST (Mlf_a8tra7at_haged_uber2) ====================
+
+// --- Basic verification (email/phone) ---
+
+app.post('/api/users/me/verify/email/request', requireAuth, async (req, res) => {
+    try {
+        const authUserId = req.auth?.uid;
+        if (!authUserId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+        const userRes = await pool.query('SELECT id, email, email_verified_at FROM users WHERE id = $1 LIMIT 1', [authUserId]);
+        const user = userRes.rows[0] || null;
+        if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+        if (!user.email) return res.status(400).json({ success: false, error: 'Email is required' });
+
+        const token = crypto.randomBytes(16).toString('hex');
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+        await pool.query(
+            `INSERT INTO user_verification_tokens (user_id, token_type, token, expires_at)
+             VALUES ($1,'email',$2,$3)`,
+            [authUserId, token, expiresAt]
+        );
+
+        // Dev/MVP: return token directly (replace with email sending later)
+        res.status(201).json({ success: true, data: { token, expires_at: expiresAt } });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/users/me/verify/email/confirm', requireAuth, async (req, res) => {
+    try {
+        const authUserId = req.auth?.uid;
+        const token = String(req.body?.token || '').trim();
+        if (!authUserId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+        if (!token) return res.status(400).json({ success: false, error: 'token is required' });
+
+        const tokRes = await pool.query(
+            `SELECT id, expires_at, consumed_at
+             FROM user_verification_tokens
+             WHERE user_id = $1 AND token_type = 'email' AND token = $2
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [authUserId, token]
+        );
+        const row = tokRes.rows[0] || null;
+        if (!row) return res.status(400).json({ success: false, error: 'Invalid token' });
+        if (row.consumed_at) return res.status(409).json({ success: false, error: 'Token already used' });
+        if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+            return res.status(410).json({ success: false, error: 'Token expired' });
+        }
+
+        await pool.query('UPDATE user_verification_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE id = $1', [row.id]);
+        await pool.query('UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = $1', [authUserId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/users/me/verify/phone/request', requireAuth, async (req, res) => {
+    try {
+        const authUserId = req.auth?.uid;
+        if (!authUserId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+        const userRes = await pool.query('SELECT id, phone FROM users WHERE id = $1 LIMIT 1', [authUserId]);
+        const user = userRes.rows[0] || null;
+        if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+        if (!user.phone) return res.status(400).json({ success: false, error: 'Phone is required' });
+
+        const otp = String(Math.floor(Math.random() * 900000) + 100000);
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        await pool.query(
+            `INSERT INTO user_verification_tokens (user_id, token_type, token, expires_at)
+             VALUES ($1,'phone',$2,$3)`,
+            [authUserId, otp, expiresAt]
+        );
+
+        // Dev/MVP: return otp directly (replace with SMS sending later)
+        res.status(201).json({ success: true, data: { otp, expires_at: expiresAt } });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/users/me/verify/phone/confirm', requireAuth, async (req, res) => {
+    try {
+        const authUserId = req.auth?.uid;
+        const otp = String(req.body?.otp || '').trim();
+        if (!authUserId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+        if (!otp) return res.status(400).json({ success: false, error: 'otp is required' });
+
+        const tokRes = await pool.query(
+            `SELECT id, expires_at, consumed_at
+             FROM user_verification_tokens
+             WHERE user_id = $1 AND token_type = 'phone' AND token = $2
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [authUserId, otp]
+        );
+        const row = tokRes.rows[0] || null;
+        if (!row) return res.status(400).json({ success: false, error: 'Invalid otp' });
+        if (row.consumed_at) return res.status(409).json({ success: false, error: 'OTP already used' });
+        if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+            return res.status(410).json({ success: false, error: 'OTP expired' });
+        }
+
+        await pool.query('UPDATE user_verification_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE id = $1', [row.id]);
+        await pool.query('UPDATE users SET phone_verified_at = CURRENT_TIMESTAMP WHERE id = $1', [authUserId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Strong verification (opt-in) ---
+
+app.get('/api/passengers/me/verification/status', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const userRes = await pool.query(
+            `SELECT id, email, phone, email_verified_at, phone_verified_at
+             FROM users WHERE id = $1 LIMIT 1`,
+            [userId]
+        );
+        const user = userRes.rows[0] || null;
+        if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+
+        const strongRes = await pool.query(
+            `SELECT id, level, status, submitted_at, reviewed_at, reviewed_by, reject_reason
+             FROM passenger_verifications
+             WHERE user_id = $1
+             ORDER BY submitted_at DESC
+             LIMIT 1`,
+            [userId]
+        );
+        const strong = strongRes.rows[0] || null;
+
+        const verifiedLevel = computePassengerVerifiedLevel({
+            email_verified_at: user.email_verified_at,
+            phone_verified_at: user.phone_verified_at,
+            strong_verification_status: strong?.status
+        });
+
+        res.json({
+            success: true,
+            data: {
+                user_id: userId,
+                verified_level: verifiedLevel,
+                basic: {
+                    email_verified_at: user.email_verified_at || null,
+                    phone_verified_at: user.phone_verified_at || null
+                },
+                strong: strong
+                    ? {
+                        id: strong.id,
+                        level: strong.level,
+                        status: strong.status,
+                        submitted_at: strong.submitted_at,
+                        reviewed_at: strong.reviewed_at,
+                        reviewed_by: strong.reviewed_by,
+                        reject_reason: strong.reject_reason || null
+                    }
+                    : null
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/verification/request', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const level = String(req.body?.level || 'strong').toLowerCase();
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+        if (!['strong', 'basic'].includes(level)) {
+            return res.status(400).json({ success: false, error: 'level must be basic or strong' });
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO passenger_verifications (user_id, level, status)
+             VALUES ($1, $2, 'pending')
+             RETURNING id, user_id, level, status, submitted_at`,
+            [userId, level]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post(
+    '/api/passengers/me/verification/upload',
+    requireRole('passenger', 'admin'),
+    secureUpload.fields([
+        { name: 'id_document', maxCount: 1 },
+        { name: 'selfie', maxCount: 1 }
+    ]),
+    async (req, res) => {
+        try {
+            const authRole = String(req.auth?.role || '').toLowerCase();
+            const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+            if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+            const verificationId = req.body?.verification_id ? Number(req.body.verification_id) : null;
+            let target = null;
+
+            if (verificationId) {
+                const v = await pool.query(
+                    `SELECT id, user_id, status FROM passenger_verifications WHERE id = $1 LIMIT 1`,
+                    [verificationId]
+                );
+                target = v.rows[0] || null;
+                if (!target) return res.status(404).json({ success: false, error: 'Verification not found' });
+                if (String(target.user_id) !== String(userId)) {
+                    return res.status(403).json({ success: false, error: 'Forbidden' });
+                }
+            } else {
+                const v = await pool.query(
+                    `SELECT id, user_id, status
+                     FROM passenger_verifications
+                     WHERE user_id = $1
+                     ORDER BY submitted_at DESC
+                     LIMIT 1`,
+                    [userId]
+                );
+                target = v.rows[0] || null;
+                if (!target) return res.status(404).json({ success: false, error: 'No verification request found' });
+            }
+
+            if (String(target.status || '').toLowerCase() !== 'pending') {
+                return res.status(409).json({ success: false, error: 'Verification is not pending' });
+            }
+
+            const idDoc = req.files?.id_document?.[0] || null;
+            const selfie = req.files?.selfie?.[0] || null;
+            if (!idDoc && !selfie) {
+                return res.status(400).json({ success: false, error: 'No files uploaded' });
+            }
+
+            const idPath = idDoc ? idDoc.path : null;
+            const selfiePath = selfie ? selfie.path : null;
+
+            const updated = await pool.query(
+                `UPDATE passenger_verifications
+                 SET id_document_path = COALESCE($2, id_document_path),
+                     selfie_path = COALESCE($3, selfie_path)
+                 WHERE id = $1
+                 RETURNING id, user_id, level, status, submitted_at`,
+                [target.id, idPath, selfiePath]
+            );
+
+            res.json({ success: true, data: updated.rows[0] });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    }
+);
+
+// Admin review
+app.get('/api/admin/passenger-verifications', requireRole('admin'), async (req, res) => {
+    try {
+        const status = req.query?.status ? String(req.query.status).toLowerCase() : 'pending';
+        const allowed = new Set(['pending', 'approved', 'rejected']);
+        const effective = allowed.has(status) ? status : 'pending';
+
+        const result = await pool.query(
+            `SELECT pv.id, pv.user_id, pv.level, pv.status, pv.submitted_at, pv.reviewed_at, pv.reviewed_by, pv.reject_reason,
+                    u.name AS user_name, u.email AS user_email, u.phone AS user_phone
+             FROM passenger_verifications pv
+             LEFT JOIN users u ON u.id = pv.user_id
+             WHERE pv.status = $1
+             ORDER BY pv.submitted_at ASC
+             LIMIT 200`,
+            [effective]
+        );
+
+        res.json({ success: true, count: result.rows.length, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.patch('/api/admin/passenger-verifications/:id', requireRole('admin'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const nextStatus = String(req.body?.status || '').toLowerCase();
+        const rejectReason = req.body?.reject_reason !== undefined && req.body?.reject_reason !== null ? String(req.body.reject_reason) : null;
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (!['approved', 'rejected'].includes(nextStatus)) {
+            return res.status(400).json({ success: false, error: 'status must be approved or rejected' });
+        }
+
+        const updated = await pool.query(
+            `UPDATE passenger_verifications
+             SET status = $2::varchar,
+                 reviewed_at = CURRENT_TIMESTAMP,
+                 reviewed_by = $3,
+                 reject_reason = CASE WHEN $2::varchar = 'rejected' THEN NULLIF($4,'') ELSE NULL END
+             WHERE id = $1
+             RETURNING id, user_id, level, status, submitted_at, reviewed_at, reviewed_by, reject_reason`,
+            [id, nextStatus, req.auth?.uid || null, rejectReason || '']
+        );
+
+        if (updated.rows.length === 0) return res.status(404).json({ success: false, error: 'Not found' });
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/admin/passenger-verifications/:id/file/:kind', requireRole('admin'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const kind = String(req.params.kind || '').toLowerCase();
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (!['id_document', 'selfie'].includes(kind)) {
+            return res.status(400).json({ success: false, error: 'Invalid kind' });
+        }
+
+        const rowRes = await pool.query(
+            `SELECT id_document_path, selfie_path
+             FROM passenger_verifications
+             WHERE id = $1
+             LIMIT 1`,
+            [id]
+        );
+        const row = rowRes.rows[0] || null;
+        if (!row) return res.status(404).json({ success: false, error: 'Not found' });
+        const filePath = kind === 'id_document' ? row.id_document_path : row.selfie_path;
+        if (!filePath) return res.status(404).json({ success: false, error: 'File not found' });
+
+        const resolved = path.resolve(filePath);
+        const base = path.resolve(secureUploadsDir);
+        if (!resolved.startsWith(base)) {
+            return res.status(400).json({ success: false, error: 'Invalid file path' });
+        }
+        if (!fs.existsSync(resolved)) {
+            return res.status(404).json({ success: false, error: 'File missing on disk' });
+        }
+
+        res.sendFile(resolved);
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Trusted contacts (Guardian) ---
+
+app.get('/api/passengers/me/trusted-contacts', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT id, name, channel, value, created_at
+             FROM passenger_trusted_contacts
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 100`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows, count: result.rows.length });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/trusted-contacts', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const name = String(req.body?.name || '').trim();
+        const channel = String(req.body?.channel || 'whatsapp').trim().toLowerCase();
+        const value = String(req.body?.value || '').trim();
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+        if (!name || !value) return res.status(400).json({ success: false, error: 'name and value are required' });
+        if (!['whatsapp', 'email', 'sms'].includes(channel)) {
+            return res.status(400).json({ success: false, error: 'channel must be whatsapp/email/sms' });
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO passenger_trusted_contacts (user_id, name, channel, value)
+             VALUES ($1,$2,$3,$4)
+             RETURNING id, name, channel, value, created_at`,
+            [userId, name, channel, value]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/passengers/me/trusted-contacts/:id', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const contactId = Number(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId || !Number.isFinite(contactId) || contactId <= 0) {
+            return res.status(400).json({ success: false, error: 'Invalid request' });
+        }
+
+        await pool.query('DELETE FROM passenger_trusted_contacts WHERE id = $1 AND user_id = $2', [contactId, userId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Guardian check-in (schedule + confirm) ---
+
+app.post('/api/trips/:id/guardian/checkin', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const userId = authRole === 'passenger' ? authUserId : Number(tripRow?.user_id);
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const minutesFromNowRaw = req.body?.minutes_from_now !== undefined && req.body?.minutes_from_now !== null ? Number(req.body.minutes_from_now) : null;
+        const dueAtRaw = req.body?.due_at ? new Date(req.body.due_at) : null;
+
+        let dueAt = null;
+        if (dueAtRaw && !isNaN(dueAtRaw.getTime())) {
+            dueAt = dueAtRaw;
+        } else {
+            const mins = minutesFromNowRaw !== null ? minutesFromNowRaw : 15;
+            if (!Number.isFinite(mins) || mins < 1 || mins > 24 * 60) {
+                return res.status(400).json({ success: false, error: 'minutes_from_now must be between 1 and 1440' });
+            }
+            dueAt = new Date(Date.now() + mins * 60 * 1000);
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO trip_guardian_checkins (trip_id, user_id, due_at, status)
+             VALUES ($1,$2,$3,'scheduled')
+             RETURNING id, trip_id, user_id, due_at, status, created_at`,
+            [tripId, userId, dueAt]
+        );
+
+        try {
+            await pool.query(
+                `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
+                 VALUES ($1,$2,$3,'guardian_checkin_scheduled',NULL)`,
+                [tripId, 'passenger', userId]
+            );
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/guardian/confirm', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const userId = authRole === 'passenger' ? authUserId : Number(tripRow?.user_id);
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const updated = await pool.query(
+            `UPDATE trip_guardian_checkins
+             SET status = 'confirmed'
+             WHERE trip_id = $1 AND user_id = $2 AND status IN ('scheduled','sent')
+             RETURNING id`,
+            [tripId, userId]
+        );
+
+        try {
+            await pool.query(
+                `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
+                 VALUES ($1,$2,$3,'guardian_checkin_confirmed',NULL)`,
+                [tripId, 'passenger', userId]
+            );
+        } catch (e) {
+            // ignore
+        }
+
+        res.json({ success: true, count: updated.rows.length });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Admin job: process due check-ins (cron substitute)
+app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), async (req, res) => {
+    try {
+        const limit = req.body?.limit !== undefined && req.body?.limit !== null ? Number(req.body.limit) : 50;
+        const effectiveLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 200) : 50;
+
+        const due = await pool.query(
+            `SELECT id, trip_id, user_id, due_at
+             FROM trip_guardian_checkins
+             WHERE status = 'scheduled' AND due_at <= NOW()
+             ORDER BY due_at ASC
+             LIMIT $1`,
+            [effectiveLimit]
+        );
+
+        const processed = [];
+        for (const row of due.rows) {
+            const tripId = String(row.trip_id);
+            const userId = row.user_id;
+
+            // Ensure active share exists
+            let token = null;
+            try {
+                const existing = await pool.query(
+                    `SELECT share_token
+                     FROM trip_shares
+                     WHERE trip_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
+                     ORDER BY created_at DESC
+                     LIMIT 1`,
+                    [tripId]
+                );
+                token = existing.rows?.[0]?.share_token || null;
+            } catch (e) {
+                token = null;
+            }
+
+            if (!token) {
+                token = makeShareToken();
+                const expiresAt = new Date(Date.now() + 24 * 3600 * 1000);
+                try {
+                    await pool.query(
+                        `INSERT INTO trip_shares (trip_id, share_token, created_by_user_id, expires_at)
+                         VALUES ($1,$2,$3,$4)`,
+                        [tripId, token, userId || null, expiresAt]
+                    );
+                } catch (e) {
+                    // if collision, fetch again
+                    const existing = await pool.query(
+                        `SELECT share_token
+                         FROM trip_shares
+                         WHERE trip_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
+                         ORDER BY created_at DESC
+                         LIMIT 1`,
+                        [tripId]
+                    );
+                    token = existing.rows?.[0]?.share_token || token;
+                }
+
+                try {
+                    await pool.query(
+                        `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
+                         VALUES ($1,'passenger',$2,'share_created','auto:guardian_checkin')`,
+                        [tripId, userId || null]
+                    );
+                } catch (e) {
+                    // ignore
+                }
+            }
+
+            await pool.query(
+                `UPDATE trip_guardian_checkins
+                 SET status = 'sent'
+                 WHERE id = $1 AND status = 'scheduled'`,
+                [row.id]
+            );
+
+            try {
+                await pool.query(
+                    `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
+                     VALUES ($1,'system',$2,'guardian_checkin_sent',NULL)`,
+                    [tripId, userId || null]
+                );
+            } catch (e) {
+                // ignore
+            }
+
+            processed.push({ checkin_id: row.id, trip_id: tripId, share_url: `/api/share/${token}` });
+        }
+
+        res.json({ success: true, processed: processed.length, data: processed });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -2124,6 +3029,223 @@ app.get('/api/trips/:id/safety/events', requireAuth, async (req, res) => {
             [tripId]
         );
         res.json({ success: true, data: events.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Route deviation guardian ---
+
+app.post('/api/trips/:id/safety/deviation-config', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const enabled = req.body?.enabled !== undefined ? Boolean(req.body.enabled) : true;
+        const deviationThresholdKm = req.body?.deviation_threshold_km !== undefined && req.body?.deviation_threshold_km !== null
+            ? Number(req.body.deviation_threshold_km)
+            : null;
+        const stopMinutesThreshold = req.body?.stop_minutes_threshold !== undefined && req.body?.stop_minutes_threshold !== null
+            ? Number(req.body.stop_minutes_threshold)
+            : null;
+
+        if (deviationThresholdKm !== null && (!Number.isFinite(deviationThresholdKm) || deviationThresholdKm <= 0 || deviationThresholdKm > 50)) {
+            return res.status(400).json({ success: false, error: 'deviation_threshold_km must be between 0 and 50' });
+        }
+        if (stopMinutesThreshold !== null && (!Number.isFinite(stopMinutesThreshold) || stopMinutesThreshold < 1 || stopMinutesThreshold > 120)) {
+            return res.status(400).json({ success: false, error: 'stop_minutes_threshold must be between 1 and 120' });
+        }
+
+        const upsert = await pool.query(
+            `INSERT INTO trip_route_deviation_configs (trip_id, enabled, deviation_threshold_km, stop_minutes_threshold, updated_at)
+             VALUES ($1,$2,$3,$4,CURRENT_TIMESTAMP)
+             ON CONFLICT (trip_id) DO UPDATE
+               SET enabled = EXCLUDED.enabled,
+                   deviation_threshold_km = EXCLUDED.deviation_threshold_km,
+                   stop_minutes_threshold = EXCLUDED.stop_minutes_threshold,
+                   updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [tripId, enabled, deviationThresholdKm, stopMinutesThreshold]
+        );
+
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/safety/ok', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const insert = await pool.query(
+            `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
+             VALUES ($1,$2,$3,'rider_ok_confirmed',NULL)
+             RETURNING *`,
+            [tripId, authRole, authUserId || null]
+        );
+
+        try {
+            io.to(tripRoom(tripId)).emit('safety_event', { trip_id: String(tripId), event: insert.rows[0] });
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/safety/help', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        // Ensure share link
+        let token = null;
+        const existing = await pool.query(
+            `SELECT share_token
+             FROM trip_shares
+             WHERE trip_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [tripId]
+        );
+        token = existing.rows?.[0]?.share_token || null;
+        if (!token) {
+            token = makeShareToken();
+            const expiresAt = new Date(Date.now() + 24 * 3600 * 1000);
+            await pool.query(
+                `INSERT INTO trip_shares (trip_id, share_token, created_by_user_id, expires_at)
+                 VALUES ($1,$2,$3,$4)`,
+                [tripId, token, authUserId || null, expiresAt]
+            );
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
+             VALUES ($1,$2,$3,'rider_help_requested',NULL)
+             RETURNING *`,
+            [tripId, authRole, authUserId || null]
+        );
+
+        try {
+            io.to(tripRoom(tripId)).emit('safety_event', { trip_id: String(tripId), event: insert.rows[0] });
+        } catch (e) {
+            // ignore
+        }
+
+        const shareUrl = `/api/share/${token}`;
+        const message = `⚠️ محتاج مساعدة في الرحلة ${tripId}\nتابع الرحلة هنا: ${shareUrl}`;
+        res.status(201).json({ success: true, data: insert.rows[0], share_url: shareUrl, message });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Pickup Handshake (phrase/code before ride start) ---
+
+app.get('/api/trips/:id/pickup-handshake', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const now = Date.now();
+        const windowStart = pickupHandshakeWindowStartMs(now, 10);
+        const expiresAt = new Date(windowStart + 10 * 60 * 1000);
+        const code = computePickupHandshakeCode({ tripId, windowStartMs: windowStart, digits: 6 });
+        const codeHash = sha256Hex(`${code}:${windowStart}`);
+
+        await pool.query(
+            `UPDATE trips
+             SET pickup_code_hash = $2,
+                 pickup_code_expires_at = $3,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [tripId, codeHash, expiresAt]
+        );
+
+        res.json({ success: true, data: { trip_id: tripId, pickup_phrase: code, expires_at: expiresAt } });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/pickup-handshake/verify', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const code = String(req.body?.code || '').trim();
+        if (!code) return res.status(400).json({ success: false, error: 'code is required' });
+
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        if (!tripRow) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(tripRow.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        const now = Date.now();
+        const windowStart = pickupHandshakeWindowStartMs(now, 10);
+        const candidates = [windowStart, windowStart - 10 * 60 * 1000];
+        let ok = false;
+        let matchedWindow = windowStart;
+        for (const ws of candidates) {
+            const expected = computePickupHandshakeCode({ tripId, windowStartMs: ws, digits: 6 });
+            if (String(expected) === String(code)) {
+                ok = true;
+                matchedWindow = ws;
+                break;
+            }
+        }
+
+        if (!ok) return res.status(400).json({ success: false, error: 'Invalid code' });
+
+        const expiresAt = new Date(matchedWindow + 10 * 60 * 1000);
+        const codeHash = sha256Hex(`${code}:${matchedWindow}`);
+        const verifiedBy = authRole === 'driver' ? authDriverId : (tripRow.driver_id || null);
+
+        const updated = await pool.query(
+            `UPDATE trips
+             SET pickup_verified_at = CURRENT_TIMESTAMP,
+                 pickup_verified_by = $2,
+                 pickup_code_hash = $3,
+                 pickup_code_expires_at = $4,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING id, pickup_verified_at, pickup_verified_by`,
+            [tripId, verifiedBy, codeHash, expiresAt]
+        );
+
+        res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -3048,7 +4170,10 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
                     duration,
                     cost,
                     driver_id,
-                    user_id
+                    user_id,
+                    pickup_verified_at,
+                    pickup_verified_by,
+                    pickup_code_expires_at
                  FROM trips
                  WHERE id = $1
                  LIMIT 1`,
@@ -3089,6 +4214,15 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
             const allowed = new Set(['assigned', 'ongoing', 'completed', 'cancelled']);
             if (!allowed.has(String(status || '').toLowerCase())) {
                 return res.status(403).json({ success: false, error: 'Drivers cannot set this status' });
+            }
+
+            // Pickup Handshake: require verification before starting the ride
+            if (String(status || '').toLowerCase() === 'ongoing' && !beforeTripRow.pickup_verified_at) {
+                return res.status(409).json({
+                    success: false,
+                    error: 'Pickup handshake required before starting the trip',
+                    code: 'pickup_handshake_required'
+                });
             }
         }
 
