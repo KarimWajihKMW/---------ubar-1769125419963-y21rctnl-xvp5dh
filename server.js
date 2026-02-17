@@ -1069,7 +1069,7 @@ async function ensurePassengerFeatureTables() {
         `);
         await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_safety_events_trip ON trip_safety_events(trip_id, created_at DESC);');
 
-        // --- Safety & trust (Mlf_a8tra7at_haged_uber2) ---
+        // --- Safety & trust ---
 
         // Basic verification state (opt-in tokens are handled at API level)
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP;');
@@ -1971,7 +1971,7 @@ app.get('/api/passengers/me/loyalty', requireRole('passenger', 'admin'), async (
     }
 });
 
-// ==================== SAFETY & TRUST (Mlf_a8tra7at_haged_uber2) ====================
+// ==================== SAFETY & TRUST ====================
 
 // --- Basic verification (email/phone) ---
 
