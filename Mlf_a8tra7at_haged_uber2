@@ -1,0 +1,143 @@
+# Mlf_a8tra7at_haged_uber2
+
+## الهدف
+إضافة مميزات “أمان وثقة” للراكب (Passenger) تكون **مميّزة جدًا** وتخلّي التطبيق مختلف، مع الحفاظ على مبدأ **Opt-in** للبيانات الحساسة.
+
+> ملاحظة واقعية: صعب أضمن إن أي فكرة «مش موجودة في أي تطبيق» 100% عالميًا، لكن اللي تحت متصمّم كمزيج Features + تنفيذ عملي فوق الستاك الحالي بحيث تكون بصمتك واضحة.
+
+## الموجود بالفعل في المشروع (عشان ما نكررش)
+- مشاركة الرحلة عبر Token (`/api/trips/:id/share` + `/api/share/:token`) وسجل أحداث الأمان (`trip_safety_events`).
+- زر طوارئ safety endpoint (`/api/trips/:id/safety/emergency`) + دعم support tickets.
+- Live location / Socket.IO، وعرض ETA وتحديثات الرحلة.
+
+---
+
+## (A) توثيق/اعتماد الحساب داخل التطبيق (Verified Account)
+### الفكرة
+نعمل نظام “توثيق الراكب” بدرجات (Levels) يرفع الثقة عند السائقين والدعم:
+- `verified_level`: `none | basic | strong`
+- `verified_badge`: يظهر في بيانات الراكب/الرحلة للسائق + في التذاكر للدعم.
+
+### Basic Verification (سهل وسريع)
+- توثيق البريد الإلكتروني (email verification) + توثيق رقم الهاتف (OTP) — بدون الاحتفاظ ببيانات حساسة.
+- Optional: ربط حساب Google/Apple (لو هتضيف OAuth لاحقًا).
+
+### Strong Verification (Opt-in)
+- رفع صورة هوية + صورة سيلفي (مع موافقة واضحة)، وحفظها **بشكل آمن** (يفضل خارج DB كـObject Storage) أو في DB كبداية لكن مع تشفير/صلاحيات مشددة.
+- مراجعة يدوية من الأدمن (Admin approve/reject) + سبب الرفض.
+
+### نموذج بيانات مقترح
+- جدول `passenger_verifications`:
+  - `id`, `user_id`, `level`, `status (pending/approved/rejected)`, `submitted_at`, `reviewed_at`, `reviewed_by`, `reject_reason`
+  - `id_document_url`, `selfie_url` (أو blobs لو هتبدأ داخل DB)
+
+### API مقترح
+- `POST /api/passengers/me/verification/request` (إنشاء طلب)
+- `POST /api/passengers/me/verification/upload` (رفع ملفات – Multer موجود)
+- `GET /api/passengers/me/verification/status`
+- Admin:
+  - `GET /api/admin/passenger-verifications?status=pending`
+  - `PATCH /api/admin/passenger-verifications/:id` (approve/reject)
+
+### UI (بدون صفحات جديدة)
+- في شاشة البروفايل الحالية: Toggle/CTA “وثّق حسابك” + حالة التوثيق.
+
+---
+
+## (B) Guardian Check‑In (اطمّن عليّا) — Opt‑in
+### الفكرة
+الراكب يختار “حارس/Guardian” (شخص أو أكثر) ويحدد:
+- “لو ما ضغطتش أنا بخير خلال X دقيقة من بداية الرحلة/أثناءها/بعدها → ابعتله متابعة الرحلة + رسالة جاهزة”.
+
+### لماذا دي مميزة؟
+مش مجرد مشاركة رحلة؛ دي “Routine safety automation” بتشتغل بالوقت + أحداث الرحلة.
+
+### بيانات
+- جدول `passenger_trusted_contacts`:
+  - `id`, `user_id`, `name`, `channel (whatsapp/email/sms later)`, `value`, `created_at`
+- جدول `trip_guardian_checkins`:
+  - `id`, `trip_id`, `user_id`, `due_at`, `status (scheduled/sent/confirmed/cancelled)`, `created_at`
+
+### API مقترح
+- `GET/POST/DELETE /api/passengers/me/trusted-contacts`
+- `POST /api/trips/:id/guardian/checkin` (جدولة)
+- `POST /api/trips/:id/guardian/confirm` (الراكب يؤكد “أنا بخير”)
+- Backend job بسيط:
+  - `POST /api/admin/jobs/guardian-checkins/process` (بديل cron مبدئي)
+
+### التنفيذ فوق الموجود
+- عند `due_at`:
+  - السيرفر يعمل `POST /api/trips/:id/share` (token) إذا مفيش token صالح
+  - يسجل event في `trip_safety_events`
+  - العميل يفتح native share برسالة جاهزة فيها رابط `/api/share/:token`
+
+---
+
+## (C) Route Deviation Guardian (كشف انحراف مسار) — Realtime
+### الفكرة
+لو السائق بدأ يبعد عن “منطقة منطقية” بين الالتقاط والوجهة أو حصل توقف غير طبيعي:
+- يظهر تنبيه للراكب: “هل كل شيء تمام؟”
+- لو اختار “لا” → يسجل safety event + يفعّل مشاركة الرحلة تلقائيًا + يجهز رسالة للطوارئ.
+
+### تنفيذ بدون خرائط خارجية
+- Corridor مبسّط بين نقطتين:
+  - خط مستقيم pickup→dropoff + عتبة انحراف (مثلاً 1.2–2.0 كم حسب طول الرحلة)
+- عتبات زمن:
+  - لو السيارة ثابتة > N دقائق في مكان غير متوقع.
+
+### بيانات / Events
+- نستخدم `trip_safety_events` الموجود + نضيف نوع event:
+  - `route_deviation_detected`, `rider_ok_confirmed`, `rider_help_requested`
+
+### API مقترح
+- `POST /api/trips/:id/safety/deviation-config` (اختياري، default server-side)
+- `GET /api/trips/:id/safety/events` (لو مش موجود بالفعل)
+
+### UI (الراكب)
+- Banner صغير أثناء الرحلة + زر Confirm/Help.
+
+---
+
+## (D) Pickup Handshake (كلمة سر/QR قبل الركوب)
+### الفكرة
+قبل ما الركاب يركبوا، لازم يحصل “Handshake” يثبت إن الشخص ده هو السائق الصحيح:
+- الراكب يظهر له `pickup_phrase` أو QR
+- السائق لازم يطابقها قبل ما يسمح النظام بالانتقال لحالة “started”.
+
+### بيانات
+- حقول على `trips`:
+  - `pickup_code_hash`, `pickup_code_expires_at`, `pickup_verified_at`, `pickup_verified_by`
+
+### API مقترح
+- `GET /api/trips/:id/pickup-handshake` (للراكب: phrase/QR)
+- `POST /api/trips/:id/pickup-handshake/verify` (للسائق)
+
+### UI
+- داخل شاشة الرحلة الحالية: “إثبات الاستلام” يظهر فقط قبل بدء الرحلة.
+
+---
+
+## MVP المقترح (أسرع قيمة)
+1) Pickup Handshake
+2) Guardian Check‑In
+ثم بعدهم Route Deviation Guardian
+
+---
+
+## اختبار قبل أي Commit (كما هو مطلوب)
+> ملاحظة: سكربتات الاختبار الحالية تعتمد إن السيرفر شغال على `http://localhost:3000` وإن `DATABASE_URL` متعيّنة في البيئة.
+
+- Build:
+  - `npm run build`
+- API tests:
+  - شغل السيرفر: `npm start`
+  - في Terminal تاني: `npm test`
+
+لو هتضيف endpoints جديدة للمميزات دي، لازم تضيف test script على نفس نمط:
+- `test-passenger-features.js`
+
+---
+
+## ملحوظات أمان
+- لا تضع بيانات اتصال الداتابيز أو مفاتيح حساسة داخل git.
+- استخدم `.env` (موجود في `.gitignore`) لتخزين `DATABASE_URL` محليًا فقط.
