@@ -7,7 +7,22 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { Server: SocketIOServer } = require('socket.io');
+const cron = require('node-cron');
+const QRCode = require('qrcode');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
+
+let twilioClient = null;
+try {
+    const sid = process.env.TWILIO_ACCOUNT_SID;
+    const token = process.env.TWILIO_AUTH_TOKEN;
+    if (sid && token) {
+        const twilio = require('twilio');
+        twilioClient = twilio(sid, token);
+    }
+} catch (e) {
+    twilioClient = null;
+}
 
 const {
     looksLikeBcryptHash,
@@ -29,6 +44,99 @@ const MAX_ASSIGN_DISTANCE_KM = 30;
 const PENDING_TRIP_TTL_MINUTES = 20;
 const ASSIGNED_TRIP_TTL_MINUTES = 120;
 const AUTO_ASSIGN_TRIPS = false;
+
+let cachedMailer = null;
+function getMailer() {
+    try {
+        if (cachedMailer) return cachedMailer;
+
+        const url = process.env.SMTP_URL;
+        if (url) {
+            cachedMailer = nodemailer.createTransport(url);
+            return cachedMailer;
+        }
+
+        const host = process.env.SMTP_HOST;
+        const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
+        const user = process.env.SMTP_USER;
+        const pass = process.env.SMTP_PASS;
+        if (!host || !user || !pass) return null;
+
+        cachedMailer = nodemailer.createTransport({
+            host,
+            port: Number.isFinite(port) ? port : 587,
+            secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
+            auth: { user, pass }
+        });
+        return cachedMailer;
+    } catch (e) {
+        return null;
+    }
+}
+
+function normalizePhoneNumber(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return null;
+    const digits = raw.replace(/[\s\-()]/g, '');
+    if (!digits) return null;
+    if (digits.startsWith('+')) return digits;
+    // Best-effort: treat as already E.164-less; prepend '+'
+    if (/^\d{6,}$/.test(digits)) return `+${digits}`;
+    return null;
+}
+
+function buildGuardianMessage({ tripId, shareUrl }) {
+    const safeTripId = String(tripId);
+    const safeUrl = String(shareUrl);
+    return `🧑‍🤝‍🧑 Guardian Check-In\nالراكب لم يؤكد (أنا بخير) في الوقت المحدد للرحلة ${safeTripId}.\nتابع الرحلة هنا: ${safeUrl}`;
+}
+
+async function deliverGuardianNotification({ contact, message, subject }) {
+    const channel = String(contact?.channel || '').toLowerCase();
+    const value = String(contact?.value || '').trim();
+    const name = contact?.name ? String(contact.name) : null;
+
+    if (!value) {
+        return { ok: false, channel, name, error: 'missing_value' };
+    }
+
+    if (channel === 'email') {
+        const mailer = getMailer();
+        if (!mailer) return { ok: false, channel, name, error: 'smtp_not_configured' };
+        const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+        await mailer.sendMail({ from, to: value, subject: subject || 'Guardian Check-In', text: message });
+        return { ok: true, channel, name, delivered: true };
+    }
+
+    if (channel === 'sms') {
+        const to = normalizePhoneNumber(value);
+        const from = process.env.TWILIO_FROM_NUMBER;
+        if (!to) return { ok: false, channel, name, error: 'invalid_phone' };
+        if (!twilioClient || !from) return { ok: false, channel, name, error: 'twilio_not_configured' };
+        const resp = await twilioClient.messages.create({ from, to, body: message });
+        return { ok: true, channel, name, delivered: true, provider: 'twilio', message_sid: resp.sid };
+    }
+
+    if (channel === 'whatsapp') {
+        const to = normalizePhoneNumber(value);
+        const waFrom = process.env.TWILIO_WHATSAPP_FROM;
+        if (to && twilioClient && waFrom) {
+            const resp = await twilioClient.messages.create({
+                from: String(waFrom).startsWith('whatsapp:') ? waFrom : `whatsapp:${waFrom}`,
+                to: `whatsapp:${to}`,
+                body: message
+            });
+            return { ok: true, channel, name, delivered: true, provider: 'twilio', message_sid: resp.sid };
+        }
+
+        // Fallback: provide a ready WhatsApp link (client can open)
+        const clean = to ? to.replace(/^\+/, '') : null;
+        const actionUrl = clean ? `https://wa.me/${encodeURIComponent(clean)}?text=${encodeURIComponent(message)}` : null;
+        return { ok: true, channel, name, delivered: false, prepared: true, action_url: actionUrl };
+    }
+
+    return { ok: false, channel: channel || 'unknown', name, error: 'unsupported_channel' };
+}
 
 function haversineKm(a, b) {
     const R = 6371;
@@ -997,9 +1105,15 @@ async function ensurePassengerFeatureTables() {
                 user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                 due_at TIMESTAMP NOT NULL,
                 status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+                sent_at TIMESTAMP,
+                delivery_result JSONB,
+                last_error TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        await pool.query('ALTER TABLE trip_guardian_checkins ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP;');
+        await pool.query('ALTER TABLE trip_guardian_checkins ADD COLUMN IF NOT EXISTS delivery_result JSONB;');
+        await pool.query('ALTER TABLE trip_guardian_checkins ADD COLUMN IF NOT EXISTS last_error TEXT;');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_guardian_checkins_due ON trip_guardian_checkins(status, due_at ASC);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_guardian_checkins_trip ON trip_guardian_checkins(trip_id, created_at DESC);');
 
@@ -2320,18 +2434,28 @@ app.post('/api/trips/:id/guardian/confirm', requireRole('passenger', 'admin'), a
     }
 });
 
-// Admin job: process due check-ins (cron substitute)
-app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), async (req, res) => {
-    try {
-        const limit = req.body?.limit !== undefined && req.body?.limit !== null ? Number(req.body.limit) : 50;
-        const effectiveLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 200) : 50;
+const GUARDIAN_CHECKINS_ADVISORY_LOCK_KEY = 90133701;
 
-        const due = await pool.query(
+async function processGuardianCheckins({ limit = 50, triggeredBy = 'admin' } = {}) {
+    const effectiveLimit = Number.isFinite(Number(limit)) ? Math.min(Math.max(Number(limit), 1), 200) : 50;
+    const client = await pool.connect();
+    let locked = false;
+    try {
+        const lockRes = await client.query('SELECT pg_try_advisory_lock($1) AS ok', [GUARDIAN_CHECKINS_ADVISORY_LOCK_KEY]);
+        locked = Boolean(lockRes.rows?.[0]?.ok);
+        if (!locked) {
+            return { ok: true, skipped: true, reason: 'lock_not_acquired', processed: [] };
+        }
+
+        await client.query('BEGIN');
+
+        const due = await client.query(
             `SELECT id, trip_id, user_id, due_at
              FROM trip_guardian_checkins
              WHERE status = 'scheduled' AND due_at <= NOW()
              ORDER BY due_at ASC
-             LIMIT $1`,
+             LIMIT $1
+             FOR UPDATE SKIP LOCKED`,
             [effectiveLimit]
         );
 
@@ -2343,7 +2467,7 @@ app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), asyn
             // Ensure active share exists
             let token = null;
             try {
-                const existing = await pool.query(
+                const existing = await client.query(
                     `SELECT share_token
                      FROM trip_shares
                      WHERE trip_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
@@ -2360,14 +2484,13 @@ app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), asyn
                 token = makeShareToken();
                 const expiresAt = new Date(Date.now() + 24 * 3600 * 1000);
                 try {
-                    await pool.query(
+                    await client.query(
                         `INSERT INTO trip_shares (trip_id, share_token, created_by_user_id, expires_at)
                          VALUES ($1,$2,$3,$4)`,
                         [tripId, token, userId || null, expiresAt]
                     );
                 } catch (e) {
-                    // if collision, fetch again
-                    const existing = await pool.query(
+                    const existing = await client.query(
                         `SELECT share_token
                          FROM trip_shares
                          WHERE trip_id = $1 AND (expires_at IS NULL OR expires_at > NOW())
@@ -2379,7 +2502,7 @@ app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), asyn
                 }
 
                 try {
-                    await pool.query(
+                    await client.query(
                         `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
                          VALUES ($1,'passenger',$2,'share_created','auto:guardian_checkin')`,
                         [tripId, userId || null]
@@ -2389,27 +2512,94 @@ app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), asyn
                 }
             }
 
-            await pool.query(
+            const shareUrl = `/api/share/${token}`;
+            const message = buildGuardianMessage({ tripId, shareUrl });
+            const subject = `Guardian Check-In (Trip ${tripId})`;
+
+            let contacts = [];
+            try {
+                const cRes = await client.query(
+                    `SELECT id, name, channel, value
+                     FROM passenger_trusted_contacts
+                     WHERE user_id = $1
+                     ORDER BY created_at DESC
+                     LIMIT 20`,
+                    [userId]
+                );
+                contacts = cRes.rows || [];
+            } catch (e) {
+                contacts = [];
+            }
+
+            const deliveries = [];
+            let lastError = null;
+            for (const c of contacts) {
+                try {
+                    const r = await deliverGuardianNotification({ contact: c, message, subject });
+                    deliveries.push({ contact_id: c.id, ...r });
+                    if (!r.ok && !lastError) lastError = r.error || 'delivery_failed';
+                } catch (e) {
+                    lastError = lastError || e.message;
+                    deliveries.push({ contact_id: c.id, ok: false, channel: c.channel, error: e.message });
+                }
+            }
+
+            if (contacts.length === 0) {
+                lastError = 'no_trusted_contacts';
+                deliveries.push({ ok: false, channel: null, error: 'no_trusted_contacts' });
+            }
+
+            await client.query(
                 `UPDATE trip_guardian_checkins
-                 SET status = 'sent'
+                 SET status = 'sent',
+                     sent_at = NOW(),
+                     delivery_result = $2::jsonb,
+                     last_error = $3
                  WHERE id = $1 AND status = 'scheduled'`,
-                [row.id]
+                [row.id, JSON.stringify({ triggered_by: triggeredBy, share_url: shareUrl, message, deliveries }), lastError]
             );
 
             try {
-                await pool.query(
+                await client.query(
                     `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, event_type, message)
-                     VALUES ($1,'system',$2,'guardian_checkin_sent',NULL)`,
-                    [tripId, userId || null]
+                     VALUES ($1,'system',$2,'guardian_checkin_sent',$3)`,
+                    [tripId, userId || null, lastError ? `delivery_issue:${lastError}` : null]
                 );
             } catch (e) {
                 // ignore
             }
 
-            processed.push({ checkin_id: row.id, trip_id: tripId, share_url: `/api/share/${token}` });
+            processed.push({ checkin_id: row.id, trip_id: tripId, share_url: shareUrl, contacts: contacts.length, last_error: lastError });
         }
 
-        res.json({ success: true, processed: processed.length, data: processed });
+        await client.query('COMMIT');
+        return { ok: true, skipped: false, processed };
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) {}
+        return { ok: false, error: err.message, processed: [] };
+    } finally {
+        try {
+            if (locked) await client.query('SELECT pg_advisory_unlock($1)', [GUARDIAN_CHECKINS_ADVISORY_LOCK_KEY]);
+        } catch (e) {
+            // ignore
+        }
+        client.release();
+    }
+}
+
+// Admin job: process due check-ins (cron substitute)
+app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), async (req, res) => {
+    try {
+        const limit = req.body?.limit !== undefined && req.body?.limit !== null ? Number(req.body.limit) : 50;
+        const result = await processGuardianCheckins({ limit, triggeredBy: 'admin' });
+        if (!result.ok) return res.status(500).json({ success: false, error: result.error || 'guardian_job_failed' });
+        res.json({
+            success: true,
+            skipped: Boolean(result.skipped),
+            reason: result.reason || null,
+            processed: result.processed.length,
+            data: result.processed
+        });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -3187,7 +3377,26 @@ app.get('/api/trips/:id/pickup-handshake', requireRole('passenger', 'admin'), as
             [tripId, codeHash, expiresAt]
         );
 
-        res.json({ success: true, data: { trip_id: tripId, pickup_phrase: code, expires_at: expiresAt } });
+        let qrPngDataUrl = null;
+        try {
+            qrPngDataUrl = await QRCode.toDataURL(String(code), {
+                errorCorrectionLevel: 'M',
+                margin: 1,
+                scale: 6
+            });
+        } catch (e) {
+            qrPngDataUrl = null;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                trip_id: tripId,
+                pickup_phrase: code,
+                expires_at: expiresAt,
+                qr_png_data_url: qrPngDataUrl
+            }
+        });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -7921,6 +8130,29 @@ app.post('/api/pending-rides/cleanup', requireRole('admin'), async (req, res) =>
     }
 });
 
+function startGuardianCron() {
+    const disabled = String(process.env.DISABLE_GUARDIAN_CRON || '').toLowerCase() === 'true';
+    const env = String(process.env.NODE_ENV || '').toLowerCase();
+    if (disabled) return;
+    if (env === 'test') return;
+
+    try {
+        cron.schedule('* * * * *', async () => {
+            try {
+                const result = await processGuardianCheckins({ limit: 50, triggeredBy: 'cron' });
+                if (!result?.ok) {
+                    console.error('⚠️  Guardian cron failed:', result?.error || 'unknown');
+                }
+            } catch (e) {
+                console.error('⚠️  Guardian cron error:', e.message);
+            }
+        });
+        console.log('⏱️  Guardian cron enabled (every 1 minute)');
+    } catch (e) {
+        console.error('⚠️  Guardian cron setup failed:', e.message);
+    }
+}
+
 // Start server
 ensureDefaultAdmins()
     .then(() => ensureDefaultOffers())
@@ -7951,5 +8183,6 @@ ensureDefaultAdmins()
         httpServer.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📍 API available at http://localhost:${PORT}/api`);
+            startGuardianCron();
         });
     });

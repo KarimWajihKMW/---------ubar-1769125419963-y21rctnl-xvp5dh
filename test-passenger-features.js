@@ -388,6 +388,10 @@ async function run() {
   const handshake = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/pickup-handshake`, { headers: p1Headers });
   if (!handshake.res.ok) throw new Error(`Pickup handshake GET failed: ${handshake.data.error || handshake.res.status}`);
   const code = handshake.data.data.pickup_phrase;
+  const qr = handshake.data.data.qr_png_data_url;
+  if (!qr || typeof qr !== 'string' || !qr.startsWith('data:image/png')) {
+    throw new Error('Pickup handshake missing qr_png_data_url');
+  }
 
   const verify = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/pickup-handshake/verify`, {
     method: 'POST',

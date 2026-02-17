@@ -1129,6 +1129,7 @@ window.refreshPickupHandshake = async function() {
         const card = document.getElementById('passenger-pickup-handshake-card');
         const codeEl = document.getElementById('passenger-pickup-handshake-code');
         const expEl = document.getElementById('passenger-pickup-handshake-expires');
+        const qrEl = document.getElementById('passenger-pickup-handshake-qr');
 
         if (codeEl) codeEl.textContent = String(d.pickup_phrase || '------');
         if (expEl) {
@@ -1138,6 +1139,17 @@ window.refreshPickupHandshake = async function() {
                 : '--:--';
         }
         if (card) card.classList.remove('hidden');
+
+        if (qrEl) {
+            const url = d.qr_png_data_url ? String(d.qr_png_data_url) : '';
+            if (url && url.startsWith('data:image')) {
+                qrEl.src = url;
+                qrEl.classList.remove('hidden');
+            } else {
+                qrEl.removeAttribute('src');
+                qrEl.classList.add('hidden');
+            }
+        }
     } catch (e) {
         // non-blocking
     }
