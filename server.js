@@ -11,6 +11,7 @@ const cron = require('node-cron');
 const QRCode = require('qrcode');
 const nodemailer = require('nodemailer');
 const { Issuer, generators } = require('openid-client');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const oauthStateStore = new Map();
@@ -57,6 +58,7 @@ const {
 const driverSync = require('./driver-sync-system');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const DRIVER_LOCATION_TTL_MINUTES = 5;
 const MAX_ASSIGN_DISTANCE_KM = 30;
@@ -489,6 +491,8 @@ function normalizePhoneForStore(input) {
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Needed for Apple OAuth when using response_mode=form_post
+app.use(express.urlencoded({ extended: true }));
 
 // Prevent stale frontend assets in production (Railway/Chrome can keep old JS and mask fixes)
 app.use((req, res, next) => {
@@ -7258,73 +7262,127 @@ app.get('/api/passengers/:id/trips', requireAuth, async (req, res) => {
 // ==================== OPTIONAL OAUTH (Google / Apple) ====================
 // Enabled only when env vars are provided. When not configured, endpoints return 501.
 
-function getOAuthProviderConfig(provider) {
+function oauthPopupErrorHtml(provider, error, extra = {}) {
+    return makeOAuthPopupHtml({ success: false, provider, error, ...extra });
+}
+
+function getRequestBaseUrl(req) {
+    const envBase = process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || process.env.BASE_URL || process.env.APP_URL;
+    if (envBase && String(envBase).trim()) {
+        return String(envBase).trim().replace(/\/+$/, '');
+    }
+
+    const xfProto = req?.headers?.['x-forwarded-proto'];
+    const xfHost = req?.headers?.['x-forwarded-host'];
+    const proto = xfProto ? String(xfProto).split(',')[0].trim() : (req?.protocol || 'http');
+    const host = xfHost ? String(xfHost).split(',')[0].trim() : (req?.headers?.host ? String(req.headers.host).trim() : '');
+    if (!host) return null;
+    return `${proto}://${host}`.replace(/\/+$/, '');
+}
+
+let cachedAppleClientSecret = null;
+let cachedAppleClientSecretExp = 0;
+function getAppleOAuthClientSecret() {
+    const staticSecret = process.env.APPLE_OAUTH_CLIENT_SECRET;
+    if (staticSecret && String(staticSecret).trim()) return String(staticSecret).trim();
+
+    const teamId = process.env.APPLE_OAUTH_TEAM_ID || process.env.APPLE_TEAM_ID;
+    const keyId = process.env.APPLE_OAUTH_KEY_ID || process.env.APPLE_KEY_ID;
+    const rawPrivateKey = process.env.APPLE_OAUTH_PRIVATE_KEY || process.env.APPLE_PRIVATE_KEY;
+    const clientId = process.env.APPLE_OAUTH_CLIENT_ID;
+    if (!teamId || !keyId || !rawPrivateKey || !clientId) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    if (cachedAppleClientSecret && cachedAppleClientSecretExp - now > 60) {
+        return cachedAppleClientSecret;
+    }
+
+    const privateKey = String(rawPrivateKey).includes('\\n')
+        ? String(rawPrivateKey).replace(/\\n/g, '\n')
+        : String(rawPrivateKey);
+
+    // Apple allows up to 6 months; use 30 days to keep rotation simple.
+    const exp = now + 30 * 24 * 60 * 60;
+    cachedAppleClientSecret = jwt.sign(
+        {
+            iss: String(teamId),
+            iat: now,
+            exp,
+            aud: 'https://appleid.apple.com',
+            sub: String(clientId)
+        },
+        privateKey,
+        {
+            algorithm: 'ES256',
+            header: { kid: String(keyId) }
+        }
+    );
+    cachedAppleClientSecretExp = exp;
+    return cachedAppleClientSecret;
+}
+
+function getOAuthProviderConfig(provider, req) {
     const p = String(provider || '').toLowerCase();
     if (p === 'google') {
+        const baseUrl = getRequestBaseUrl(req);
+        const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || (baseUrl ? `${baseUrl}/api/oauth/google/callback` : null);
         return {
             provider: 'google',
             issuerUrl: 'https://accounts.google.com',
             clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
             clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
-            redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI
+            redirectUri
         };
     }
     if (p === 'apple') {
+        const baseUrl = getRequestBaseUrl(req);
+        const redirectUri = process.env.APPLE_OAUTH_REDIRECT_URI || (baseUrl ? `${baseUrl}/api/oauth/apple/callback` : null);
         return {
             provider: 'apple',
             issuerUrl: 'https://appleid.apple.com',
             clientId: process.env.APPLE_OAUTH_CLIENT_ID,
-            clientSecret: process.env.APPLE_OAUTH_CLIENT_SECRET,
-            redirectUri: process.env.APPLE_OAUTH_REDIRECT_URI
+            clientSecret: getAppleOAuthClientSecret(),
+            redirectUri
         };
     }
     return null;
 }
 
-function isOAuthConfigured(provider) {
-    const cfg = getOAuthProviderConfig(provider);
+function isOAuthConfigured(provider, req) {
+    const cfg = getOAuthProviderConfig(provider, req);
     return Boolean(cfg?.clientId && cfg?.clientSecret && cfg?.redirectUri);
 }
 
-let googleClientPromise = null;
-let appleClientPromise = null;
-async function getOAuthClient(provider) {
+const oauthClientPromises = new Map();
+async function getOAuthClient(provider, req) {
     const p = String(provider || '').toLowerCase();
-    const cfg = getOAuthProviderConfig(p);
+    const cfg = getOAuthProviderConfig(p, req);
     if (!cfg) throw new Error('Unsupported provider');
-    if (!isOAuthConfigured(p)) throw new Error('OAuth not configured');
+    if (!isOAuthConfigured(p, req)) throw new Error('OAuth not configured');
 
-    if (p === 'google') {
-        if (!googleClientPromise) {
-            googleClientPromise = (async () => {
-                const issuer = await Issuer.discover(cfg.issuerUrl);
-                return new issuer.Client({
-                    client_id: cfg.clientId,
-                    client_secret: cfg.clientSecret,
-                    redirect_uris: [cfg.redirectUri],
-                    response_types: ['code']
-                });
-            })();
-        }
-        return googleClientPromise;
+    const cacheKey = `${p}|${cfg.clientId}|${cfg.redirectUri}`;
+    if (!oauthClientPromises.has(cacheKey)) {
+        oauthClientPromises.set(cacheKey, (async () => {
+            const issuer = await Issuer.discover(cfg.issuerUrl);
+            const client = new issuer.Client({
+                client_id: cfg.clientId,
+                client_secret: cfg.clientSecret,
+                redirect_uris: [cfg.redirectUri],
+                response_types: ['code']
+            });
+            return client;
+        })());
     }
 
+    const client = await oauthClientPromises.get(cacheKey);
+
+    // Ensure Apple client_secret stays fresh if it's generated.
     if (p === 'apple') {
-        if (!appleClientPromise) {
-            appleClientPromise = (async () => {
-                const issuer = await Issuer.discover(cfg.issuerUrl);
-                return new issuer.Client({
-                    client_id: cfg.clientId,
-                    client_secret: cfg.clientSecret,
-                    redirect_uris: [cfg.redirectUri],
-                    response_types: ['code']
-                });
-            })();
-        }
-        return appleClientPromise;
+        const fresh = getAppleOAuthClientSecret();
+        if (fresh) client.client_secret = fresh;
     }
 
-    throw new Error('Unsupported provider');
+    return client;
 }
 
 function makeOAuthPopupHtml(payload) {
@@ -7450,12 +7508,13 @@ async function findOrCreateUserFromOAuth({ provider, providerSub, email, name, l
 }
 
 async function oauthStartLogin(provider, req, res) {
-    if (!isOAuthConfigured(provider)) {
-        return res.status(501).json({ success: false, error: 'oauth_not_configured' });
+    if (!isOAuthConfigured(provider, req)) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.status(501).send(oauthPopupErrorHtml(provider, 'oauth_not_configured'));
     }
     oauthPruneStates();
-    const client = await getOAuthClient(provider);
-    const cfg = getOAuthProviderConfig(provider);
+    const client = await getOAuthClient(provider, req);
+    const cfg = getOAuthProviderConfig(provider, req);
     const state = crypto.randomBytes(16).toString('hex');
     const codeVerifier = generators.codeVerifier();
     const codeChallenge = generators.codeChallenge(codeVerifier);
@@ -7467,25 +7526,27 @@ async function oauthStartLogin(provider, req, res) {
         createdAtMs: Date.now(),
         expiresAtMs: Date.now() + 10 * 60 * 1000
     });
+    const scope = String(provider).toLowerCase() === 'apple' ? 'openid email name' : 'openid email profile';
     const url = client.authorizationUrl({
-        scope: 'openid email profile',
+        scope,
         state,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
-        redirect_uri: cfg.redirectUri
+        redirect_uri: cfg.redirectUri,
+        ...(String(provider).toLowerCase() === 'apple' ? { response_mode: 'form_post' } : {})
     });
     return res.redirect(url);
 }
 
 async function oauthStartLink(provider, req, res) {
-    if (!isOAuthConfigured(provider)) {
+    if (!isOAuthConfigured(provider, req)) {
         return res.status(501).json({ success: false, error: 'oauth_not_configured' });
     }
     const userId = req.auth?.uid;
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
     oauthPruneStates();
-    const client = await getOAuthClient(provider);
-    const cfg = getOAuthProviderConfig(provider);
+    const client = await getOAuthClient(provider, req);
+    const cfg = getOAuthProviderConfig(provider, req);
     const state = crypto.randomBytes(16).toString('hex');
     const codeVerifier = generators.codeVerifier();
     const codeChallenge = generators.codeChallenge(codeVerifier);
@@ -7497,25 +7558,30 @@ async function oauthStartLink(provider, req, res) {
         createdAtMs: Date.now(),
         expiresAtMs: Date.now() + 10 * 60 * 1000
     });
+    const scope = String(provider).toLowerCase() === 'apple' ? 'openid email name' : 'openid email profile';
     const url = client.authorizationUrl({
-        scope: 'openid email profile',
+        scope,
         state,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
-        redirect_uri: cfg.redirectUri
+        redirect_uri: cfg.redirectUri,
+        ...(String(provider).toLowerCase() === 'apple' ? { response_mode: 'form_post' } : {})
     });
     return res.json({ success: true, url });
 }
 
 async function oauthCallback(provider, req, res) {
     try {
-        if (!isOAuthConfigured(provider)) {
-            return res.status(501).send(makeOAuthPopupHtml({ success: false, error: 'oauth_not_configured' }));
+        if (!isOAuthConfigured(provider, req)) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.status(501).send(oauthPopupErrorHtml(provider, 'oauth_not_configured'));
         }
-        const client = await getOAuthClient(provider);
-        const cfg = getOAuthProviderConfig(provider);
+        const client = await getOAuthClient(provider, req);
+        const cfg = getOAuthProviderConfig(provider, req);
 
-        const params = client.callbackParams(req);
+        const params = String(req.method || 'GET').toUpperCase() === 'POST'
+            ? (req.body || {})
+            : client.callbackParams(req);
         const state = params?.state ? String(params.state) : '';
         const st = oauthTakeState(state);
         if (!st) {
@@ -7563,6 +7629,7 @@ app.post('/api/oauth/google/link', requireAuth, (req, res) => oauthStartLink('go
 
 app.get('/api/oauth/apple/login', (req, res) => oauthStartLogin('apple', req, res));
 app.get('/api/oauth/apple/callback', (req, res) => oauthCallback('apple', req, res));
+app.post('/api/oauth/apple/callback', (req, res) => oauthCallback('apple', req, res));
 app.post('/api/oauth/apple/link', requireAuth, (req, res) => oauthStartLink('apple', req, res));
 
 // Login with email and password

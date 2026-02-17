@@ -4070,7 +4070,10 @@ window.addEventListener('message', (event) => {
 
     const payload = msg.payload || null;
     if (!payload || !payload.success) {
-        showToast('❌ فشل OAuth');
+        const provider = payload?.provider ? String(payload.provider) : '';
+        const err = payload?.error ? String(payload.error) : '';
+        const label = provider ? ` (${provider})` : '';
+        showToast(`❌ فشل OAuth${label}${err ? `: ${err}` : ''}`);
         return;
     }
 
