@@ -18,3 +18,10 @@ Implemented in the app:
 - Run: `npm install`
 - Start: `npm start` (or `./scripts/run-dev.sh`)
 - Test: `npm test`
+
+## OAuth (Google / Apple)
+- OAuth login is optional and enabled only when env vars are set.
+- Check config from the API:
+	- `GET /api/oauth/google/status`
+	- `GET /api/oauth/apple/status`
+- Configure env vars in `.env` (local) or in your hosting provider (production). See `.env.example` for the full list.

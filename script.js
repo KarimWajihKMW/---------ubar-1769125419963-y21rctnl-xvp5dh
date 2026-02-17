@@ -4012,6 +4012,22 @@ window.loginWithEmail = async function() {
 
 let lastOauthPopup = null;
 
+function getApiOriginForOAuth() {
+    try {
+        const host = window.location.hostname;
+        const proto = window.location.protocol;
+        const isLocal = host === 'localhost' || proto === 'file:' || !host;
+        return isLocal ? 'http://localhost:3000' : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function buildOAuthApiUrl(path) {
+    const origin = getApiOriginForOAuth();
+    return `${origin}${path}`;
+}
+
 function openOauthPopup(url) {
     try {
         const w = 520;
@@ -4024,9 +4040,34 @@ function openOauthPopup(url) {
             const join = String(url).includes('?') ? '&' : '?';
             window.location.href = `${url}${join}flow=redirect`;
         }
+        return lastOauthPopup;
     } catch (e) {
         const join = String(url).includes('?') ? '&' : '?';
         window.location.href = `${url}${join}flow=redirect`;
+        return null;
+    }
+}
+
+function writePopupMessage(popup, title, body) {
+    if (!popup) return;
+    try {
+        const doc = popup.document;
+        doc.open();
+        doc.write(`<!doctype html>
+<html lang="ar">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${String(title || 'OAuth')}</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 16px; direction: rtl;">
+    <h3 style="margin: 0 0 8px;">${String(title || '')}</h3>
+    <p style="margin: 0; white-space: pre-wrap;">${String(body || '')}</p>
+  </body>
+</html>`);
+        doc.close();
+    } catch (e) {
+        // ignore
     }
 }
 
@@ -4035,23 +4076,43 @@ window.oauthLogin = function(provider) {
     if (!p) return;
     showToast('⏳ جاري فتح تسجيل OAuth...');
 
-    // IMPORTANT: open popup/redirect synchronously (before any await) to avoid popup blockers.
-    const loginUrl = `/api/oauth/${encodeURIComponent(p)}/login`;
-    openOauthPopup(loginUrl);
+    // IMPORTANT: open popup synchronously (before any await) to avoid popup blockers.
+    // We start with a blank window, then navigate after we confirm configuration.
+    const popup = openOauthPopup('about:blank');
+    if (popup) writePopupMessage(popup, 'تسجيل الدخول', '⏳ جاري تجهيز تسجيل OAuth...');
 
-    // Non-blocking: check setup status in the background and show guidance if missing.
+    const loginUrl = buildOAuthApiUrl(`/api/oauth/${encodeURIComponent(p)}/login`);
+    const statusUrl = buildOAuthApiUrl(`/api/oauth/${encodeURIComponent(p)}/status`);
+
     (async () => {
         try {
-            const statusRes = await fetch(`/api/oauth/${encodeURIComponent(p)}/status`, { method: 'GET' });
+            const statusRes = await fetch(statusUrl, { method: 'GET' });
             const statusData = await statusRes.json().catch(() => ({}));
-            if (!statusRes.ok || !statusData.success) return;
+
+            if (!statusRes.ok || !statusData.success) {
+                if (popup) writePopupMessage(popup, 'فشل OAuth', '❌ تعذر التحقق من إعدادات OAuth.');
+                return;
+            }
+
             if (!statusData.configured) {
                 const missing = Array.isArray(statusData.missing) ? statusData.missing : [];
-                const msg = missing.length ? `⚠️ OAuth غير مُعد: ${missing.join(' , ')}` : '⚠️ OAuth غير مُعد';
-                showToast(msg, 6000);
+                const msg = missing.length ? `⚠️ OAuth غير مُعد:\n${missing.join('\n')}` : '⚠️ OAuth غير مُعد';
+                showToast(missing.length ? `⚠️ OAuth غير مُعد: ${missing.join(' , ')}` : '⚠️ OAuth غير مُعد', 7000);
+                if (popup) writePopupMessage(popup, 'OAuth غير مُعد', msg);
+                return;
             }
+
+            // Navigate to provider login (popup flow).
+            if (popup && !popup.closed) {
+                popup.location.href = loginUrl;
+                return;
+            }
+
+            // Popup blocked or closed: fallback to redirect flow.
+            const join = String(loginUrl).includes('?') ? '&' : '?';
+            window.location.href = `${loginUrl}${join}flow=redirect`;
         } catch (e) {
-            // ignore
+            if (popup) writePopupMessage(popup, 'فشل OAuth', '❌ حدث خطأ أثناء بدء OAuth.');
         }
     })();
 };
@@ -4065,7 +4126,8 @@ window.oauthLink = async function(provider) {
         return;
     }
     try {
-        const res = await fetch(`/api/oauth/${encodeURIComponent(p)}/link`, {
+        const linkUrl = buildOAuthApiUrl(`/api/oauth/${encodeURIComponent(p)}/link`);
+        const res = await fetch(linkUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

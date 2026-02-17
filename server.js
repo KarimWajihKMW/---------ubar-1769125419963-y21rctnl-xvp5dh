@@ -7266,6 +7266,17 @@ function oauthPopupErrorHtml(provider, error, extra = {}) {
     return makeOAuthPopupHtml({ success: false, provider, error, ...extra });
 }
 
+function oauthNotConfiguredPayload(provider, req) {
+    const p = String(provider || '').toLowerCase();
+    const info = oauthMissingParts(p, req);
+    const missing = Array.isArray(info?.missing) ? info.missing : [];
+    return { success: false, provider: p, error: 'oauth_not_configured', missing };
+}
+
+function oauthNotConfiguredHtml(provider, req) {
+    return makeOAuthPopupHtml(oauthNotConfiguredPayload(provider, req));
+}
+
 function getRequestBaseUrl(req) {
     const envBase = process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || process.env.BASE_URL || process.env.APP_URL;
     if (envBase && String(envBase).trim()) {
@@ -7582,7 +7593,7 @@ async function findOrCreateUserFromOAuth({ provider, providerSub, email, name, l
 async function oauthStartLogin(provider, req, res) {
     if (!isOAuthConfigured(provider, req)) {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        return res.status(501).send(oauthPopupErrorHtml(provider, 'oauth_not_configured'));
+        return res.status(501).send(oauthNotConfiguredHtml(provider, req));
     }
     oauthPruneStates();
     const client = await getOAuthClient(provider, req);
@@ -7613,7 +7624,8 @@ async function oauthStartLogin(provider, req, res) {
 
 async function oauthStartLink(provider, req, res) {
     if (!isOAuthConfigured(provider, req)) {
-        return res.status(501).json({ success: false, error: 'oauth_not_configured' });
+        const payload = oauthNotConfiguredPayload(provider, req);
+        return res.status(501).json(payload);
     }
     const userId = req.auth?.uid;
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -7648,7 +7660,7 @@ async function oauthCallback(provider, req, res) {
     try {
         if (!isOAuthConfigured(provider, req)) {
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            return res.status(501).send(oauthPopupErrorHtml(provider, 'oauth_not_configured'));
+            return res.status(501).send(oauthNotConfiguredHtml(provider, req));
         }
         const client = await getOAuthClient(provider, req);
         const cfg = getOAuthProviderConfig(provider, req);
