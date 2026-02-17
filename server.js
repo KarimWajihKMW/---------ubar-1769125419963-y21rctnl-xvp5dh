@@ -67,6 +67,43 @@ const PENDING_TRIP_TTL_MINUTES = 20;
 const ASSIGNED_TRIP_TTL_MINUTES = 120;
 const AUTO_ASSIGN_TRIPS = false;
 
+// Night Safety Policy (defaults)
+const NIGHT_POLICY_START_HOUR = process.env.NIGHT_POLICY_START_HOUR !== undefined ? Number(process.env.NIGHT_POLICY_START_HOUR) : 22;
+const NIGHT_POLICY_END_HOUR = process.env.NIGHT_POLICY_END_HOUR !== undefined ? Number(process.env.NIGHT_POLICY_END_HOUR) : 6;
+const NIGHT_POLICY_MIN_RATING = process.env.NIGHT_POLICY_MIN_RATING !== undefined ? Number(process.env.NIGHT_POLICY_MIN_RATING) : 4.7;
+const NIGHT_POLICY_MAX_LOCATION_AGE_MIN = process.env.NIGHT_POLICY_MAX_LOCATION_AGE_MIN !== undefined ? Number(process.env.NIGHT_POLICY_MAX_LOCATION_AGE_MIN) : 10;
+
+function isNightNow(d = new Date()) {
+    const hour = d.getHours();
+    const start = Number.isFinite(NIGHT_POLICY_START_HOUR) ? NIGHT_POLICY_START_HOUR : 22;
+    const end = Number.isFinite(NIGHT_POLICY_END_HOUR) ? NIGHT_POLICY_END_HOUR : 6;
+    // Wrap-around window (e.g. 22 -> 6)
+    if (start === end) return false;
+    if (start < end) {
+        return hour >= start && hour < end;
+    }
+    return hour >= start || hour < end;
+}
+
+function isDriverEligibleForNightPolicy(driverRow) {
+    if (!driverRow) return false;
+    const approval = driverRow.approval_status ? String(driverRow.approval_status).toLowerCase() : '';
+    if (approval && approval !== 'approved') return false;
+
+    const rating = driverRow.rating !== undefined && driverRow.rating !== null ? Number(driverRow.rating) : null;
+    const minRating = Number.isFinite(NIGHT_POLICY_MIN_RATING) ? NIGHT_POLICY_MIN_RATING : 4.7;
+    if (Number.isFinite(rating) && Number.isFinite(minRating) && rating < minRating) return false;
+
+    const lastAt = driverRow.last_location_at ? new Date(driverRow.last_location_at) : null;
+    const maxAgeMin = Number.isFinite(NIGHT_POLICY_MAX_LOCATION_AGE_MIN) ? NIGHT_POLICY_MAX_LOCATION_AGE_MIN : 10;
+    if (lastAt && Number.isFinite(lastAt.getTime()) && Number.isFinite(maxAgeMin) && maxAgeMin > 0) {
+        const ageMs = Date.now() - lastAt.getTime();
+        if (ageMs > maxAgeMin * 60 * 1000) return false;
+    }
+
+    return true;
+}
+
 let cachedMailer = null;
 function getMailer() {
     try {
@@ -602,12 +639,16 @@ async function ensureOffersTable() {
                 discount_type VARCHAR(20) NOT NULL DEFAULT 'percent',
                 discount_value DECIMAL(10, 2) NOT NULL DEFAULT 0,
                 is_active BOOLEAN NOT NULL DEFAULT true,
+                eligibility_metric VARCHAR(40),
+                eligibility_min INTEGER,
                 starts_at TIMESTAMP,
                 ends_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        await pool.query('ALTER TABLE offers ADD COLUMN IF NOT EXISTS eligibility_metric VARCHAR(40);');
+        await pool.query('ALTER TABLE offers ADD COLUMN IF NOT EXISTS eligibility_min INTEGER;');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_offers_active ON offers(is_active);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_offers_code ON offers(code);');
         console.log('✅ Offers table ensured');
@@ -997,6 +1038,21 @@ async function ensurePassengerFeatureTables() {
         `);
         await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_family_owner ON passenger_family_members(owner_user_id, is_active);');
         await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS booked_for_family_member_id BIGINT REFERENCES passenger_family_members(id) ON DELETE SET NULL;');
+
+        // --- Trip quiet mode (Comfort) ---
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS quiet_mode BOOLEAN NOT NULL DEFAULT false;');
+
+        // --- Trip budget envelope (Smart saving) ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_budget_envelopes (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                daily_limit DECIMAL(12, 2),
+                weekly_limit DECIMAL(12, 2),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
 
         // --- Scheduled rides ---
         await pool.query(`
@@ -1498,10 +1554,13 @@ app.get('/api/pickup-hubs/suggest', async (req, res) => {
         const lat = req.query.lat !== undefined ? Number(req.query.lat) : null;
         const lng = req.query.lng !== undefined ? Number(req.query.lng) : null;
         const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 20) : 8;
+        const preference = req.query.preference ? String(req.query.preference).toLowerCase() : 'clear';
 
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
             return res.status(400).json({ success: false, error: 'lat and lng are required' });
         }
+
+        const safePref = preference === 'safe' || preference === 'safer' || preference === 'secure';
 
         const result = await pool.query(
             `SELECT id, title, category, lat, lng,
@@ -1511,9 +1570,15 @@ app.get('/api/pickup-hubs/suggest', async (req, res) => {
                     )) AS distance_km
              FROM pickup_hubs
              WHERE is_active = true
-             ORDER BY distance_km ASC
+             ORDER BY
+                CASE
+                    WHEN $4::boolean = true AND COALESCE(category,'') ILIKE ANY(ARRAY['%محطة%','%مترو%','%مول%','%معلم%','%بوابة%']) THEN 0
+                    WHEN $4::boolean = true THEN 1
+                    ELSE 0
+                END ASC,
+                distance_km ASC
              LIMIT $3`,
-            [lat, lng, limit]
+            [lat, lng, limit, safePref]
         );
 
         res.json({ success: true, data: result.rows });
@@ -2695,6 +2760,196 @@ app.get('/api/passengers/me/family', requireRole('passenger', 'admin'), async (r
     }
 });
 
+// Family spending budget remaining (daily/weekly) for UI warnings
+app.get('/api/passengers/me/family/:id/budget', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const memberId = Number(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId || !Number.isFinite(memberId) || memberId <= 0) {
+            return res.status(400).json({ success: false, error: 'Invalid request' });
+        }
+
+        const famRes = await pool.query(
+            `SELECT id, daily_limit, weekly_limit
+             FROM passenger_family_members
+             WHERE id = $1 AND owner_user_id = $2 AND is_active = true
+             LIMIT 1`,
+            [memberId, userId]
+        );
+        const fam = famRes.rows[0] || null;
+        if (!fam) return res.status(404).json({ success: false, error: 'Family member not found' });
+
+        const daySpentRes = await pool.query(
+            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+             FROM trips
+             WHERE booked_for_family_member_id = $1
+               AND status <> 'cancelled'
+               AND created_at >= date_trunc('day', NOW())`,
+            [memberId]
+        );
+        const weekSpentRes = await pool.query(
+            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+             FROM trips
+             WHERE booked_for_family_member_id = $1
+               AND status <> 'cancelled'
+               AND created_at >= date_trunc('week', NOW())`,
+            [memberId]
+        );
+
+        const dailyLimit = fam.daily_limit !== null && fam.daily_limit !== undefined ? Number(fam.daily_limit) : null;
+        const weeklyLimit = fam.weekly_limit !== null && fam.weekly_limit !== undefined ? Number(fam.weekly_limit) : null;
+        const dailySpent = Number(daySpentRes.rows?.[0]?.total || 0);
+        const weeklySpent = Number(weekSpentRes.rows?.[0]?.total || 0);
+
+        const dailyRemaining = Number.isFinite(dailyLimit) ? Math.max(0, dailyLimit - dailySpent) : null;
+        const weeklyRemaining = Number.isFinite(weeklyLimit) ? Math.max(0, weeklyLimit - weeklySpent) : null;
+
+        return res.json({
+            success: true,
+            data: {
+                member_id: memberId,
+                daily_limit: dailyLimit,
+                weekly_limit: weeklyLimit,
+                daily_spent: dailySpent,
+                weekly_spent: weeklySpent,
+                daily_remaining: dailyRemaining,
+                weekly_remaining: weeklyRemaining
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Trip Budget Envelope (per passenger) ---
+app.get('/api/passengers/me/budget-envelope', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const rowRes = await pool.query(
+            `SELECT user_id, enabled, daily_limit, weekly_limit, updated_at
+             FROM passenger_budget_envelopes
+             WHERE user_id = $1
+             LIMIT 1`,
+            [userId]
+        );
+        const row = rowRes.rows[0] || null;
+        return res.json({ success: true, data: row });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/budget-envelope', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const enabled = req.body?.enabled !== undefined ? Boolean(req.body.enabled) : true;
+        const dailyLimit = req.body?.daily_limit !== undefined && req.body?.daily_limit !== null ? Number(req.body.daily_limit) : null;
+        const weeklyLimit = req.body?.weekly_limit !== undefined && req.body?.weekly_limit !== null ? Number(req.body.weekly_limit) : null;
+
+        if (dailyLimit !== null && (!Number.isFinite(dailyLimit) || dailyLimit < 0)) {
+            return res.status(400).json({ success: false, error: 'daily_limit must be >= 0' });
+        }
+        if (weeklyLimit !== null && (!Number.isFinite(weeklyLimit) || weeklyLimit < 0)) {
+            return res.status(400).json({ success: false, error: 'weekly_limit must be >= 0' });
+        }
+
+        const up = await pool.query(
+            `INSERT INTO passenger_budget_envelopes (user_id, enabled, daily_limit, weekly_limit, updated_at)
+             VALUES ($1,$2,$3,$4,CURRENT_TIMESTAMP)
+             ON CONFLICT (user_id) DO UPDATE
+               SET enabled = EXCLUDED.enabled,
+                   daily_limit = EXCLUDED.daily_limit,
+                   weekly_limit = EXCLUDED.weekly_limit,
+                   updated_at = CURRENT_TIMESTAMP
+             RETURNING user_id, enabled, daily_limit, weekly_limit, updated_at`,
+            [userId, enabled, dailyLimit, weeklyLimit]
+        );
+
+        return res.json({ success: true, data: up.rows[0] });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Check if wallet payment fits inside budget envelope. If not -> suggest switching to cash.
+app.post('/api/passengers/me/budget-envelope/check', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const amount = req.body?.amount !== undefined && req.body?.amount !== null ? Number(req.body.amount) : null;
+        if (!userId || !Number.isFinite(amount) || amount <= 0) {
+            return res.status(400).json({ success: false, error: 'amount is required' });
+        }
+
+        const envRes = await pool.query(
+            `SELECT enabled, daily_limit, weekly_limit
+             FROM passenger_budget_envelopes
+             WHERE user_id = $1
+             LIMIT 1`,
+            [userId]
+        );
+        const env = envRes.rows[0] || null;
+        if (!env || env.enabled === false) {
+            return res.json({ success: true, allowed: true, force_method: null });
+        }
+
+        const dailyLimit = env.daily_limit !== null && env.daily_limit !== undefined ? Number(env.daily_limit) : null;
+        const weeklyLimit = env.weekly_limit !== null && env.weekly_limit !== undefined ? Number(env.weekly_limit) : null;
+
+        const dailySpentRes = await pool.query(
+            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+             FROM trips
+             WHERE user_id = $1
+               AND payment_method = 'wallet'
+               AND status <> 'cancelled'
+               AND created_at >= date_trunc('day', NOW())`,
+            [userId]
+        );
+        const weeklySpentRes = await pool.query(
+            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+             FROM trips
+             WHERE user_id = $1
+               AND payment_method = 'wallet'
+               AND status <> 'cancelled'
+               AND created_at >= date_trunc('week', NOW())`,
+            [userId]
+        );
+
+        const dailySpent = Number(dailySpentRes.rows?.[0]?.total || 0);
+        const weeklySpent = Number(weeklySpentRes.rows?.[0]?.total || 0);
+
+        const dailyRemaining = Number.isFinite(dailyLimit) ? Math.max(0, dailyLimit - dailySpent) : null;
+        const weeklyRemaining = Number.isFinite(weeklyLimit) ? Math.max(0, weeklyLimit - weeklySpent) : null;
+
+        const dailyOk = dailyRemaining === null ? true : amount <= dailyRemaining;
+        const weeklyOk = weeklyRemaining === null ? true : amount <= weeklyRemaining;
+        const allowed = dailyOk && weeklyOk;
+
+        return res.json({
+            success: true,
+            allowed,
+            force_method: allowed ? null : 'cash',
+            data: {
+                daily_limit: Number.isFinite(dailyLimit) ? dailyLimit : null,
+                weekly_limit: Number.isFinite(weeklyLimit) ? weeklyLimit : null,
+                daily_spent: dailySpent,
+                weekly_spent: weeklySpent,
+                daily_remaining: dailyRemaining,
+                weekly_remaining: weeklyRemaining
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 app.post('/api/passengers/me/family', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
@@ -3865,7 +4120,46 @@ app.get('/api/offers/validate', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Offer not found or inactive' });
         }
 
-        res.json({ success: true, data: result.rows[0] });
+        const offer = result.rows[0];
+
+        // Optional: eligibility rules (Offer Eligibility linked to behavior)
+        const metric = offer.eligibility_metric ? String(offer.eligibility_metric) : '';
+        const min = offer.eligibility_min !== undefined && offer.eligibility_min !== null ? Number(offer.eligibility_min) : null;
+
+        if (metric && Number.isFinite(min) && min > 0) {
+            const authRole = String(req.auth?.role || '').toLowerCase();
+            const uid = req.auth?.uid;
+            if (!uid || authRole !== 'passenger') {
+                return res.status(401).json({ success: false, error: 'Unauthorized', code: 'offer_eligibility_requires_auth' });
+            }
+
+            let current = 0;
+            if (metric === 'hub_compliance_trips') {
+                const stats = await pool.query(
+                    `SELECT hub_compliance_trips
+                     FROM passenger_loyalty_stats
+                     WHERE user_id = $1
+                     LIMIT 1`,
+                    [uid]
+                );
+                current = Number(stats.rows?.[0]?.hub_compliance_trips || 0);
+            } else {
+                return res.status(400).json({ success: false, error: 'Unsupported eligibility metric', code: 'unsupported_eligibility_metric' });
+            }
+
+            if (!Number.isFinite(current)) current = 0;
+            if (current < min) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Not eligible for this offer',
+                    code: 'offer_not_eligible',
+                    required: { metric, min },
+                    current
+                });
+            }
+        }
+
+        res.json({ success: true, data: offer });
     } catch (err) {
         console.error('Error validating offer:', err);
         res.status(500).json({ success: false, error: err.message });
@@ -4180,6 +4474,7 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             passenger_note_template_id,
             booked_for_family_member_id,
             price_lock_id,
+            quiet_mode,
             car_type = 'economy',
             cost,
             price,
@@ -4242,6 +4537,13 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             }
         }
 
+        const quietModeEnabled = quiet_mode !== undefined ? Boolean(quiet_mode) : false;
+
+        // Comfort: Quiet Mode auto-note (if user didn't provide any note/template)
+        if (quietModeEnabled && !effectivePassengerNote) {
+            effectivePassengerNote = 'Quiet Mode: من فضلك بدون مكالمات/رسائل إلا للطوارئ.';
+        }
+
         // Optional: price lock validation
         let effectiveCost = price !== undefined && price !== null ? price : cost;
         const priceLockId = price_lock_id !== undefined && price_lock_id !== null ? Number(price_lock_id) : null;
@@ -4265,6 +4567,59 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                 return res.status(410).json({ success: false, error: 'Price lock expired' });
             }
             effectiveCost = Number(lockedPriceRow.price);
+        }
+
+        // Enforce family member spending limits (daily/weekly)
+        if (familyMember) {
+            const dailyLimit = familyMember.daily_limit !== null && familyMember.daily_limit !== undefined ? Number(familyMember.daily_limit) : null;
+            const weeklyLimit = familyMember.weekly_limit !== null && familyMember.weekly_limit !== undefined ? Number(familyMember.weekly_limit) : null;
+            const tripCost = effectiveCost !== undefined && effectiveCost !== null ? Number(effectiveCost) : null;
+
+            if (Number.isFinite(tripCost) && tripCost > 0 && (Number.isFinite(dailyLimit) || Number.isFinite(weeklyLimit))) {
+                const daySpentRes = await pool.query(
+                    `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+                     FROM trips
+                     WHERE booked_for_family_member_id = $1
+                       AND status <> 'cancelled'
+                       AND created_at >= date_trunc('day', NOW())`,
+                    [Number(familyMember.id)]
+                );
+                const weekSpentRes = await pool.query(
+                    `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+                     FROM trips
+                     WHERE booked_for_family_member_id = $1
+                       AND status <> 'cancelled'
+                       AND created_at >= date_trunc('week', NOW())`,
+                    [Number(familyMember.id)]
+                );
+
+                const dailySpent = Number(daySpentRes.rows?.[0]?.total || 0);
+                const weeklySpent = Number(weekSpentRes.rows?.[0]?.total || 0);
+
+                const dailyRemaining = Number.isFinite(dailyLimit) ? Math.max(0, dailyLimit - dailySpent) : null;
+                const weeklyRemaining = Number.isFinite(weeklyLimit) ? Math.max(0, weeklyLimit - weeklySpent) : null;
+
+                const dailyOk = dailyRemaining === null ? true : tripCost <= dailyRemaining;
+                const weeklyOk = weeklyRemaining === null ? true : tripCost <= weeklyRemaining;
+
+                if (!dailyOk || !weeklyOk) {
+                    return res.status(409).json({
+                        success: false,
+                        error: 'Family member budget exceeded',
+                        code: 'family_budget_exceeded',
+                        data: {
+                            member_id: Number(familyMember.id),
+                            trip_cost: tripCost,
+                            daily_limit: Number.isFinite(dailyLimit) ? dailyLimit : null,
+                            weekly_limit: Number.isFinite(weeklyLimit) ? weeklyLimit : null,
+                            daily_spent: dailySpent,
+                            weekly_spent: weeklySpent,
+                            daily_remaining: dailyRemaining,
+                            weekly_remaining: weeklyRemaining
+                        }
+                    });
+                }
+            }
         }
 
         // Optional: pickup hub overrides pickup coords + location
@@ -4351,8 +4706,8 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                 distance, distance_km,
                 duration, duration_minutes,
                 payment_method, status, driver_name, source,
-                pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+                pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id, quiet_mode
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
             RETURNING *
         `, [
             tripId, effectiveRiderId, effectiveRiderId, driver_id, effectivePickupLocation, dropoff_location,
@@ -4365,7 +4720,8 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             pickupHub ? pickupHub.id : null,
             effectivePassengerNote ? String(effectivePassengerNote) : null,
             familyMember ? Number(familyMember.id) : null,
-            lockedPriceRow ? Number(lockedPriceRow.id) : null
+            lockedPriceRow ? Number(lockedPriceRow.id) : null,
+            quietModeEnabled
         ]);
 
         let createdTrip = result.rows[0];
@@ -4685,6 +5041,70 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
         if (!nextTripStatus && status === 'completed') {
             nextTripStatus = 'completed';
         }
+
+        // Budget envelope: if wallet payment exceeds envelope, auto-switch to cash
+        let paymentMeta = null;
+        let effectivePaymentMethod = payment_method !== undefined && payment_method !== null ? String(payment_method) : null;
+        if (
+            String(status || '').toLowerCase() === 'completed' &&
+            effectivePaymentMethod &&
+            String(effectivePaymentMethod).toLowerCase() === 'wallet'
+        ) {
+            try {
+                const passengerId = beforeTripRow.user_id ? Number(beforeTripRow.user_id) : null;
+                const amount = cost !== undefined && cost !== null
+                    ? Number(cost)
+                    : (beforeTripRow.cost !== undefined && beforeTripRow.cost !== null ? Number(beforeTripRow.cost) : null);
+
+                if (passengerId && Number.isFinite(amount) && amount > 0) {
+                    const envRes = await pool.query(
+                        `SELECT enabled, daily_limit, weekly_limit
+                         FROM passenger_budget_envelopes
+                         WHERE user_id = $1
+                         LIMIT 1`,
+                        [passengerId]
+                    );
+                    const env = envRes.rows[0] || null;
+                    if (env && env.enabled !== false) {
+                        const dailyLimit = env.daily_limit !== null && env.daily_limit !== undefined ? Number(env.daily_limit) : null;
+                        const weeklyLimit = env.weekly_limit !== null && env.weekly_limit !== undefined ? Number(env.weekly_limit) : null;
+
+                        const dailySpentRes = await pool.query(
+                            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+                             FROM trips
+                             WHERE user_id = $1
+                               AND payment_method = 'wallet'
+                               AND status <> 'cancelled'
+                               AND created_at >= date_trunc('day', NOW())`,
+                            [passengerId]
+                        );
+                        const weeklySpentRes = await pool.query(
+                            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0) AS total
+                             FROM trips
+                             WHERE user_id = $1
+                               AND payment_method = 'wallet'
+                               AND status <> 'cancelled'
+                               AND created_at >= date_trunc('week', NOW())`,
+                            [passengerId]
+                        );
+
+                        const dailySpent = Number(dailySpentRes.rows?.[0]?.total || 0);
+                        const weeklySpent = Number(weeklySpentRes.rows?.[0]?.total || 0);
+                        const dailyRemaining = Number.isFinite(dailyLimit) ? Math.max(0, dailyLimit - dailySpent) : null;
+                        const weeklyRemaining = Number.isFinite(weeklyLimit) ? Math.max(0, weeklyLimit - weeklySpent) : null;
+
+                        const dailyOk = dailyRemaining === null ? true : amount <= dailyRemaining;
+                        const weeklyOk = weeklyRemaining === null ? true : amount <= weeklyRemaining;
+                        if (!dailyOk || !weeklyOk) {
+                            effectivePaymentMethod = 'cash';
+                            paymentMeta = { switched_from: 'wallet', switched_to: 'cash', reason: 'budget_exceeded' };
+                        }
+                    }
+                }
+            } catch (e) {
+                // non-blocking
+            }
+        }
         
         let query = 'UPDATE trips SET status = $1, updated_at = CURRENT_TIMESTAMP';
         const params = [status];
@@ -4753,10 +5173,10 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
             query += `, duration_minutes = COALESCE(duration_minutes, duration, GREATEST(1, ROUND(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE(started_at, created_at))) / 60)))`;
         }
 
-        if (payment_method !== undefined) {
+        if (effectivePaymentMethod !== null) {
             paramCount++;
             query += `, payment_method = $${paramCount}`;
-            params.push(payment_method);
+            params.push(effectivePaymentMethod);
         }
         
         if (effectivePassengerRating !== undefined) {
@@ -5035,7 +5455,8 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
         
         res.json({
             success: true,
-            data: result.rows[0]
+            data: result.rows[0],
+            meta: paymentMeta
         });
     } catch (err) {
         console.error('Error updating trip status:', err);
@@ -5807,6 +6228,21 @@ app.patch('/api/trips/:id/assign', requireRole('driver', 'admin'), async (req, r
         const effectiveDriverId = authRole === 'driver' ? authDriverId : driver_id;
         if (!effectiveDriverId) {
             return res.status(400).json({ success: false, error: 'driver_id is required' });
+        }
+
+        // Night Safety Policy (driver only; admin override allowed)
+        if (authRole === 'driver' && isNightNow()) {
+            const dRes = await pool.query(
+                `SELECT approval_status, rating, last_location_at
+                 FROM drivers
+                 WHERE id = $1
+                 LIMIT 1`,
+                [effectiveDriverId]
+            );
+            const dRow = dRes.rows[0] || null;
+            if (!isDriverEligibleForNightPolicy(dRow)) {
+                return res.status(403).json({ success: false, error: 'Night safety policy: driver not eligible', code: 'night_policy_not_eligible' });
+            }
         }
 
         if (authRole === 'driver' && String(driver_id || effectiveDriverId) !== String(effectiveDriverId)) {
@@ -8546,6 +8982,25 @@ app.post('/api/pending-rides/:request_id/accept', requireRole('driver', 'admin')
             });
         }
 
+        // Night Safety Policy (driver only; admin override allowed)
+        if (authRole === 'driver' && isNightNow()) {
+            const dRes = await pool.query(
+                `SELECT approval_status, rating, last_location_at
+                 FROM drivers
+                 WHERE id = $1
+                 LIMIT 1`,
+                [effectiveDriverId]
+            );
+            const dRow = dRes.rows[0] || null;
+            if (!isDriverEligibleForNightPolicy(dRow)) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Night safety policy: driver not eligible',
+                    code: 'night_policy_not_eligible'
+                });
+            }
+        }
+
         // Check if request exists and is still waiting
         const checkResult = await pool.query(`
             SELECT * FROM pending_ride_requests
@@ -8804,7 +9259,7 @@ app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'),
 
         // Get driver info
         const driverResult = await pool.query(`
-            SELECT car_type, last_lat, last_lng, last_location_at
+            SELECT car_type, last_lat, last_lng, last_location_at, approval_status, rating
             FROM drivers
             WHERE id = $1
         `, [driver_id]);
@@ -8817,6 +9272,20 @@ app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'),
         }
 
         const driver = driverResult.rows[0];
+
+        // Night Safety Policy: block non-eligible drivers from night assignments
+        if (isNightNow() && !isDriverEligibleForNightPolicy(driver)) {
+            return res.json({
+                success: true,
+                count: 0,
+                data: [],
+                meta: {
+                    night_policy_blocked: true,
+                    min_rating: Number.isFinite(NIGHT_POLICY_MIN_RATING) ? NIGHT_POLICY_MIN_RATING : 4.7,
+                    max_location_age_min: Number.isFinite(NIGHT_POLICY_MAX_LOCATION_AGE_MIN) ? NIGHT_POLICY_MAX_LOCATION_AGE_MIN : 10
+                }
+            });
+        }
 
         if (!driver.last_lat || !driver.last_lng || !driver.last_location_at) {
             return res.json({

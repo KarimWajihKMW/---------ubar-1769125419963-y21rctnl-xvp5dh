@@ -324,11 +324,12 @@ const ApiService = {
     },
 
     pickupHubs: {
-        async suggest(lat, lng, limit = null) {
+        async suggest(lat, lng, limit = null, preference = null) {
             const params = new URLSearchParams();
             params.set('lat', lat);
             params.set('lng', lng);
             if (Number.isFinite(limit)) params.set('limit', limit);
+            if (preference) params.set('preference', preference);
             return ApiService.request(`/pickup-hubs/suggest?${params.toString()}`);
         }
     },
@@ -380,6 +381,28 @@ const ApiService = {
         async deleteFamilyMember(id) {
             return ApiService.request(`/passengers/me/family/${encodeURIComponent(id)}`, {
                 method: 'DELETE'
+            });
+        },
+
+        async getFamilyBudget(memberId) {
+            return ApiService.request(`/passengers/me/family/${encodeURIComponent(memberId)}/budget`);
+        },
+
+        async getBudgetEnvelope() {
+            return ApiService.request('/passengers/me/budget-envelope');
+        },
+
+        async setBudgetEnvelope(payload = {}) {
+            return ApiService.request('/passengers/me/budget-envelope', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async checkBudgetEnvelope(amount) {
+            return ApiService.request('/passengers/me/budget-envelope/check', {
+                method: 'POST',
+                body: JSON.stringify({ amount })
             });
         },
 

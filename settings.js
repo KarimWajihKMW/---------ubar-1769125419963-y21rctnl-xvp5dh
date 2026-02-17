@@ -148,6 +148,80 @@ function loadUser() {
     }
 }
 
+function getToken() {
+    try { return localStorage.getItem('akwadra_token'); } catch (e) { return null; }
+}
+
+async function apiJson(path, options = {}) {
+    const token = getToken();
+    const headers = {
+        ...(options.headers || {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+    };
+    const res = await fetch(path, { ...options, headers });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+}
+
+async function loadBudgetEnvelope() {
+    const enabledEl = document.getElementById('budget-enabled');
+    const dailyEl = document.getElementById('budget-daily');
+    const weeklyEl = document.getElementById('budget-weekly');
+    const statusEl = document.getElementById('budget-status');
+    if (!enabledEl || !dailyEl || !weeklyEl) return;
+
+    if (!getToken()) {
+        if (statusEl) statusEl.textContent = 'سجّل الدخول لعرض/حفظ الميزانية.';
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = 'جاري التحميل...';
+    const { res, data } = await apiJson('/api/passengers/me/budget-envelope');
+    if (!res.ok || !data.success) {
+        if (statusEl) statusEl.textContent = 'تعذر تحميل الميزانية.';
+        return;
+    }
+
+    const row = data.data || null;
+    enabledEl.checked = row ? !!row.enabled : false;
+    dailyEl.value = row && row.daily_limit !== null && row.daily_limit !== undefined ? String(row.daily_limit) : '';
+    weeklyEl.value = row && row.weekly_limit !== null && row.weekly_limit !== undefined ? String(row.weekly_limit) : '';
+    if (statusEl) statusEl.textContent = 'تم تحميل الميزانية.';
+}
+
+async function saveBudgetEnvelope() {
+    const enabledEl = document.getElementById('budget-enabled');
+    const dailyEl = document.getElementById('budget-daily');
+    const weeklyEl = document.getElementById('budget-weekly');
+    const statusEl = document.getElementById('budget-status');
+    if (!enabledEl || !dailyEl || !weeklyEl) return;
+
+    if (!getToken()) {
+        if (statusEl) statusEl.textContent = 'سجّل الدخول أولاً.';
+        return;
+    }
+
+    const daily = dailyEl.value !== '' ? Number(dailyEl.value) : null;
+    const weekly = weeklyEl.value !== '' ? Number(weeklyEl.value) : null;
+    const payload = {
+        enabled: !!enabledEl.checked,
+        daily_limit: daily,
+        weekly_limit: weekly
+    };
+
+    if (statusEl) statusEl.textContent = 'جاري الحفظ...';
+    const { res, data } = await apiJson('/api/passengers/me/budget-envelope', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok || !data.success) {
+        if (statusEl) statusEl.textContent = 'تعذر حفظ الميزانية.';
+        return;
+    }
+    if (statusEl) statusEl.textContent = '✅ تم حفظ الميزانية.';
+}
+
 function loadPrefs() {
     const defaults = ROLE === 'driver' ? DRIVER_PREF_DEFAULTS : PASSENGER_PREF_DEFAULTS;
     try {
@@ -252,4 +326,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (translateBtn) translateBtn.addEventListener('click', openTranslatedPage);
 
     setupAccordions();
+
+    loadBudgetEnvelope().catch(() => {});
+    const budgetSave = document.getElementById('budget-save');
+    if (budgetSave) budgetSave.addEventListener('click', () => {
+        saveBudgetEnvelope().catch(() => {});
+    });
 });

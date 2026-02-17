@@ -151,6 +151,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Realtime trip sync (Socket.io) - no manual refresh
     initRealtimeSocket();
+
+    // Pickup hub preference -> refresh suggestions
+    const pref = document.getElementById('pickup-hub-preference');
+    if (pref) {
+        pref.addEventListener('change', () => {
+            try { refreshPickupHubSuggestions(); } catch (e) {}
+        });
+    }
 });
 
 // --- Global State ---
@@ -567,6 +575,13 @@ window.refreshFamilyUI = async function() {
             rows.forEach((m) => {
                 select.insertAdjacentHTML('beforeend', `<option value="${String(m.id)}">${escapeHtml(m.name || 'فرد')}</option>`);
             });
+
+            if (!select.dataset.budgetBound) {
+                select.addEventListener('change', () => {
+                    try { window.updateFamilyBudgetHint && window.updateFamilyBudgetHint(); } catch (e) {}
+                });
+                select.dataset.budgetBound = '1';
+            }
         }
 
         if (!list) return;
@@ -590,6 +605,38 @@ window.refreshFamilyUI = async function() {
     } catch (e) {
         console.error('refreshFamilyUI failed:', e);
         if (list) list.innerHTML = '<p class="text-gray-500 text-center py-4">تعذر تحميل العائلة</p>';
+    }
+};
+
+window.updateFamilyBudgetHint = async function() {
+    if (currentUserRole !== 'passenger') return;
+    const select = document.getElementById('ride-family-member');
+    const hint = document.getElementById('family-budget-hint');
+    if (!hint) return;
+
+    const memberId = select && select.value ? Number(select.value) : null;
+    if (!Number.isFinite(memberId) || memberId <= 0) {
+        hint.textContent = '';
+        return;
+    }
+
+    hint.textContent = 'جاري حساب حدود الإنفاق...';
+    try {
+        const res = await ApiService.passenger.getFamilyBudget(memberId);
+        const d = res?.data || null;
+        if (!d) {
+            hint.textContent = '';
+            return;
+        }
+
+        const daily = d.daily_remaining !== null && d.daily_remaining !== undefined ? Number(d.daily_remaining) : null;
+        const weekly = d.weekly_remaining !== null && d.weekly_remaining !== undefined ? Number(d.weekly_remaining) : null;
+        const parts = [];
+        if (daily !== null && Number.isFinite(daily)) parts.push(`المتبقي اليوم: ${daily.toFixed(2)} ر.س`);
+        if (weekly !== null && Number.isFinite(weekly)) parts.push(`المتبقي الأسبوع: ${weekly.toFixed(2)} ر.س`);
+        hint.textContent = parts.length ? parts.join(' • ') : '';
+    } catch (e) {
+        hint.textContent = '';
     }
 };
 
@@ -1905,7 +1952,9 @@ async function refreshPickupHubSuggestions() {
     pickupHubSuggestRequestAt = now;
 
     try {
-        const resp = await ApiService.pickupHubs.suggest(currentPickup.lat, currentPickup.lng, 6);
+        const prefEl = document.getElementById('pickup-hub-preference');
+        const preference = prefEl && prefEl.value ? String(prefEl.value) : 'clear';
+        const resp = await ApiService.pickupHubs.suggest(currentPickup.lat, currentPickup.lng, 6, preference);
         renderPickupHubSuggestions(resp?.data || []);
     } catch (e) {
         // Hide on error
@@ -5276,6 +5325,9 @@ window.requestRide = async function() {
         const noteCustomEl = document.getElementById('ride-note-custom');
         const noteCustom = noteCustomEl ? String(noteCustomEl.value || '').trim() : '';
 
+        const quietEl = document.getElementById('ride-quiet-mode');
+        const quietMode = quietEl ? Boolean(quietEl.checked) : false;
+
         const priceLockId = activePriceLock && isPriceLockValid(activePriceLock) ? Number(activePriceLock.id) : null;
 
         let pendingStops = [];
@@ -5331,6 +5383,7 @@ window.requestRide = async function() {
             passenger_note_template_id: !noteCustom && Number.isFinite(noteTplId) && noteTplId > 0 ? noteTplId : null,
             booked_for_family_member_id: Number.isFinite(familyMemberId) && familyMemberId > 0 ? familyMemberId : null,
             price_lock_id: Number.isFinite(priceLockId) && priceLockId > 0 ? priceLockId : null,
+            quiet_mode: quietMode,
             car_type: currentCarType,
             cost: currentTripPrice,
             distance: est.distanceKm,
@@ -7731,6 +7784,31 @@ window.selectPaymentMethod = function(method) {
             selectedPaymentMethod = null;
             return;
         }
+
+        // Budget envelope (if configured): if exceeded, block wallet selection
+        try {
+            const amount = (tripDetails.basePrice || currentTripPrice || 0) - promoDiscount;
+            if (amount > 0 && ApiService?.passenger?.checkBudgetEnvelope) {
+                ApiService.passenger.checkBudgetEnvelope(amount).then((resp) => {
+                    if (resp && resp.success && resp.allowed === false && resp.force_method === 'cash') {
+                        showToast('⚠️ الميزانية غير كافية للمحفظة — اختر كاش');
+                        selectedPaymentMethod = null;
+                        if (confirmBtn) {
+                            confirmBtn.disabled = true;
+                            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                        }
+                        document.querySelectorAll('.payment-method-btn').forEach(btn => {
+                            const radio = btn.querySelector('.w-5');
+                            if (!radio) return;
+                            radio.classList.remove('bg-indigo-600', 'border-indigo-600');
+                            radio.classList.add('border-gray-300');
+                        });
+                    }
+                }).catch(() => {});
+            }
+        } catch (e) {
+            // ignore
+        }
     }
     
     confirmBtn.disabled = false;
@@ -7751,11 +7829,8 @@ window.applyPromoCode = async function() {
 
     if (!resolvedOffer) {
         try {
-            const response = await fetch(`/api/offers/validate?code=${encodeURIComponent(code)}`);
-            if (response.ok) {
-                const data = await response.json();
-                resolvedOffer = data.data ? normalizeOffer(data.data) : null;
-            }
+            const data = await ApiService.request(`/offers/validate?code=${encodeURIComponent(code)}`);
+            resolvedOffer = data.data ? normalizeOffer(data.data) : null;
         } catch (err) {
             resolvedOffer = null;
         }
@@ -7973,7 +8048,7 @@ window.showInvoice = function() {
 };
 
 window.proceedToPayment = function() {
-    const paymentMethod = selectedPaymentMethod;
+    let paymentMethod = selectedPaymentMethod;
     const amount = (tripDetails.basePrice || 25) - promoDiscount;
     
     // Simulate payment processing
@@ -7993,6 +8068,21 @@ window.proceedToPayment = function() {
 
         tripDetails.duration = actualDuration;
         
+        // Budget envelope enforcement: auto-switch to cash when exceeded
+        if (paymentMethod === 'wallet') {
+            try {
+                if (ApiService?.passenger?.checkBudgetEnvelope) {
+                    const chk = await ApiService.passenger.checkBudgetEnvelope(amount);
+                    if (chk && chk.success && chk.allowed === false && chk.force_method === 'cash') {
+                        paymentMethod = 'cash';
+                        showToast('⚠️ الميزانية غير كافية للمحفظة — تم التحويل إلى كاش');
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
         if (user) {
             const newBalance = paymentMethod === 'wallet' 
                 ? user.balance - amount

@@ -180,6 +180,59 @@ async function run() {
   if (!fam.res.ok) throw new Error(`Family add failed: ${fam.data.error || fam.res.status}`);
   const familyMemberId = fam.data.data.id;
 
+  // 3️⃣b) Family spending limits enforcement
+  console.log('\n3️⃣b Family limits...');
+  const famLimited = await jsonFetch(`${baseURL}/passengers/me/family`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ name: 'طفل (حدود)', phone: '0500000001', daily_limit: 5, weekly_limit: 5 })
+  });
+  if (!famLimited.res.ok) throw new Error(`Family add (limited) failed: ${famLimited.data.error || famLimited.res.status}`);
+  const limitedMemberId = famLimited.data.data.id;
+
+  const limitedTrip = await jsonFetch(`${baseURL}/trips`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({
+      pickup_location: 'التقاط حدود',
+      dropoff_location: 'وجهة حدود',
+      pickup_lat: 24.7136,
+      pickup_lng: 46.6753,
+      pickup_accuracy: 6.1,
+      pickup_timestamp: Date.now(),
+      dropoff_lat: 24.6917,
+      dropoff_lng: 46.6853,
+      car_type: 'economy',
+      cost: 10,
+      distance: 1,
+      duration: 10,
+      payment_method: 'cash',
+      booked_for_family_member_id: limitedMemberId,
+      source: 'passenger_app'
+    })
+  });
+  if (limitedTrip.res.status !== 409) {
+    throw new Error(`Expected family budget exceeded (409), got: ${limitedTrip.res.status}`);
+  }
+
+  // 3️⃣c) Budget envelope check
+  console.log('\n3️⃣c Budget envelope...');
+  const setEnvelope = await jsonFetch(`${baseURL}/passengers/me/budget-envelope`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ enabled: true, daily_limit: 5, weekly_limit: 5 })
+  });
+  if (!setEnvelope.res.ok) throw new Error(`Set envelope failed: ${setEnvelope.data.error || setEnvelope.res.status}`);
+  const chkEnvelope = await jsonFetch(`${baseURL}/passengers/me/budget-envelope/check`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ amount: 10 })
+  });
+  if (!chkEnvelope.res.ok) throw new Error(`Envelope check failed: ${chkEnvelope.data.error || chkEnvelope.res.status}`);
+  if (chkEnvelope.data.allowed !== false || chkEnvelope.data.force_method !== 'cash') {
+    throw new Error('Envelope check should force cash when exceeded');
+  }
+
   // 4) Create trip with hub + note + family + price lock
   console.log('\n4️⃣ Create trip with hub/note/family/lock...');
   const tripCreate = await jsonFetch(`${baseURL}/trips`, {
