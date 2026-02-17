@@ -7415,6 +7415,51 @@ function makeOAuthPopupHtml(payload) {
 </html>`;
 }
 
+function makeOAuthRedirectHtml({ token, user, provider, created }) {
+        const safeToken = JSON.stringify(String(token || ''));
+        const safeUser = JSON.stringify(user || null);
+        const safeProvider = JSON.stringify(String(provider || ''));
+        const safeCreated = JSON.stringify(Boolean(created));
+        return `<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>OAuth Complete</title>
+    </head>
+    <body style="font-family: system-ui, sans-serif; padding: 16px;">
+        <p>OAuth completed. Redirecting…</p>
+        <script>
+            (function() {
+                try {
+                    var token = ${safeToken};
+                    var user = ${safeUser};
+                    var provider = ${safeProvider};
+                    var created = ${safeCreated};
+
+                    if (token) {
+                        localStorage.setItem('akwadra_token', token);
+                    }
+                    if (user) {
+                        try { localStorage.setItem('akwadra_user', JSON.stringify(user)); } catch (e) {}
+                    }
+                    localStorage.setItem('akwadra_session_active', 'true');
+                    localStorage.setItem('akwadra_last_oauth_provider', provider || '');
+                    localStorage.setItem('akwadra_last_oauth_created', created ? '1' : '0');
+                } catch (e) {
+                    // ignore
+                }
+                try {
+                    window.location.replace('/index.html');
+                } catch (e) {
+                    window.location.href = '/index.html';
+                }
+            })();
+        </script>
+    </body>
+</html>`;
+}
+
 async function findOrCreateUserFromOAuth({ provider, providerSub, email, name, linkUserId = null }) {
     const p = String(provider || '').toLowerCase();
     const sub = String(providerSub || '').trim();
@@ -7521,6 +7566,7 @@ async function oauthStartLogin(provider, req, res) {
     oauthPutState(state, {
         provider: String(provider).toLowerCase(),
         mode: 'login',
+        flow: String(req.query?.flow || '').toLowerCase() === 'redirect' ? 'redirect' : 'popup',
         userId: null,
         codeVerifier,
         createdAtMs: Date.now(),
@@ -7553,6 +7599,7 @@ async function oauthStartLink(provider, req, res) {
     oauthPutState(state, {
         provider: String(provider).toLowerCase(),
         mode: 'link',
+        flow: String(req.query?.flow || '').toLowerCase() === 'redirect' ? 'redirect' : 'popup',
         userId,
         codeVerifier,
         createdAtMs: Date.now(),
@@ -7616,6 +7663,9 @@ async function oauthCallback(provider, req, res) {
         });
 
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        if (String(st.flow || '').toLowerCase() === 'redirect') {
+            return res.status(200).send(makeOAuthRedirectHtml({ provider, created, user, token }));
+        }
         return res.status(200).send(makeOAuthPopupHtml({ success: true, provider, created, data: user, token }));
     } catch (err) {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');

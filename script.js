@@ -4021,10 +4021,12 @@ function openOauthPopup(url) {
         const features = `popup=yes,width=${w},height=${h},left=${left},top=${top}`;
         lastOauthPopup = window.open(url, 'oauth_popup', features);
         if (!lastOauthPopup) {
-            window.location.href = url;
+            const join = String(url).includes('?') ? '&' : '?';
+            window.location.href = `${url}${join}flow=redirect`;
         }
     } catch (e) {
-        window.location.href = url;
+        const join = String(url).includes('?') ? '&' : '?';
+        window.location.href = `${url}${join}flow=redirect`;
     }
 }
 
