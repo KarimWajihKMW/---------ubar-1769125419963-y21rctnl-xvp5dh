@@ -7353,6 +7353,33 @@ function isOAuthConfigured(provider, req) {
     return Boolean(cfg?.clientId && cfg?.clientSecret && cfg?.redirectUri);
 }
 
+function oauthMissingParts(provider, req) {
+    const p = String(provider || '').toLowerCase();
+    const cfg = getOAuthProviderConfig(p, req);
+    if (!cfg) return { supported: false, missing: ['unsupported_provider'] };
+
+    const missing = [];
+    if (!cfg.clientId) missing.push(`${p.toUpperCase()}_OAUTH_CLIENT_ID`);
+
+    // Apple secret can be either static secret or generated from team/key/private_key
+    if (p === 'apple') {
+        const hasStatic = Boolean(process.env.APPLE_OAUTH_CLIENT_SECRET && String(process.env.APPLE_OAUTH_CLIENT_SECRET).trim());
+        const hasGen = Boolean(
+            (process.env.APPLE_OAUTH_TEAM_ID || process.env.APPLE_TEAM_ID) &&
+            (process.env.APPLE_OAUTH_KEY_ID || process.env.APPLE_KEY_ID) &&
+            (process.env.APPLE_OAUTH_PRIVATE_KEY || process.env.APPLE_PRIVATE_KEY)
+        );
+        if (!hasStatic && !hasGen) {
+            missing.push('APPLE_OAUTH_CLIENT_SECRET (or APPLE_OAUTH_TEAM_ID + APPLE_OAUTH_KEY_ID + APPLE_OAUTH_PRIVATE_KEY)');
+        }
+    } else {
+        if (!cfg.clientSecret) missing.push(`${p.toUpperCase()}_OAUTH_CLIENT_SECRET`);
+    }
+
+    if (!cfg.redirectUri) missing.push(`${p.toUpperCase()}_OAUTH_REDIRECT_URI or PUBLIC_BASE_URL`);
+    return { supported: true, missing };
+}
+
 const oauthClientPromises = new Map();
 async function getOAuthClient(provider, req) {
     const p = String(provider || '').toLowerCase();
@@ -7681,6 +7708,21 @@ app.get('/api/oauth/apple/login', (req, res) => oauthStartLogin('apple', req, re
 app.get('/api/oauth/apple/callback', (req, res) => oauthCallback('apple', req, res));
 app.post('/api/oauth/apple/callback', (req, res) => oauthCallback('apple', req, res));
 app.post('/api/oauth/apple/link', requireAuth, (req, res) => oauthStartLink('apple', req, res));
+
+// Config status helper for UI/debugging
+app.get('/api/oauth/:provider/status', (req, res) => {
+    try {
+        const provider = String(req.params.provider || '').toLowerCase();
+        const info = oauthMissingParts(provider, req);
+        if (!info.supported) {
+            return res.status(400).json({ success: false, error: 'unsupported_provider' });
+        }
+        const configured = info.missing.length === 0;
+        return res.json({ success: true, provider, configured, missing: info.missing });
+    } catch (e) {
+        return res.status(500).json({ success: false, error: e.message });
+    }
+});
 
 // Login with email and password
 app.post('/api/auth/login', async (req, res) => {

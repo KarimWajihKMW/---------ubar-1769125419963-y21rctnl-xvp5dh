@@ -4030,10 +4030,29 @@ function openOauthPopup(url) {
     }
 }
 
-window.oauthLogin = function(provider) {
+window.oauthLogin = async function(provider) {
     const p = String(provider || '').toLowerCase();
     if (!p) return;
     showToast('⏳ جاري فتح تسجيل OAuth...');
+
+    try {
+        const statusRes = await fetch(`/api/oauth/${encodeURIComponent(p)}/status`, { method: 'GET' });
+        const statusData = await statusRes.json().catch(() => ({}));
+        if (!statusRes.ok || !statusData.success) {
+            showToast('❌ OAuth: تعذر التحقق من الإعدادات');
+            openOauthPopup(`/api/oauth/${encodeURIComponent(p)}/login`);
+            return;
+        }
+        if (!statusData.configured) {
+            const missing = Array.isArray(statusData.missing) ? statusData.missing : [];
+            const msg = missing.length ? `⚠️ OAuth غير مُعد: ${missing.join(' , ')}` : '⚠️ OAuth غير مُعد';
+            showToast(msg, 6000);
+            return;
+        }
+    } catch (e) {
+        // If status endpoint fails, still try login.
+    }
+
     openOauthPopup(`/api/oauth/${encodeURIComponent(p)}/login`);
 };
 
