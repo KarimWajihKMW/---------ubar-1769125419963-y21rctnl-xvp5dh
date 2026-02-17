@@ -3296,10 +3296,25 @@ app.get('/api/support/me/tickets', requireRole('passenger', 'admin'), async (req
         const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
         const result = await pool.query(
-            `SELECT *
-             FROM support_tickets
-             WHERE user_id = $1
-             ORDER BY created_at DESC
+            `SELECT st.*,
+                    u.name AS user_name,
+                    u.phone AS user_phone,
+                    CASE
+                        WHEN COALESCE(pv.status, '') = 'approved' THEN 'strong'
+                        WHEN u.email_verified_at IS NOT NULL AND u.phone_verified_at IS NOT NULL THEN 'basic'
+                        ELSE 'none'
+                    END AS verified_level
+             FROM support_tickets st
+             LEFT JOIN users u ON u.id = st.user_id
+             LEFT JOIN LATERAL (
+                 SELECT status
+                 FROM passenger_verifications
+                 WHERE user_id = st.user_id
+                 ORDER BY submitted_at DESC
+                 LIMIT 1
+             ) pv ON true
+             WHERE st.user_id = $1
+             ORDER BY st.created_at DESC
              LIMIT 100`,
             [userId]
         );
@@ -3319,10 +3334,26 @@ app.get('/api/admin/support/tickets', requireRole('admin'), async (req, res) => 
             where = `WHERE status = $${params.length}`;
         }
         const result = await pool.query(
-            `SELECT *
-             FROM support_tickets
+            `SELECT st.*,
+                    u.name AS user_name,
+                    u.phone AS user_phone,
+                    u.email AS user_email,
+                    CASE
+                        WHEN COALESCE(pv.status, '') = 'approved' THEN 'strong'
+                        WHEN u.email_verified_at IS NOT NULL AND u.phone_verified_at IS NOT NULL THEN 'basic'
+                        ELSE 'none'
+                    END AS verified_level
+             FROM support_tickets st
+             LEFT JOIN users u ON u.id = st.user_id
+             LEFT JOIN LATERAL (
+                 SELECT status
+                 FROM passenger_verifications
+                 WHERE user_id = st.user_id
+                 ORDER BY submitted_at DESC
+                 LIMIT 1
+             ) pv ON true
              ${where}
-             ORDER BY created_at DESC
+             ORDER BY st.created_at DESC
              LIMIT 200`,
             params
         );
@@ -7487,10 +7518,22 @@ app.get('/api/pending-rides/:request_id', requireAuth, async (req, res) => {
                 pr.*,
                 u.name as user_name,
                 u.phone as user_phone,
+                CASE
+                    WHEN COALESCE(pv.status, '') = 'approved' THEN 'strong'
+                    WHEN u.email_verified_at IS NOT NULL AND u.phone_verified_at IS NOT NULL THEN 'basic'
+                    ELSE 'none'
+                END AS passenger_verified_level,
                 d.name as assigned_driver_name,
                 d.phone as assigned_driver_phone
             FROM pending_ride_requests pr
             LEFT JOIN users u ON pr.user_id = u.id
+            LEFT JOIN LATERAL (
+                SELECT status
+                FROM passenger_verifications
+                WHERE user_id = u.id
+                ORDER BY submitted_at DESC
+                LIMIT 1
+            ) pv ON true
             LEFT JOIN drivers d ON pr.assigned_driver_id = d.id
             WHERE pr.request_id = $1
         `, [request_id]);
@@ -7793,6 +7836,11 @@ app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'),
                 pr.*,
                 u.name as user_name,
                 u.phone as user_phone,
+                CASE
+                    WHEN COALESCE(pv.status, '') = 'approved' THEN 'strong'
+                    WHEN u.email_verified_at IS NOT NULL AND u.phone_verified_at IS NOT NULL THEN 'basic'
+                    ELSE 'none'
+                END AS passenger_verified_level,
                 t.id as trip_ref,
                 (6371 * acos(
                     cos(radians($2)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($3)) +
@@ -7800,6 +7848,13 @@ app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'),
                 )) AS distance_km
             FROM pending_ride_requests pr
             LEFT JOIN users u ON pr.user_id = u.id
+            LEFT JOIN LATERAL (
+                SELECT status
+                FROM passenger_verifications
+                WHERE user_id = u.id
+                ORDER BY submitted_at DESC
+                LIMIT 1
+            ) pv ON true
             INNER JOIN trips t ON t.id = pr.trip_id
             WHERE pr.status = 'waiting'
                 AND pr.source = 'passenger_app'

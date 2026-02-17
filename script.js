@@ -5454,7 +5454,8 @@ function normalizeDriverIncomingRequest(rawRequest) {
         cost: rawRequest.estimated_cost ?? rawRequest.cost ?? 0,
         distance: rawRequest.estimated_distance ?? rawRequest.distance ?? '-',
         passenger_name: rawRequest.passenger_name || rawRequest.user_name || 'راكب جديد',
-        passenger_phone: rawRequest.passenger_phone || rawRequest.user_phone || null
+        passenger_phone: rawRequest.passenger_phone || rawRequest.user_phone || null,
+        passenger_verified_level: rawRequest.passenger_verified_level || rawRequest.verified_level || 'none'
     };
 }
 
@@ -5576,6 +5577,7 @@ function renderDriverIncomingTrip(trip, nearbyCount = 0) {
     const priceEl = document.getElementById('driver-request-price');
     const distanceEl = document.getElementById('driver-request-distance');
     const passengerEl = document.getElementById('driver-request-passenger');
+    const passengerVerifiedEl = document.getElementById('driver-request-passenger-verified');
     const carTypeEl = document.getElementById('driver-request-car-type');
     const tripIdEl = document.getElementById('driver-request-trip-id');
     const countEl = document.getElementById('driver-request-nearby-count');
@@ -5586,6 +5588,22 @@ function renderDriverIncomingTrip(trip, nearbyCount = 0) {
     if (priceEl) priceEl.innerText = trip.cost || '0';
     if (distanceEl) distanceEl.innerText = trip.distance || '-';
     if (passengerEl) passengerEl.innerText = trip.passenger_name || 'راكب جديد';
+
+    if (passengerVerifiedEl) {
+        const lvl = String(trip.passenger_verified_level || 'none').toLowerCase();
+        if (lvl === 'strong') {
+            passengerVerifiedEl.textContent = 'Strong ✅';
+            passengerVerifiedEl.className = 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700';
+            passengerVerifiedEl.classList.remove('hidden');
+        } else if (lvl === 'basic') {
+            passengerVerifiedEl.textContent = 'Basic ✅';
+            passengerVerifiedEl.className = 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700';
+            passengerVerifiedEl.classList.remove('hidden');
+        } else {
+            passengerVerifiedEl.textContent = '';
+            passengerVerifiedEl.classList.add('hidden');
+        }
+    }
     if (carTypeEl) carTypeEl.innerText = trip.car_type || 'اقتصادي';
     if (countEl) {
         countEl.innerText = nearbyCount > 1 ? `طلبات قريبة: ${nearbyCount}` : '';

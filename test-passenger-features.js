@@ -373,6 +373,18 @@ async function run() {
   });
   if (!assignTrip.res.ok) throw new Error(`Assign main trip failed: ${assignTrip.data.error || assignTrip.res.status}`);
 
+  // Driver feed should include verification level
+  const driverFeed = await jsonFetch(`${baseURL}/drivers/${encodeURIComponent(driverId)}/pending-rides?max_distance=30`, {
+    headers: adminHeaders
+  });
+  if (!driverFeed.res.ok) throw new Error(`Driver pending rides feed failed: ${driverFeed.data.error || driverFeed.res.status}`);
+  if (driverFeed.data.data.length > 0) {
+    const first = driverFeed.data.data[0];
+    if (!('passenger_verified_level' in first)) {
+      throw new Error('Driver feed missing passenger_verified_level');
+    }
+  }
+
   const handshake = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/pickup-handshake`, { headers: p1Headers });
   if (!handshake.res.ok) throw new Error(`Pickup handshake GET failed: ${handshake.data.error || handshake.res.status}`);
   const code = handshake.data.data.pickup_phrase;
