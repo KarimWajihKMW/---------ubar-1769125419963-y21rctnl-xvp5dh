@@ -96,6 +96,33 @@
 
 ---
 
+## 4.1) حالة التنفيذ في الريبو الحالي (موجود بالفعل)
+
+> ملحوظة: الجزء ده للتوثيق السريع “إيه اتعمل فعلاً” علشان ما نعيدش اقتراح حاجة اتنفّذت.
+
+- ✅ Endpoint: `GET /api/trips/:id/safety/capsule`
+- ✅ Socket.IO: أحداث `pending_request_update` و `trip_assigned` للـLive Match Timeline
+- ✅ UI minimal لتقرير الأمان داخل شاشة تفاصيل الرحلة (زر + share link + timeline)
+- ✅ تجميع البيانات من: `trips.pickup_verified_at/pickup_verified_by` + `trip_safety_events` + `trip_guardian_checkins` + `trip_route_deviation_configs` + `trip_shares`
+
+---
+
+## 4.2) اقتراحات إضافية سريعة (Low effort / High impact)
+
+1) **Timeline event codes بدل النص**
+- بدل ما السيرفر يبعت نصوص فقط، يبعت `event_code` ثابت + بيانات بسيطة؛ والـUI تعمل ترجمة/عرض عربي حسب الحالة.
+
+2) **Redaction حسب الدور**
+- نفس Endpoint يرجع بيانات “مخففة” للراكب (بدون أي identifiers حساسة) وبيانات أوسع للـAdmin/Support.
+
+3) **Export / Copy capsule**
+- زر صغير داخل نفس القسم: “نسخ تقرير الأمان” (JSON مختصر أو نص منسّق) للمشاركة مع الدعم.
+
+4) **Capsule snapshot عند اكتمال الرحلة**
+- تخزين Snapshot مختصر (أو hash) عند `completed` لتسهيل دعم الشكاوى (بدون بناء نظام معقد).
+
+---
+
 ## 5) Checklist للاختبار قبل أي Commit
 
 ### Tests (API)
