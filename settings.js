@@ -163,6 +163,377 @@ async function apiJson(path, options = {}) {
     return { res, data };
 }
 
+// ==================== Captain-only (Driver) Settings ====================
+
+let cachedAuthMe = null;
+async function getAuthMe() {
+    if (cachedAuthMe) return cachedAuthMe;
+    if (!getToken()) return null;
+    const { res, data } = await apiJson('/api/auth/me');
+    if (!res.ok || !data.success) return null;
+    cachedAuthMe = data;
+    return cachedAuthMe;
+}
+
+async function getDriverIdFromAuth() {
+    const me = await getAuthMe();
+    const driverId = me?.auth?.driver_id;
+    const n = driverId !== undefined && driverId !== null ? Number(driverId) : null;
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function setStatus(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text || '';
+}
+
+function parseJsonTextarea(id) {
+    const el = document.getElementById(id);
+    if (!el) return { ok: true, value: null };
+    const raw = String(el.value || '').trim();
+    if (!raw) return { ok: true, value: null };
+    try {
+        return { ok: true, value: JSON.parse(raw) };
+    } catch (e) {
+        return { ok: false, value: null, error: 'invalid_json' };
+    }
+}
+
+function setJsonTextarea(id, obj) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (obj === undefined || obj === null || obj === '') {
+        el.value = '';
+        return;
+    }
+    try {
+        el.value = JSON.stringify(obj);
+    } catch (e) {
+        el.value = '';
+    }
+}
+
+async function loadCaptainAcceptanceRules() {
+    const statusId = 'cap-rules-status';
+    const minFareEl = document.getElementById('cap-min-fare');
+    const maxPickupEl = document.getElementById('cap-max-pickup-km');
+    if (!minFareEl || !maxPickupEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول ككابتن لعرض/حفظ القواعد.');
+        return;
+    }
+
+    setStatus(statusId, 'جاري التحميل...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/acceptance-rules`);
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر تحميل القواعد.');
+        return;
+    }
+
+    const row = data.data || null;
+    minFareEl.value = row && row.min_fare !== null && row.min_fare !== undefined ? String(row.min_fare) : '';
+    maxPickupEl.value = row && row.max_pickup_distance_km !== null && row.max_pickup_distance_km !== undefined ? String(row.max_pickup_distance_km) : '';
+    setJsonTextarea('cap-excluded-zones', row ? row.excluded_zones_json : null);
+    setJsonTextarea('cap-preferred-axis', row ? row.preferred_axis_json : null);
+    setStatus(statusId, 'تم تحميل القواعد.');
+}
+
+async function saveCaptainAcceptanceRules() {
+    const statusId = 'cap-rules-status';
+    const minFareEl = document.getElementById('cap-min-fare');
+    const maxPickupEl = document.getElementById('cap-max-pickup-km');
+    if (!minFareEl || !maxPickupEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول أولاً.');
+        return;
+    }
+
+    const minFare = minFareEl.value !== '' ? Number(minFareEl.value) : null;
+    const maxPickup = maxPickupEl.value !== '' ? Number(maxPickupEl.value) : null;
+    const excluded = parseJsonTextarea('cap-excluded-zones');
+    if (!excluded.ok) {
+        setStatus(statusId, 'صيغة JSON لاستبعاد المناطق غير صحيحة.');
+        return;
+    }
+    const axis = parseJsonTextarea('cap-preferred-axis');
+    if (!axis.ok) {
+        setStatus(statusId, 'صيغة JSON لتفضيل الاتجاه غير صحيحة.');
+        return;
+    }
+
+    const payload = {
+        min_fare: Number.isFinite(minFare) ? minFare : null,
+        max_pickup_distance_km: Number.isFinite(maxPickup) ? maxPickup : null,
+        excluded_zones_json: excluded.value,
+        preferred_axis_json: axis.value
+    };
+
+    setStatus(statusId, 'جاري الحفظ...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/acceptance-rules`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر حفظ القواعد.');
+        return;
+    }
+    setStatus(statusId, '✅ تم حفظ القواعد.');
+}
+
+async function loadCaptainGoHome() {
+    const statusId = 'cap-gohome-status';
+    const enabledEl = document.getElementById('cap-gohome-enabled');
+    const latEl = document.getElementById('cap-home-lat');
+    const lngEl = document.getElementById('cap-home-lng');
+    const detourEl = document.getElementById('cap-gohome-detour');
+    if (!enabledEl || !latEl || !lngEl || !detourEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول ككابتن لعرض/حفظ راجع البيت.');
+        return;
+    }
+
+    setStatus(statusId, 'جاري التحميل...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/go-home`);
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر تحميل راجع البيت.');
+        return;
+    }
+
+    const row = data.data || null;
+    enabledEl.checked = row ? !!row.enabled : false;
+    latEl.value = row && row.home_lat !== null && row.home_lat !== undefined ? String(row.home_lat) : '';
+    lngEl.value = row && row.home_lng !== null && row.home_lng !== undefined ? String(row.home_lng) : '';
+    detourEl.value = row && row.max_detour_km !== null && row.max_detour_km !== undefined ? String(row.max_detour_km) : '2';
+    setStatus(statusId, 'تم تحميل راجع البيت.');
+}
+
+async function saveCaptainGoHome() {
+    const statusId = 'cap-gohome-status';
+    const enabledEl = document.getElementById('cap-gohome-enabled');
+    const latEl = document.getElementById('cap-home-lat');
+    const lngEl = document.getElementById('cap-home-lng');
+    const detourEl = document.getElementById('cap-gohome-detour');
+    if (!enabledEl || !latEl || !lngEl || !detourEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول أولاً.');
+        return;
+    }
+
+    const payload = {
+        enabled: !!enabledEl.checked,
+        home_lat: latEl.value !== '' ? Number(latEl.value) : null,
+        home_lng: lngEl.value !== '' ? Number(lngEl.value) : null,
+        max_detour_km: detourEl.value !== '' ? Number(detourEl.value) : null
+    };
+
+    setStatus(statusId, 'جاري الحفظ...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/go-home`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر حفظ راجع البيت.');
+        return;
+    }
+    setStatus(statusId, '✅ تم حفظ راجع البيت.');
+}
+
+async function loadCaptainGoals() {
+    const statusId = 'cap-goals-status';
+    const dailyEl = document.getElementById('cap-goal-daily');
+    const weeklyEl = document.getElementById('cap-goal-weekly');
+    if (!dailyEl || !weeklyEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول ككابتن لعرض/حفظ الأهداف.');
+        return;
+    }
+
+    setStatus(statusId, 'جاري التحميل...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/goals`);
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر تحميل الأهداف.');
+        return;
+    }
+
+    const row = data.data || null;
+    dailyEl.value = row && row.daily_target !== null && row.daily_target !== undefined ? String(row.daily_target) : '';
+    weeklyEl.value = row && row.weekly_target !== null && row.weekly_target !== undefined ? String(row.weekly_target) : '';
+    setStatus(statusId, 'تم تحميل الأهداف.');
+}
+
+async function saveCaptainGoals() {
+    const statusId = 'cap-goals-status';
+    const dailyEl = document.getElementById('cap-goal-daily');
+    const weeklyEl = document.getElementById('cap-goal-weekly');
+    if (!dailyEl || !weeklyEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول أولاً.');
+        return;
+    }
+
+    const payload = {
+        daily_target: dailyEl.value !== '' ? Number(dailyEl.value) : null,
+        weekly_target: weeklyEl.value !== '' ? Number(weeklyEl.value) : null
+    };
+
+    setStatus(statusId, 'جاري الحفظ...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/goals`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر حفظ الأهداف.');
+        return;
+    }
+    setStatus(statusId, '✅ تم حفظ الأهداف.');
+}
+
+async function loadCaptainFatigue() {
+    const statusId = 'cap-fatigue-status';
+    const enabledEl = document.getElementById('cap-fatigue-enabled');
+    const limitEl = document.getElementById('cap-fatigue-limit');
+    if (!enabledEl || !limitEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول ككابتن لعرض/حفظ مدير الإرهاق.');
+        return;
+    }
+
+    setStatus(statusId, 'جاري التحميل...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/fatigue/today`);
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر تحميل مدير الإرهاق.');
+        return;
+    }
+
+    const row = data.data || null;
+    enabledEl.checked = row ? !!row.enabled : true;
+    limitEl.value = row && row.safe_limit_minutes !== null && row.safe_limit_minutes !== undefined ? String(row.safe_limit_minutes) : '480';
+    setStatus(statusId, 'تم تحميل مدير الإرهاق.');
+}
+
+async function saveCaptainFatigue() {
+    const statusId = 'cap-fatigue-status';
+    const enabledEl = document.getElementById('cap-fatigue-enabled');
+    const limitEl = document.getElementById('cap-fatigue-limit');
+    if (!enabledEl || !limitEl) return;
+
+    const driverId = await getDriverIdFromAuth();
+    if (!driverId) {
+        setStatus(statusId, 'سجّل الدخول أولاً.');
+        return;
+    }
+
+    const payload = {
+        enabled: !!enabledEl.checked,
+        safe_limit_minutes: limitEl.value !== '' ? Number(limitEl.value) : null
+    };
+
+    setStatus(statusId, 'جاري الحفظ...');
+    const { res, data } = await apiJson(`/api/drivers/${encodeURIComponent(String(driverId))}/captain/fatigue/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر حفظ مدير الإرهاق.');
+        return;
+    }
+    setStatus(statusId, '✅ تم حفظ مدير الإرهاق.');
+}
+
+function setDriverEmergencyInputsEnabled(enabled) {
+    const ids = ['cap-em-name', 'cap-em-channel', 'cap-em-value', 'cap-em-med'];
+    ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !enabled;
+    });
+}
+
+async function loadDriverEmergencyProfile() {
+    const statusId = 'cap-emergency-status';
+    const optEl = document.getElementById('cap-em-opt-in');
+    const nameEl = document.getElementById('cap-em-name');
+    const chanEl = document.getElementById('cap-em-channel');
+    const valEl = document.getElementById('cap-em-value');
+    const medEl = document.getElementById('cap-em-med');
+    if (!optEl || !nameEl || !chanEl || !valEl || !medEl) return;
+
+    if (!getToken()) {
+        setDriverEmergencyInputsEnabled(false);
+        setStatus(statusId, 'سجّل الدخول ككابتن لعرض/حفظ جهة الطوارئ.');
+        return;
+    }
+
+    setStatus(statusId, 'جاري التحميل...');
+    const { res, data } = await apiJson('/api/drivers/me/emergency-profile');
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر تحميل جهة الطوارئ.');
+        return;
+    }
+
+    const row = data.data || null;
+    optEl.checked = row ? !!row.opt_in : false;
+    nameEl.value = row?.contact_name ? String(row.contact_name) : '';
+    chanEl.value = row?.contact_channel ? String(row.contact_channel) : 'phone';
+    valEl.value = row?.contact_value ? String(row.contact_value) : '';
+    medEl.value = row?.medical_note ? String(row.medical_note) : '';
+    setDriverEmergencyInputsEnabled(!!optEl.checked);
+    setStatus(statusId, 'تم تحميل جهة الطوارئ.');
+}
+
+async function saveDriverEmergencyProfile() {
+    const statusId = 'cap-emergency-status';
+    const optEl = document.getElementById('cap-em-opt-in');
+    const nameEl = document.getElementById('cap-em-name');
+    const chanEl = document.getElementById('cap-em-channel');
+    const valEl = document.getElementById('cap-em-value');
+    const medEl = document.getElementById('cap-em-med');
+    if (!optEl || !nameEl || !chanEl || !valEl || !medEl) return;
+
+    if (!getToken()) {
+        setStatus(statusId, 'سجّل الدخول أولاً.');
+        return;
+    }
+
+    const payload = {
+        opt_in: !!optEl.checked,
+        contact_name: nameEl.value ? String(nameEl.value) : null,
+        contact_channel: chanEl.value ? String(chanEl.value) : 'phone',
+        contact_value: valEl.value ? String(valEl.value) : null,
+        medical_note: medEl.value ? String(medEl.value) : null
+    };
+
+    setStatus(statusId, 'جاري الحفظ...');
+    const { res, data } = await apiJson('/api/drivers/me/emergency-profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok || !data.success) {
+        setStatus(statusId, 'تعذر حفظ جهة الطوارئ.');
+        return;
+    }
+    setDriverEmergencyInputsEnabled(!!optEl.checked);
+    setStatus(statusId, '✅ تم حفظ جهة الطوارئ.');
+}
+
 async function loadBudgetEnvelope() {
     const enabledEl = document.getElementById('budget-enabled');
     const dailyEl = document.getElementById('budget-daily');
@@ -691,6 +1062,28 @@ window.addEventListener('DOMContentLoaded', () => {
     if (emOpt) emOpt.addEventListener('change', () => {
         setEmergencyInputsEnabled(!!emOpt.checked);
     });
+
+    // Captain-only (Driver) settings
+    if (ROLE === 'driver') {
+        loadCaptainAcceptanceRules().catch(() => {});
+        loadCaptainGoHome().catch(() => {});
+        loadCaptainGoals().catch(() => {});
+        loadCaptainFatigue().catch(() => {});
+        loadDriverEmergencyProfile().catch(() => {});
+
+        const saveRules = document.getElementById('cap-save-rules');
+        if (saveRules) saveRules.addEventListener('click', () => { saveCaptainAcceptanceRules().catch(() => {}); });
+        const saveGoHome = document.getElementById('cap-save-gohome');
+        if (saveGoHome) saveGoHome.addEventListener('click', () => { saveCaptainGoHome().catch(() => {}); });
+        const saveGoals = document.getElementById('cap-save-goals');
+        if (saveGoals) saveGoals.addEventListener('click', () => { saveCaptainGoals().catch(() => {}); });
+        const saveFatigue = document.getElementById('cap-save-fatigue');
+        if (saveFatigue) saveFatigue.addEventListener('click', () => { saveCaptainFatigue().catch(() => {}); });
+        const saveEm = document.getElementById('cap-save-emergency');
+        if (saveEm) saveEm.addEventListener('click', () => { saveDriverEmergencyProfile().catch(() => {}); });
+        const opt = document.getElementById('cap-em-opt-in');
+        if (opt) opt.addEventListener('change', () => { setDriverEmergencyInputsEnabled(!!opt.checked); });
+    }
 
     // v3 Saved Places
     loadSavedPlacesUI().catch(() => {});

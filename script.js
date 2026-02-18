@@ -201,6 +201,12 @@ let driverTripStartedAt = null;
 let lastDriverLocationUpdateAt = 0;
 let nearestDriverPreview = null;
 
+// Captain-only: encrypted audio recording (client-side)
+let driverAudioRecorder = null;
+let driverAudioStream = null;
+let driverAudioChunks = [];
+let driverAudioRecording = false;
+
 // Passenger live tracking (real trip mode)
 let passengerLiveTrackingInterval = null;
 let passengerLiveTrackingTripId = null;
@@ -5270,6 +5276,8 @@ window.driverAcceptRequest = async function() {
         setDriverStartReady(false);
         setDriverTripStarted(false);
 
+        try { refreshDriverFatigueBadge(); } catch (e) {}
+
         const pickupLat = currentIncomingTrip.pickup_lat;
         const pickupLng = currentIncomingTrip.pickup_lng;
         if (pickupLat !== undefined && pickupLat !== null && pickupLng !== undefined && pickupLng !== null) {
@@ -6368,7 +6376,11 @@ function normalizeDriverIncomingRequest(rawRequest) {
         distance: rawRequest.estimated_distance ?? rawRequest.distance ?? '-',
         passenger_name: rawRequest.passenger_name || rawRequest.user_name || 'راكب جديد',
         passenger_phone: rawRequest.passenger_phone || rawRequest.user_phone || null,
-        passenger_verified_level: rawRequest.passenger_verified_level || rawRequest.verified_level || 'none'
+        passenger_verified_level: rawRequest.passenger_verified_level || rawRequest.verified_level || 'none',
+        is_favorite: !!rawRequest.is_favorite,
+        captain_profitability: rawRequest.captain_profitability || null,
+        captain_risk: rawRequest.captain_risk || null,
+        captain_go_home: rawRequest.captain_go_home || null
     };
 }
 
@@ -6522,6 +6534,12 @@ function renderDriverIncomingTrip(trip, nearbyCount = 0) {
         countEl.innerText = nearbyCount > 1 ? `طلبات قريبة: ${nearbyCount}` : '';
     }
 
+    try {
+        updateDriverRequestInsights(trip);
+    } catch (e) {
+        // ignore
+    }
+
     if (trip.pickup_lat !== undefined && trip.pickup_lat !== null && trip.pickup_lng !== undefined && trip.pickup_lng !== null) {
         setPassengerPickup({
             lat: Number(trip.pickup_lat),
@@ -6535,6 +6553,367 @@ function renderDriverIncomingTrip(trip, nearbyCount = 0) {
         startDriverIncomingTripLiveUpdates(trip.request_id);
     }
     setDriverPanelVisible(true);
+}
+
+function setBadge(el, { text, className, hidden }) {
+    if (!el) return;
+    if (hidden) {
+        el.textContent = '';
+        el.classList.add('hidden');
+        return;
+    }
+    el.textContent = text;
+    el.className = className;
+    el.classList.remove('hidden');
+}
+
+function updateDriverRequestInsights(trip) {
+    const profitEl = document.getElementById('driver-request-profit-badge');
+    const riskEl = document.getElementById('driver-request-risk-badge');
+    const goHomeEl = document.getElementById('driver-request-gohome-badge');
+    const favBtn = document.getElementById('driver-favorite-btn');
+
+    const profit = trip?.captain_profitability || null;
+    const profitLevel = String(profit?.level || '').toLowerCase();
+    if (profitLevel === 'good') {
+        setBadge(profitEl, {
+            text: `✅ ربحية مناسبة${Number.isFinite(profit.score) ? ` (${profit.score}/د)` : ''}`,
+            className: 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700'
+        });
+    } else if (profitLevel === 'medium') {
+        setBadge(profitEl, {
+            text: `➖ ربحية متوسطة${Number.isFinite(profit.score) ? ` (${profit.score}/د)` : ''}`,
+            className: 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700'
+        });
+    } else if (profitLevel === 'bad') {
+        setBadge(profitEl, {
+            text: `⚠️ غير مربحة غالبًا${Number.isFinite(profit.score) ? ` (${profit.score}/د)` : ''}`,
+            className: 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-red-200 bg-red-50 text-red-700'
+        });
+    } else {
+        setBadge(profitEl, { hidden: true });
+    }
+
+    const risk = trip?.captain_risk || null;
+    const riskLevel = String(risk?.level || '').toLowerCase();
+    if (riskLevel === 'high') {
+        setBadge(riskEl, {
+            text: '🚨 مخاطر أعلى',
+            className: 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-red-200 bg-red-50 text-red-700'
+        });
+    } else if (riskLevel === 'medium') {
+        setBadge(riskEl, {
+            text: '⚠️ مخاطر متوسطة',
+            className: 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700'
+        });
+    } else if (riskLevel === 'low') {
+        setBadge(riskEl, {
+            text: '🟢 مخاطر أقل',
+            className: 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700'
+        });
+    } else {
+        setBadge(riskEl, { hidden: true });
+    }
+
+    const gh = trip?.captain_go_home || null;
+    if (gh && gh.enabled) {
+        const km = gh.dropoff_to_home_km;
+        setBadge(goHomeEl, {
+            text: `🏠 راجع البيت${Number.isFinite(km) ? ` (${km} كم)` : ''}`,
+            className: 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700'
+        });
+    } else {
+        setBadge(goHomeEl, { hidden: true });
+    }
+
+    if (favBtn) {
+        favBtn.textContent = trip?.is_favorite ? '⭐ عميل مفضل (إزالة)' : '⭐ عميل مفضل';
+    }
+}
+
+window.driverToggleFavoritePassenger = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!currentDriverProfile?.id) return;
+        if (!currentIncomingTrip?.user_id) {
+            showToast('لا توجد بيانات راكب');
+            return;
+        }
+
+        const userId = Number(currentIncomingTrip.user_id);
+        if (!Number.isFinite(userId) || userId <= 0) {
+            showToast('لا توجد بيانات راكب');
+            return;
+        }
+
+        if (currentIncomingTrip.is_favorite) {
+            await ApiService.captain.removeFavorite(currentDriverProfile.id, userId);
+            currentIncomingTrip.is_favorite = false;
+            updateDriverRequestInsights(currentIncomingTrip);
+            showToast('تمت الإزالة من العملاء المفضلين');
+            return;
+        }
+
+        await ApiService.captain.addFavorite(currentDriverProfile.id, userId);
+        currentIncomingTrip.is_favorite = true;
+        updateDriverRequestInsights(currentIncomingTrip);
+        showToast('✅ تم الإضافة كعميل مفضل');
+    } catch (e) {
+        const msg = String(e?.message || 'تعذر تنفيذ العملية');
+        if (msg.includes('favorite_requires_completed_trip')) {
+            showToast('لازم تكون عملت رحلة مكتملة مع الراكب قبل كده');
+            return;
+        }
+        console.error(e);
+        showToast('تعذر تحديث العميل المفضل');
+    }
+};
+
+window.driverQuickRoadReport = async function(reportType) {
+    try {
+        if (currentUserRole !== 'driver') return;
+        const loc = driverLocation || getDriverBaseLocation();
+        if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) {
+            showToast('فعّل الموقع أولاً');
+            return;
+        }
+
+        await ApiService.captain.createRoadReport({
+            report_type: String(reportType || 'traffic'),
+            lat: Number(loc.lat),
+            lng: Number(loc.lng),
+            ttl_minutes: 60
+        });
+        showToast('✅ تم إرسال البلاغ');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر إرسال البلاغ');
+    }
+};
+
+window.driverStopReceiving = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        await ApiService.captain.stopReceiving();
+        showToast('تم إيقاف الاستقبال');
+        // Hide panels to avoid confusion
+        showDriverWaitingState();
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر إيقاف الاستقبال');
+    }
+};
+
+window.driverSOS = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        const ok = window.confirm('🆘 هل تريد تفعيل SOS؟ سيتم إيقاف استقبال الرحلات فورًا.');
+        if (!ok) return;
+
+        const loc = driverLocation || getDriverBaseLocation();
+        const payload = {
+            lat: loc && Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : null,
+            lng: loc && Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : null,
+            trip_id: activeDriverTripId || null,
+            message: 'SOS'
+        };
+        await ApiService.captain.sos(payload);
+        showToast('🆘 تم تفعيل SOS');
+        showDriverWaitingState();
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تفعيل SOS');
+    }
+};
+
+window.driverWaitingArrive = async function() {
+    try {
+        if (!activeDriverTripId) {
+            showToast('لا توجد رحلة نشطة');
+            return;
+        }
+        const loc = driverLocation || getDriverBaseLocation();
+        if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) {
+            showToast('فعّل الموقع أولاً');
+            return;
+        }
+        await ApiService.captain.waitingArrive(activeDriverTripId, { lat: Number(loc.lat), lng: Number(loc.lng) });
+        showToast('✅ تم توثيق الوصول');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر توثيق الوصول');
+    }
+};
+
+window.driverWaitingEnd = async function() {
+    try {
+        if (!activeDriverTripId) {
+            showToast('لا توجد رحلة نشطة');
+            return;
+        }
+        await ApiService.captain.waitingEnd(activeDriverTripId);
+        showToast('✅ تم توثيق انتهاء الانتظار');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر إنهاء توثيق الانتظار');
+    }
+};
+
+async function driverEnsureAudioRecorder() {
+    if (driverAudioRecorder) return true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('المتصفح لا يدعم التسجيل الصوتي');
+        return false;
+    }
+    try {
+        driverAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        driverAudioChunks = [];
+        driverAudioRecorder = new MediaRecorder(driverAudioStream, { mimeType: 'audio/webm' });
+        driverAudioRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size) driverAudioChunks.push(e.data);
+        };
+        driverAudioRecorder.onstop = async () => {
+            try {
+                const blob = new Blob(driverAudioChunks, { type: 'audio/webm' });
+                driverAudioChunks = [];
+                if (!activeDriverTripId) {
+                    showToast('لا توجد رحلة نشطة لرفع التسجيل');
+                    return;
+                }
+                showToast('⏳ جاري رفع التسجيل...');
+                await ApiService.captain.uploadTripAudio(activeDriverTripId, blob, blob.type);
+                showToast('✅ تم حفظ التسجيل (مشفّر)');
+            } catch (e) {
+                console.error(e);
+                showToast('تعذر رفع التسجيل');
+            }
+        };
+        return true;
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر الوصول للميكروفون');
+        return false;
+    }
+}
+
+window.driverToggleAudioRecording = async function() {
+    try {
+        if (!activeDriverTripId) {
+            showToast('التسجيل متاح داخل الرحلة فقط');
+            return;
+        }
+
+        const btn = document.getElementById('driver-audio-record-btn');
+        if (!driverAudioRecording) {
+            const ok = await driverEnsureAudioRecorder();
+            if (!ok) return;
+            driverAudioRecorder.start();
+            driverAudioRecording = true;
+            if (btn) btn.textContent = '⏹️ إيقاف التسجيل';
+            showToast('🎙️ بدأ التسجيل');
+            return;
+        }
+
+        driverAudioRecorder.stop();
+        driverAudioRecording = false;
+        if (btn) btn.textContent = '🎙️ تسجيل صوتي';
+        showToast('⏹️ تم إيقاف التسجيل');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تشغيل/إيقاف التسجيل');
+    }
+};
+
+window.driverSuggestNextTrip = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!currentDriverProfile?.id) return;
+        const resp = await ApiService.captain.nextTripSuggestion(currentDriverProfile.id, { radiusKm: 3 });
+        const row = resp?.data || null;
+        if (!row) {
+            showToast('لا توجد رحلة مناسبة الآن');
+            return;
+        }
+        showToast(`➕ اقتراح: ${row.pickup_location || 'موقع'} → ${row.dropoff_location || 'وجهة'}`);
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر جلب اقتراح رحلة');
+    }
+};
+
+window.driverShowEarningsAssistant = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!currentDriverProfile?.id) {
+            showToast('سجّل دخول الكابتن أولاً');
+            return;
+        }
+
+        const statusEl = document.getElementById('driver-earnings-assistant-status');
+        if (statusEl) statusEl.textContent = 'جاري التحميل...';
+
+        const [assistantResp, netResp] = await Promise.all([
+            ApiService.captain.getEarningsAssistant(currentDriverProfile.id, { windowDays: 30 }),
+            ApiService.captain.getNetProfitToday(currentDriverProfile.id)
+        ]);
+
+        const a = assistantResp?.data || null;
+        const net = netResp?.data || null;
+        if (!a) {
+            if (statusEl) statusEl.textContent = 'لا توجد بيانات كافية حتى الآن.';
+            showToast('لا توجد بيانات كافية لمساعد الربح');
+            return;
+        }
+
+        const bestHour = Array.isArray(a.best_hours) && a.best_hours.length ? a.best_hours[0] : null;
+        const hourText = bestHour && Number.isFinite(Number(bestHour.hour))
+            ? `أفضل ساعة: ${String(bestHour.hour).padStart(2, '0')}:00`
+            : null;
+
+        const remainingToday = a.progress && a.progress.today_remaining !== undefined ? a.progress.today_remaining : null;
+        const remainingWeek = a.progress && a.progress.week_remaining !== undefined ? a.progress.week_remaining : null;
+
+        const parts = [];
+        if (hourText) parts.push(hourText);
+        if (Number.isFinite(Number(remainingToday))) parts.push(`المتبقي لهدف اليوم: ${Number(remainingToday)} ر.س`);
+        if (Number.isFinite(Number(remainingWeek))) parts.push(`المتبقي لهدف الأسبوع: ${Number(remainingWeek)} ر.س`);
+        if (net && Number.isFinite(Number(net.net))) parts.push(`صافي اليوم: ${Number(net.net)} ر.س`);
+
+        const msg = parts.length ? parts.join(' • ') : 'تم تحديث مساعد الربح.';
+        if (statusEl) statusEl.textContent = msg;
+        showToast(`💡 ${msg}`);
+    } catch (e) {
+        console.error(e);
+        const statusEl = document.getElementById('driver-earnings-assistant-status');
+        if (statusEl) statusEl.textContent = 'تعذر تحميل مساعد الربح.';
+        showToast('تعذر تحميل مساعد الربح');
+    }
+};
+
+async function refreshDriverFatigueBadge() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!currentDriverProfile?.id) return;
+        const el = document.getElementById('driver-fatigue-badge');
+        if (!el) return;
+        const r = await ApiService.captain.getFatigueToday(currentDriverProfile.id);
+        const d = r?.data || null;
+        if (!d) return;
+        if (!d.enabled) {
+            el.textContent = 'إرهاق: غير مفعل';
+            el.className = 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-gray-200 text-gray-600 bg-white';
+            return;
+        }
+        if (d.warning) {
+            el.textContent = `⚠️ إرهاق (${d.driving_minutes_today}د)`;
+            el.className = 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700';
+            return;
+        }
+        el.textContent = `🟢 قيادة اليوم: ${d.driving_minutes_today}د`;
+        el.className = 'text-[11px] font-extrabold px-2 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700';
+    } catch (e) {
+        // ignore
+    }
 }
 
 async function renderAdminTrips() {

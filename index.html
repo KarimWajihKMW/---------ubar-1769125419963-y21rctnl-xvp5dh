@@ -2328,7 +2328,27 @@
                             <span>نوع الرحلة</span>
                             <span id="driver-request-car-type">اقتصادي</span>
                         </div>
+
+                        <!-- Captain-only insights (profitability / risk / go-home) -->
+                        <div id="driver-request-insights" class="flex flex-wrap gap-2 pt-2">
+                            <span id="driver-request-profit-badge" class="hidden text-[11px] font-extrabold px-2 py-1 rounded-full border"></span>
+                            <span id="driver-request-risk-badge" class="hidden text-[11px] font-extrabold px-2 py-1 rounded-full border"></span>
+                            <span id="driver-request-gohome-badge" class="hidden text-[11px] font-extrabold px-2 py-1 rounded-full border"></span>
+                        </div>
                     </div>
+
+                    <div class="grid grid-cols-2 gap-3 mt-4">
+                        <button id="driver-favorite-btn" type="button" onclick="driverToggleFavoritePassenger()" class="py-3 rounded-xl bg-amber-50 text-amber-700 font-bold hover:bg-amber-100 transition-colors">
+                            ⭐ عميل مفضل
+                        </button>
+                        <button type="button" onclick="driverQuickRoadReport('traffic')" class="py-3 rounded-xl bg-gray-50 text-gray-700 font-bold hover:bg-gray-100 transition-colors">
+                            🚧 بلاغ زحمة
+                        </button>
+                    </div>
+
+                    <button type="button" onclick="driverSOS()" class="mt-3 w-full py-3 rounded-xl bg-red-600 text-white font-extrabold hover:bg-red-700 transition-colors">
+                        🆘 موقف صعب (SOS)
+                    </button>
 
                     <div class="grid grid-cols-2 gap-3 mt-4">
                         <button id="driver-reject-btn" type="button" onclick="driverRejectRequest()" class="py-3 rounded-xl bg-red-50 text-red-600 font-bold hover:bg-red-100 transition-colors">
@@ -2349,11 +2369,20 @@
                 </div>
                 <h2 class="text-2xl font-bold text-gray-800 mb-2">أنت متصل الآن</h2>
                 <p class="text-gray-500">بانتظار طلبات جديدة في منطقتك...</p>
+
+                <button type="button" onclick="driverShowEarningsAssistant()" class="mt-4 w-full py-3 bg-emerald-50 text-emerald-700 font-bold rounded-xl hover:bg-emerald-100 transition-colors">
+                    💡 مساعد الربح للكابتن
+                </button>
+                <p id="driver-earnings-assistant-status" class="text-[11px] text-gray-500 mt-2"></p>
+
                 <button type="button" onclick="switchToPassengerMode()" class="mt-4 w-full py-3 bg-indigo-50 text-indigo-700 font-bold rounded-xl hover:bg-indigo-100 transition-colors">
                     طلب رحلة كراكب
                 </button>
-                <button class="mt-6 w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl hover:bg-red-100 transition-colors">
+                <button type="button" onclick="driverStopReceiving()" class="mt-6 w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl hover:bg-red-100 transition-colors">
                     إيقاف الاستقبال
+                </button>
+                <button type="button" onclick="driverSOS()" class="mt-3 w-full py-3 bg-red-600 text-white font-extrabold rounded-xl hover:bg-red-700 transition-colors">
+                    🆘 موقف صعب (SOS)
                 </button>
                 <button type="button" onclick="toggleDriverPanel()" class="mt-3 w-full py-2.5 bg-gray-50 text-gray-600 font-bold rounded-xl hover:bg-gray-100 transition-colors">
                     إخفاء اللوحة
@@ -2434,6 +2463,32 @@
                          تحديث ETA
                      </button>
                      <p class="text-[11px] text-gray-500 mt-2" id="driver-eta-current"></p>
+                 </div>
+
+                 <!-- Captain-only tools (in-trip) -->
+                 <div class="mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                     <div class="flex items-center justify-between mb-3">
+                         <p class="text-sm font-extrabold text-gray-800">🧑‍✈️ أدوات الكابتن</p>
+                         <span id="driver-fatigue-badge" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-gray-200 text-gray-600 bg-white">—</span>
+                     </div>
+                     <div class="grid grid-cols-2 gap-3">
+                         <button type="button" onclick="driverWaitingArrive()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             ✅ وصلت
+                         </button>
+                         <button type="button" onclick="driverWaitingEnd()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             ⏱️ إنهاء انتظار
+                         </button>
+                         <button id="driver-audio-record-btn" type="button" onclick="driverToggleAudioRecording()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             🎙️ تسجيل صوتي
+                         </button>
+                         <button type="button" onclick="driverSuggestNextTrip()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             ➕ رحلة بعدها
+                         </button>
+                     </div>
+                     <button type="button" onclick="driverSOS()" class="mt-3 w-full py-3 rounded-xl bg-red-600 text-white font-extrabold hover:bg-red-700 transition-colors">
+                         🆘 موقف صعب (SOS)
+                     </button>
+                     <p class="text-[11px] text-gray-500 mt-2">التسجيل الصوتي اختياري ومشفّر، ولا يفتح إلا للإدارة عند الحاجة.</p>
                  </div>
 
                  <button id="driver-end-btn" onclick="driverEndTrip()" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700" disabled>إنهاء الرحلة</button>

@@ -69,6 +69,40 @@ const ApiService = {
         }
     },
 
+    async requestForm(endpoint, formData, options = {}) {
+        try {
+            const token = ApiService.getToken();
+            const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                method: options.method || 'POST',
+                headers: {
+                    ...authHeader,
+                    ...(options.headers || {})
+                },
+                body: formData
+            });
+
+            const raw = await response.text();
+            let data = {};
+            if (raw) {
+                try { data = JSON.parse(raw); } catch (e) { data = { error: raw }; }
+            }
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    try { window.Auth && typeof window.Auth.clearToken === 'function' && window.Auth.clearToken(); } catch (e) {}
+                    try { window.DB && typeof window.DB.clearSession === 'function' && window.DB.clearSession(); } catch (e) {}
+                }
+                const msg = (data && data.error) ? String(data.error) : (response.statusText || 'Request failed');
+                throw new Error(`HTTP ${response.status}: ${msg}`);
+            }
+            return data;
+        } catch (error) {
+            console.error('API Form Request Error:', error);
+            throw error;
+        }
+    },
+
     // Wallet endpoints
     wallet: {
         async getMyBalance() {
@@ -607,6 +641,169 @@ const ApiService = {
             return ApiService.request(`/pending-rides/${requestId}/reject`, {
                 method: 'POST',
                 body: JSON.stringify({ driver_id: driverId })
+            });
+        }
+    },
+
+    // Captain-only (Driver) tools
+    captain: {
+        async getAcceptanceRules(driverId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/acceptance-rules`);
+        },
+        async setAcceptanceRules(driverId, payload = {}) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/acceptance-rules`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getGoHome(driverId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/go-home`);
+        },
+        async setGoHome(driverId, payload = {}) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/go-home`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getGoals(driverId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/goals`);
+        },
+        async setGoals(driverId, payload = {}) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/goals`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getEarningsAssistant(driverId, options = {}) {
+            const params = new URLSearchParams();
+            if (Number.isFinite(options.windowDays)) params.set('window_days', options.windowDays);
+            const q = params.toString();
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/earnings-assistant${q ? `?${q}` : ''}`);
+        },
+
+        async addExpense(driverId, payload = {}) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/expenses`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+        async listExpenses(driverId, options = {}) {
+            const params = new URLSearchParams();
+            if (options.from) params.set('from', options.from);
+            if (options.to) params.set('to', options.to);
+            const q = params.toString();
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/expenses${q ? `?${q}` : ''}`);
+        },
+        async getNetProfitToday(driverId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/net-profit/today`);
+        },
+
+        async getFatigueToday(driverId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/fatigue/today`);
+        },
+        async setFatigueSettings(driverId, payload = {}) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/fatigue/settings`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async listFavorites(driverId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/favorites`);
+        },
+        async addFavorite(driverId, userId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/favorites`, {
+                method: 'POST',
+                body: JSON.stringify({ user_id: userId })
+            });
+        },
+        async removeFavorite(driverId, userId) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/favorites/${encodeURIComponent(userId)}` , {
+                method: 'DELETE'
+            });
+        },
+
+        async getEmergencyProfile() {
+            return ApiService.request('/drivers/me/emergency-profile');
+        },
+        async setEmergencyProfile(payload = {}) {
+            return ApiService.request('/drivers/me/emergency-profile', {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async sos(payload = {}) {
+            return ApiService.request('/drivers/me/sos', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async stopReceiving() {
+            return ApiService.request('/drivers/me/stop-receiving', {
+                method: 'POST'
+            });
+        },
+
+        async createRoadReport(payload = {}) {
+            return ApiService.request('/drivers/me/road-reports', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async voteRoadReport(reportId, vote) {
+            return ApiService.request(`/drivers/me/road-reports/${encodeURIComponent(String(reportId))}/vote`, {
+                method: 'POST',
+                body: JSON.stringify({ vote })
+            });
+        },
+        async listRoadReportsNearby(options = {}) {
+            const params = new URLSearchParams();
+            if (Number.isFinite(options.lat)) params.set('lat', options.lat);
+            if (Number.isFinite(options.lng)) params.set('lng', options.lng);
+            if (Number.isFinite(options.radiusKm)) params.set('radius_km', options.radiusKm);
+            const q = params.toString();
+            return ApiService.request(`/drivers/me/road-reports/nearby${q ? `?${q}` : ''}`);
+        },
+
+        async createMapError(payload = {}) {
+            return ApiService.request('/drivers/me/map-errors', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async waitingArrive(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/waiting/arrive`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+        async waitingEnd(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/waiting/end`, {
+                method: 'POST'
+            });
+        },
+
+        async nextTripSuggestion(driverId, options = {}) {
+            const params = new URLSearchParams();
+            if (Number.isFinite(options.radiusKm)) params.set('radius_km', options.radiusKm);
+            const q = params.toString();
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/next-trip-suggestion${q ? `?${q}` : ''}`);
+        },
+
+        async uploadTripAudio(tripId, blob, mimeType = null) {
+            const fd = new FormData();
+            const type = mimeType || (blob && blob.type ? blob.type : 'audio/webm');
+            fd.append('audio', blob, `audio-${Date.now()}.webm`);
+            return ApiService.requestForm(`/trips/${encodeURIComponent(tripId)}/driver-audio`, fd, {
+                method: 'POST',
+                headers: type ? { } : {}
             });
         }
     },

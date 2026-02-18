@@ -14,6 +14,15 @@ const { Issuer, generators } = require('openid-client');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
+const secureAudioDir = path.join(__dirname, 'secure-audio');
+try {
+    if (!fs.existsSync(secureAudioDir)) {
+        fs.mkdirSync(secureAudioDir, { recursive: true });
+    }
+} catch (e) {
+    // ignore
+}
+
 const oauthStateStore = new Map();
 function oauthPutState(state, record) {
     oauthStateStore.set(state, record);
@@ -214,6 +223,138 @@ function monthKeyFromDate(d) {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     return `${year}-${month}`;
+}
+
+function safeNumber(v) {
+    if (v === undefined || v === null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+function withinBox(lat, lng, box) {
+    const minLat = safeNumber(box?.min_lat);
+    const maxLat = safeNumber(box?.max_lat);
+    const minLng = safeNumber(box?.min_lng);
+    const maxLng = safeNumber(box?.max_lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    if (!Number.isFinite(minLat) || !Number.isFinite(maxLat) || !Number.isFinite(minLng) || !Number.isFinite(maxLng)) return false;
+    const loLat = Math.min(minLat, maxLat);
+    const hiLat = Math.max(minLat, maxLat);
+    const loLng = Math.min(minLng, maxLng);
+    const hiLng = Math.max(minLng, maxLng);
+    return lat >= loLat && lat <= hiLat && lng >= loLng && lng <= hiLng;
+}
+
+function computeProfitabilityIndicator({ fare, pickupDistanceKm, tripDurationMin }) {
+    const f = safeNumber(fare);
+    const d = safeNumber(pickupDistanceKm);
+    const t = safeNumber(tripDurationMin);
+    if (!Number.isFinite(f) || f <= 0) return { level: 'unknown', score: null, reasons: ['missing_fare'] };
+
+    const pickupMin = Number.isFinite(d) && d >= 0 ? d * 2.0 : 6; // rough ETA to pickup
+    const driveMin = Number.isFinite(t) && t > 0 ? t : 15;
+    const totalMin = Math.max(1, pickupMin + driveMin);
+    const sarPerMin = f / totalMin;
+
+    // Heuristic thresholds (no sensitive inputs)
+    if (sarPerMin >= 2.2) return { level: 'good', score: Math.round(sarPerMin * 100) / 100, reasons: [] };
+    if (sarPerMin >= 1.3) return { level: 'medium', score: Math.round(sarPerMin * 100) / 100, reasons: [] };
+    return { level: 'bad', score: Math.round(sarPerMin * 100) / 100, reasons: ['low_return_per_time'] };
+}
+
+function computeRiskIndicator({ passengerVerifiedLevel, passengerCancelRate30d, pickupDistanceKm, rejectionCount }) {
+    const lvl = String(passengerVerifiedLevel || 'none').toLowerCase();
+    const cancelRate = safeNumber(passengerCancelRate30d);
+    const dist = safeNumber(pickupDistanceKm);
+    const rej = safeNumber(rejectionCount) || 0;
+
+    let score = 0;
+    const reasons = [];
+
+    if (lvl === 'none') {
+        score += 2;
+        reasons.push('unverified_passenger');
+    } else if (lvl === 'basic') {
+        score += 1;
+    }
+
+    if (Number.isFinite(cancelRate)) {
+        if (cancelRate >= 0.35) {
+            score += 2;
+            reasons.push('higher_cancel_probability');
+        } else if (cancelRate >= 0.2) {
+            score += 1;
+            reasons.push('moderate_cancel_probability');
+        }
+    }
+
+    if (Number.isFinite(dist) && dist >= 10) {
+        score += 1;
+        reasons.push('far_pickup');
+    }
+
+    if (rej >= 3) {
+        score += 1;
+        reasons.push('many_driver_rejections');
+    }
+
+    if (score >= 4) return { level: 'high', score, reasons };
+    if (score >= 2) return { level: 'medium', score, reasons };
+    return { level: 'low', score, reasons };
+}
+
+function bearingDeg(fromLat, fromLng, toLat, toLng) {
+    if (![fromLat, fromLng, toLat, toLng].every(Number.isFinite)) return null;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const toDeg = (r) => (r * 180) / Math.PI;
+    const lat1 = toRad(fromLat);
+    const lat2 = toRad(toLat);
+    const dLng = toRad(toLng - fromLng);
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    const brng = toDeg(Math.atan2(y, x));
+    return (brng + 360) % 360;
+}
+
+function angleDiffDeg(a, b) {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+}
+
+function deriveAudioKey() {
+    const envKey = process.env.CAPTAIN_AUDIO_KEY || process.env.AUDIO_ENCRYPTION_KEY;
+    if (envKey) {
+        try {
+            // Accept base64 or hex
+            const trimmed = String(envKey).trim();
+            const asBuf = /^[0-9a-fA-F]{64}$/.test(trimmed)
+                ? Buffer.from(trimmed, 'hex')
+                : Buffer.from(trimmed, 'base64');
+            if (asBuf.length === 32) return asBuf;
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    const fallback = process.env.JWT_SECRET || process.env.DATABASE_URL || 'akwadra_fallback_key';
+    return crypto.createHash('sha256').update(String(fallback)).digest();
+}
+
+function encryptBufferAesGcm(plaintextBuffer) {
+    const key = deriveAudioKey();
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const ciphertext = Buffer.concat([cipher.update(plaintextBuffer), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return { iv, tag, ciphertext, algo: 'aes-256-gcm' };
+}
+
+function decryptBufferAesGcm({ iv, tag, ciphertext }) {
+    const key = deriveAudioKey();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
 
 // ------------------------------
@@ -505,6 +646,18 @@ const secureUpload = multer({
         } else {
             cb(new Error('Only .png, .jpg, .jpeg and .pdf files are allowed!'));
         }
+    }
+});
+
+const audioUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+    fileFilter: (req, file, cb) => {
+        const mime = String(file.mimetype || '').toLowerCase();
+        // Common audio types from browsers
+        const ok = mime.startsWith('audio/') || mime === 'application/octet-stream';
+        if (ok) return cb(null, true);
+        cb(new Error('Only audio uploads are allowed'));
     }
 });
 
@@ -844,6 +997,175 @@ async function ensureWalletTables() {
         console.log('✅ Wallet tables ensured');
     } catch (err) {
         console.error('❌ Failed to ensure wallet tables:', err.message);
+    }
+}
+
+async function ensureCaptainFeatureTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_acceptance_rules (
+                driver_id INTEGER PRIMARY KEY REFERENCES drivers(id) ON DELETE CASCADE,
+                min_fare DECIMAL(12, 2),
+                max_pickup_distance_km DECIMAL(10, 2),
+                excluded_zones_json JSONB,
+                preferred_axis_json JSONB,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_go_home_settings (
+                driver_id INTEGER PRIMARY KEY REFERENCES drivers(id) ON DELETE CASCADE,
+                enabled BOOLEAN NOT NULL DEFAULT false,
+                home_lat DECIMAL(10, 8),
+                home_lng DECIMAL(11, 8),
+                max_detour_km DECIMAL(10, 2) DEFAULT 2,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_earnings_goals (
+                driver_id INTEGER PRIMARY KEY REFERENCES drivers(id) ON DELETE CASCADE,
+                daily_target DECIMAL(12, 2),
+                weekly_target DECIMAL(12, 2),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_expenses (
+                id BIGSERIAL PRIMARY KEY,
+                driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+                category VARCHAR(30) NOT NULL,
+                amount DECIMAL(12, 2) NOT NULL,
+                note TEXT,
+                expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_expenses_driver_date ON driver_expenses(driver_id, expense_date DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_fatigue_settings (
+                driver_id INTEGER PRIMARY KEY REFERENCES drivers(id) ON DELETE CASCADE,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                safe_limit_minutes INTEGER NOT NULL DEFAULT 480,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_favorite_passengers (
+                driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (driver_id, user_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_fav_passenger_driver ON driver_favorite_passengers(driver_id, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_wait_proofs (
+                trip_id VARCHAR(50) PRIMARY KEY REFERENCES trips(id) ON DELETE CASCADE,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                arrived_at TIMESTAMP,
+                arrived_lat DECIMAL(10, 8),
+                arrived_lng DECIMAL(11, 8),
+                wait_end_at TIMESTAMP,
+                wait_seconds INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_road_reports (
+                id BIGSERIAL PRIMARY KEY,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                report_type VARCHAR(30) NOT NULL,
+                lat DECIMAL(10, 8) NOT NULL,
+                lng DECIMAL(11, 8) NOT NULL,
+                note TEXT,
+                confirms_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_road_reports_geo ON driver_road_reports(lat, lng, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_road_report_votes (
+                report_id BIGINT NOT NULL REFERENCES driver_road_reports(id) ON DELETE CASCADE,
+                driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+                vote VARCHAR(10) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (report_id, driver_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_road_votes_report ON driver_road_report_votes(report_id, updated_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_road_votes_driver ON driver_road_report_votes(driver_id, updated_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_map_error_reports (
+                id BIGSERIAL PRIMARY KEY,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                error_type VARCHAR(40) NOT NULL,
+                lat DECIMAL(10, 8) NOT NULL,
+                lng DECIMAL(11, 8) NOT NULL,
+                title TEXT,
+                details TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_map_errors_geo ON driver_map_error_reports(lat, lng, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_emergency_profiles (
+                driver_id INTEGER PRIMARY KEY REFERENCES drivers(id) ON DELETE CASCADE,
+                opt_in BOOLEAN NOT NULL DEFAULT false,
+                contact_name TEXT,
+                contact_channel VARCHAR(20) NOT NULL DEFAULT 'phone',
+                contact_value TEXT,
+                medical_note TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_sos_events (
+                id BIGSERIAL PRIMARY KEY,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                trip_id VARCHAR(50),
+                message TEXT,
+                lat DECIMAL(10, 8),
+                lng DECIMAL(11, 8),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_sos_driver_created ON driver_sos_events(driver_id, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_driver_audio_recordings (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                file_mime TEXT,
+                file_size_bytes BIGINT,
+                algo VARCHAR(30) NOT NULL DEFAULT 'aes-256-gcm',
+                iv_hex TEXT NOT NULL,
+                tag_hex TEXT NOT NULL,
+                encrypted_rel_path TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_driver_audio_trip ON trip_driver_audio_recordings(trip_id, created_at DESC);');
+
+        console.log('✅ Captain-only tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure captain-only tables:', err.message);
     }
 }
 
@@ -10848,6 +11170,943 @@ app.post('/api/pending-rides/:request_id/cancel', requireRole('passenger', 'admi
     }
 });
 
+// ==================== CAPTAIN-ONLY (DRIVER) FEATURES ====================
+
+function ensureDriverSelfOrAdmin(req, res, driverId) {
+    const authRole = String(req.auth?.role || '').toLowerCase();
+    const authDriverId = req.auth?.driver_id;
+    if (authRole === 'driver') {
+        if (!authDriverId) return { ok: false, status: 403, error: 'Driver profile not linked to this account' };
+        if (String(driverId) !== String(authDriverId)) return { ok: false, status: 403, error: 'Forbidden' };
+    }
+    return { ok: true };
+}
+
+app.get('/api/drivers/:id/captain/acceptance-rules', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const r = await pool.query(
+            `SELECT driver_id, min_fare, max_pickup_distance_km, excluded_zones_json, preferred_axis_json, updated_at
+             FROM driver_acceptance_rules
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        res.json({ success: true, data: r.rows[0] || null });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.put('/api/drivers/:id/captain/acceptance-rules', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const minFare = safeNumber(req.body?.min_fare);
+        const maxPickup = safeNumber(req.body?.max_pickup_distance_km);
+        const excludedZones = req.body?.excluded_zones_json !== undefined ? req.body.excluded_zones_json : req.body?.excluded_zones;
+        const preferredAxis = req.body?.preferred_axis_json !== undefined ? req.body.preferred_axis_json : req.body?.preferred_axis;
+
+        const upsert = await pool.query(
+            `INSERT INTO driver_acceptance_rules (driver_id, min_fare, max_pickup_distance_km, excluded_zones_json, preferred_axis_json, updated_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, CURRENT_TIMESTAMP)
+             ON CONFLICT (driver_id) DO UPDATE SET
+                min_fare = EXCLUDED.min_fare,
+                max_pickup_distance_km = EXCLUDED.max_pickup_distance_km,
+                excluded_zones_json = EXCLUDED.excluded_zones_json,
+                preferred_axis_json = EXCLUDED.preferred_axis_json,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING driver_id, min_fare, max_pickup_distance_km, excluded_zones_json, preferred_axis_json, updated_at`,
+            [
+                driverId,
+                Number.isFinite(minFare) && minFare >= 0 ? minFare : null,
+                Number.isFinite(maxPickup) && maxPickup > 0 ? Math.min(Math.max(maxPickup, 1), 100) : null,
+                excludedZones !== undefined ? JSON.stringify(excludedZones) : null,
+                preferredAxis !== undefined ? JSON.stringify(preferredAxis) : null
+            ]
+        );
+
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/go-home', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const r = await pool.query(
+            `SELECT driver_id, enabled, home_lat, home_lng, max_detour_km, updated_at
+             FROM driver_go_home_settings
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        res.json({ success: true, data: r.rows[0] || null });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.put('/api/drivers/:id/captain/go-home', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const enabled = !!req.body?.enabled;
+        const homeLat = safeNumber(req.body?.home_lat);
+        const homeLng = safeNumber(req.body?.home_lng);
+        const maxDetour = safeNumber(req.body?.max_detour_km);
+
+        const upsert = await pool.query(
+            `INSERT INTO driver_go_home_settings (driver_id, enabled, home_lat, home_lng, max_detour_km, updated_at)
+             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+             ON CONFLICT (driver_id) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                home_lat = EXCLUDED.home_lat,
+                home_lng = EXCLUDED.home_lng,
+                max_detour_km = EXCLUDED.max_detour_km,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING driver_id, enabled, home_lat, home_lng, max_detour_km, updated_at`,
+            [
+                driverId,
+                enabled,
+                Number.isFinite(homeLat) ? homeLat : null,
+                Number.isFinite(homeLng) ? homeLng : null,
+                Number.isFinite(maxDetour) && maxDetour >= 0 ? Math.min(Math.max(maxDetour, 0), 30) : 2
+            ]
+        );
+
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/goals', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const r = await pool.query(
+            `SELECT driver_id, daily_target, weekly_target, updated_at
+             FROM driver_earnings_goals
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        res.json({ success: true, data: r.rows[0] || null });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.put('/api/drivers/:id/captain/goals', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const daily = safeNumber(req.body?.daily_target);
+        const weekly = safeNumber(req.body?.weekly_target);
+
+        const upsert = await pool.query(
+            `INSERT INTO driver_earnings_goals (driver_id, daily_target, weekly_target, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (driver_id) DO UPDATE SET
+                daily_target = EXCLUDED.daily_target,
+                weekly_target = EXCLUDED.weekly_target,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING driver_id, daily_target, weekly_target, updated_at`,
+            [
+                driverId,
+                Number.isFinite(daily) && daily >= 0 ? daily : null,
+                Number.isFinite(weekly) && weekly >= 0 ? weekly : null
+            ]
+        );
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/fatigue/today', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const settingsRes = await pool.query(
+            `SELECT enabled, safe_limit_minutes
+             FROM driver_fatigue_settings
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        const s = settingsRes.rows[0] || { enabled: true, safe_limit_minutes: 480 };
+        const sumRes = await pool.query(
+            `SELECT
+                 COALESCE(SUM(COALESCE(duration_minutes, duration, 0)), 0)::int AS minutes
+             FROM trips
+             WHERE driver_id = $1
+               AND status = 'completed'
+               AND completed_at >= DATE_TRUNC('day', NOW())`,
+            [driverId]
+        );
+        const minutes = Number(sumRes.rows[0]?.minutes || 0);
+        const limit = Number(s.safe_limit_minutes || 480);
+        const warn = !!s.enabled && minutes >= limit;
+        res.json({ success: true, data: { enabled: !!s.enabled, safe_limit_minutes: limit, driving_minutes_today: minutes, warning: warn } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.put('/api/drivers/:id/captain/fatigue/settings', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const enabled = req.body?.enabled !== undefined ? !!req.body.enabled : true;
+        const limit = safeNumber(req.body?.safe_limit_minutes);
+        const safeLimit = Number.isFinite(limit) ? Math.max(60, Math.min(24 * 60, Math.round(limit))) : 480;
+
+        const upsert = await pool.query(
+            `INSERT INTO driver_fatigue_settings (driver_id, enabled, safe_limit_minutes, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (driver_id) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                safe_limit_minutes = EXCLUDED.safe_limit_minutes,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING driver_id, enabled, safe_limit_minutes, updated_at`,
+            [driverId, enabled, safeLimit]
+        );
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/:id/captain/expenses', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const category = String(req.body?.category || '').trim().toLowerCase();
+        const allowed = new Set(['fuel', 'maintenance', 'oil', 'cards', 'other', 'بنزين', 'صيانة', 'زيوت', 'كروت', 'أخرى']);
+        if (!category || !allowed.has(category)) return res.status(400).json({ success: false, error: 'invalid_category' });
+        const amount = safeNumber(req.body?.amount);
+        if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ success: false, error: 'invalid_amount' });
+        const note = req.body?.note ? String(req.body.note).slice(0, 500) : null;
+        const expenseDate = req.body?.expense_date ? String(req.body.expense_date) : null;
+
+        const insert = await pool.query(
+            `INSERT INTO driver_expenses (driver_id, category, amount, note, expense_date)
+             VALUES ($1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE))
+             RETURNING id, driver_id, category, amount, note, expense_date, created_at`,
+            [driverId, category, amount, note, expenseDate]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/expenses', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const from = req.query?.from ? String(req.query.from) : null;
+        const to = req.query?.to ? String(req.query.to) : null;
+        const q = await pool.query(
+            `SELECT id, category, amount, note, expense_date, created_at
+             FROM driver_expenses
+             WHERE driver_id = $1
+               AND ($2::date IS NULL OR expense_date >= $2::date)
+               AND ($3::date IS NULL OR expense_date <= $3::date)
+             ORDER BY expense_date DESC, created_at DESC
+             LIMIT 200`,
+            [driverId, from, to]
+        );
+        res.json({ success: true, count: q.rows.length, data: q.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/net-profit/today', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const incomeRes = await pool.query(
+            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0)::numeric AS income
+             FROM trips
+             WHERE driver_id = $1
+               AND status = 'completed'
+               AND completed_at >= DATE_TRUNC('day', NOW())`,
+            [driverId]
+        );
+        const expRes = await pool.query(
+            `SELECT COALESCE(SUM(amount), 0)::numeric AS expenses
+             FROM driver_expenses
+             WHERE driver_id = $1
+               AND expense_date = CURRENT_DATE`,
+            [driverId]
+        );
+        const income = Number(incomeRes.rows[0]?.income || 0);
+        const expenses = Number(expRes.rows[0]?.expenses || 0);
+        res.json({ success: true, data: { income, expenses, net: Math.round((income - expenses) * 100) / 100 } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/favorites', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const q = await pool.query(
+            `SELECT f.user_id, f.created_at, u.name, u.phone
+             FROM driver_favorite_passengers f
+             JOIN users u ON u.id = f.user_id
+             WHERE f.driver_id = $1
+             ORDER BY f.created_at DESC
+             LIMIT 200`,
+            [driverId]
+        );
+        res.json({ success: true, count: q.rows.length, data: q.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/:id/captain/favorites', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        const userId = Number(req.body?.user_id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        if (!Number.isFinite(userId) || userId <= 0) return res.status(400).json({ success: false, error: 'invalid_user_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        // Guardrail: allow only if driver had a completed trip with that passenger (last 90 days)
+        const okTrip = await pool.query(
+            `SELECT 1
+             FROM trips
+             WHERE driver_id = $1 AND rider_id = $2 AND status = 'completed'
+               AND completed_at >= NOW() - INTERVAL '90 days'
+             LIMIT 1`,
+            [driverId, userId]
+        );
+        if (okTrip.rows.length === 0) {
+            return res.status(400).json({ success: false, error: 'favorite_requires_completed_trip' });
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO driver_favorite_passengers (driver_id, user_id)
+             VALUES ($1, $2)
+             ON CONFLICT (driver_id, user_id) DO NOTHING
+             RETURNING driver_id, user_id, created_at`,
+            [driverId, userId]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] || { driver_id: driverId, user_id: userId } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.delete('/api/drivers/:id/captain/favorites/:userId', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        const userId = Number(req.params.userId);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        if (!Number.isFinite(userId) || userId <= 0) return res.status(400).json({ success: false, error: 'invalid_user_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        await pool.query('DELETE FROM driver_favorite_passengers WHERE driver_id = $1 AND user_id = $2', [driverId, userId]);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/earnings-assistant', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+        const windowDays = Number.isFinite(Number(req.query?.window_days)) ? Math.max(7, Math.min(180, Number(req.query.window_days))) : 30;
+
+        const byHour = await pool.query(
+            `SELECT EXTRACT(HOUR FROM completed_at)::int AS hour,
+                    COUNT(*)::int AS trips,
+                    COALESCE(SUM(COALESCE(cost, price, 0)), 0)::numeric AS earnings
+             FROM trips
+             WHERE driver_id = $1 AND status = 'completed'
+               AND completed_at >= NOW() - ($2::int || ' days')::interval
+             GROUP BY 1
+             ORDER BY earnings DESC
+             LIMIT 6`,
+            [driverId, windowDays]
+        );
+
+        // Simple geo clustering by rounding coords (no new libs)
+        const byZone = await pool.query(
+            `SELECT
+                ROUND(COALESCE(pickup_lat, 0)::numeric, 2) AS lat2,
+                ROUND(COALESCE(pickup_lng, 0)::numeric, 2) AS lng2,
+                COUNT(*)::int AS trips,
+                COALESCE(SUM(COALESCE(cost, price, 0)), 0)::numeric AS earnings
+             FROM trips
+             WHERE driver_id = $1 AND status = 'completed'
+               AND pickup_lat IS NOT NULL AND pickup_lng IS NOT NULL
+               AND completed_at >= NOW() - ($2::int || ' days')::interval
+             GROUP BY 1,2
+             ORDER BY earnings DESC
+             LIMIT 6`,
+            [driverId, windowDays]
+        );
+
+        const goalsRes = await pool.query('SELECT daily_target, weekly_target FROM driver_earnings_goals WHERE driver_id = $1 LIMIT 1', [driverId]);
+        const goals = goalsRes.rows[0] || null;
+
+        const todayIncomeRes = await pool.query(
+            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0)::numeric AS income
+             FROM trips
+             WHERE driver_id = $1 AND status = 'completed'
+               AND completed_at >= DATE_TRUNC('day', NOW())`,
+            [driverId]
+        );
+        const todayIncome = Number(todayIncomeRes.rows[0]?.income || 0);
+
+        // week starts Monday in Postgres by default for date_trunc('week')? It's ISO week (Monday). Good.
+        const weekIncomeRes = await pool.query(
+            `SELECT COALESCE(SUM(COALESCE(cost, price, 0)), 0)::numeric AS income
+             FROM trips
+             WHERE driver_id = $1 AND status = 'completed'
+               AND completed_at >= DATE_TRUNC('week', NOW())`,
+            [driverId]
+        );
+        const weekIncome = Number(weekIncomeRes.rows[0]?.income || 0);
+
+        const dailyTarget = goals?.daily_target !== undefined && goals?.daily_target !== null ? Number(goals.daily_target) : null;
+        const weeklyTarget = goals?.weekly_target !== undefined && goals?.weekly_target !== null ? Number(goals.weekly_target) : null;
+
+        res.json({
+            success: true,
+            data: {
+                window_days: windowDays,
+                best_hours: byHour.rows,
+                best_zones: byZone.rows,
+                goals: goals,
+                progress: {
+                    today_income: todayIncome,
+                    today_remaining: Number.isFinite(dailyTarget) ? Math.max(0, Math.round((dailyTarget - todayIncome) * 100) / 100) : null,
+                    week_income: weekIncome,
+                    week_remaining: Number.isFinite(weeklyTarget) ? Math.max(0, Math.round((weeklyTarget - weekIncome) * 100) / 100) : null
+                }
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/me/emergency-profile', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = req.auth?.driver_id;
+        if (!driverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        const r = await pool.query(
+            `SELECT driver_id, opt_in, contact_name, contact_channel, contact_value, medical_note, updated_at
+             FROM driver_emergency_profiles
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        res.json({ success: true, data: r.rows[0] || null });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.put('/api/drivers/me/emergency-profile', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = req.auth?.driver_id;
+        if (!driverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+
+        const optIn = !!req.body?.opt_in;
+        const contactName = req.body?.contact_name ? String(req.body.contact_name).slice(0, 120) : null;
+        const channel = req.body?.contact_channel ? String(req.body.contact_channel).toLowerCase() : 'phone';
+        const value = req.body?.contact_value ? String(req.body.contact_value).slice(0, 180) : null;
+        const medical = req.body?.medical_note ? String(req.body.medical_note).slice(0, 500) : null;
+        const allowed = new Set(['phone', 'sms', 'whatsapp', 'email']);
+        if (!allowed.has(channel)) return res.status(400).json({ success: false, error: 'invalid_contact_channel' });
+
+        const upsert = await pool.query(
+            `INSERT INTO driver_emergency_profiles (driver_id, opt_in, contact_name, contact_channel, contact_value, medical_note, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP)
+             ON CONFLICT (driver_id) DO UPDATE SET
+                opt_in = EXCLUDED.opt_in,
+                contact_name = EXCLUDED.contact_name,
+                contact_channel = EXCLUDED.contact_channel,
+                contact_value = EXCLUDED.contact_value,
+                medical_note = EXCLUDED.medical_note,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING driver_id, opt_in, contact_name, contact_channel, contact_value, medical_note, updated_at`,
+            [driverId, optIn, contactName, channel, value, medical]
+        );
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/me/sos', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = req.auth?.driver_id;
+        if (!driverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+
+        const lat = safeNumber(req.body?.lat);
+        const lng = safeNumber(req.body?.lng);
+        const tripId = req.body?.trip_id ? String(req.body.trip_id) : null;
+        const message = req.body?.message ? String(req.body.message).slice(0, 300) : null;
+
+        await pool.query(`UPDATE drivers SET status = 'offline', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [driverId]);
+
+        const insert = await pool.query(
+            `INSERT INTO driver_sos_events (driver_id, trip_id, message, lat, lng)
+             VALUES ($1, $2, NULLIF($3,''), $4, $5)
+             RETURNING *`,
+            [driverId, tripId, message || '', Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null]
+        );
+
+        // Optional: also log into trip safety events when a trip is provided
+        if (tripId) {
+            try {
+                await pool.query(
+                    `INSERT INTO trip_safety_events (trip_id, created_by_role, created_by_user_id, created_by_driver_id, event_type, message)
+                     VALUES ($1, 'driver', NULL, $2, 'driver_sos', NULLIF($3,''))`,
+                    [tripId, driverId, message || '']
+                );
+                try { io.to(tripRoom(tripId)).emit('safety_event', { trip_id: String(tripId), event: { event_type: 'driver_sos', created_at: new Date().toISOString() } }); } catch (e) {}
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        // Notify driver's emergency contact (opt-in)
+        let delivery = null;
+        try {
+            const profRes = await pool.query(
+                `SELECT opt_in, contact_name, contact_channel, contact_value
+                 FROM driver_emergency_profiles
+                 WHERE driver_id = $1
+                 LIMIT 1`,
+                [driverId]
+            );
+            const prof = profRes.rows[0] || null;
+            if (prof && prof.opt_in && prof.contact_value) {
+                const text = `🆘 SOS من الكابتن\nDriver: ${driverId}\n${tripId ? `Trip: ${tripId}\n` : ''}${Number.isFinite(lat) && Number.isFinite(lng) ? `Location: ${lat},${lng}\n` : ''}${message ? `Note: ${message}` : ''}`;
+                delivery = await deliverGuardianNotification({
+                    contact: { channel: prof.contact_channel, value: prof.contact_value, name: prof.contact_name },
+                    message: text,
+                    subject: 'SOS (Driver)'
+                });
+            }
+        } catch (e) {
+            delivery = null;
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0], contact_delivery: delivery });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/me/stop-receiving', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = req.auth?.driver_id;
+        if (!driverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+
+        const result = await pool.query(
+            `UPDATE drivers
+             SET status = 'offline', updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING id, status, updated_at`,
+            [driverId]
+        );
+        res.json({ success: true, data: result.rows[0] || null });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/me/road-reports', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = req.auth?.driver_id;
+        if (!driverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        const type = String(req.body?.report_type || '').toLowerCase();
+        const allowed = new Set(['traffic', 'checkpoint', 'closure', 'other']);
+        if (!allowed.has(type)) return res.status(400).json({ success: false, error: 'invalid_report_type' });
+        const lat = safeNumber(req.body?.lat);
+        const lng = safeNumber(req.body?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ success: false, error: 'invalid_coordinates' });
+        const note = req.body?.note ? String(req.body.note).slice(0, 300) : null;
+        const ttlMin = Number.isFinite(Number(req.body?.ttl_minutes)) ? Math.max(5, Math.min(12 * 60, Number(req.body.ttl_minutes))) : 60;
+        const expiresAt = new Date(Date.now() + ttlMin * 60 * 1000);
+
+        const insert = await pool.query(
+            `INSERT INTO driver_road_reports (driver_id, report_type, lat, lng, note, expires_at)
+             VALUES ($1,$2,$3,$4,$5,$6)
+             RETURNING *`,
+            [driverId, type, lat, lng, note, expiresAt.toISOString()]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/me/road-reports/:id/vote', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const voterDriverId = req.auth?.driver_id;
+        if (!voterDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        const reportId = Number(req.params.id);
+        if (!Number.isFinite(reportId) || reportId <= 0) return res.status(400).json({ success: false, error: 'invalid_report_id' });
+        const vote = String(req.body?.vote || '').toLowerCase();
+        const allowed = new Set(['confirm', 'deny']);
+        if (!allowed.has(vote)) return res.status(400).json({ success: false, error: 'invalid_vote' });
+
+        const repRes = await pool.query(
+            `SELECT id, driver_id, expires_at
+             FROM driver_road_reports
+             WHERE id = $1
+             LIMIT 1`,
+            [reportId]
+        );
+        const rep = repRes.rows[0] || null;
+        if (!rep) return res.status(404).json({ success: false, error: 'not_found' });
+        if (rep.expires_at && new Date(rep.expires_at).getTime() <= Date.now()) {
+            return res.status(400).json({ success: false, error: 'expired' });
+        }
+        if (String(rep.driver_id || '') === String(voterDriverId)) {
+            return res.status(400).json({ success: false, error: 'cannot_vote_own_report' });
+        }
+
+        await pool.query(
+            `INSERT INTO driver_road_report_votes (report_id, driver_id, vote, created_at, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT (report_id, driver_id) DO UPDATE SET
+                vote = EXCLUDED.vote,
+                updated_at = CURRENT_TIMESTAMP`,
+            [reportId, voterDriverId, vote]
+        );
+
+        await pool.query(
+            `UPDATE driver_road_reports r
+             SET confirms_count = (
+                 SELECT COUNT(*)::int
+                 FROM driver_road_report_votes v
+                 WHERE v.report_id = r.id AND v.vote = 'confirm'
+             )
+             WHERE r.id = $1`,
+            [reportId]
+        );
+
+        const out = await pool.query('SELECT * FROM driver_road_reports WHERE id = $1 LIMIT 1', [reportId]);
+        res.json({ success: true, data: out.rows[0] || null });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/me/road-reports/nearby', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const lat = safeNumber(req.query?.lat);
+        const lng = safeNumber(req.query?.lng);
+        const radius = Number.isFinite(Number(req.query?.radius_km)) ? Math.max(1, Math.min(30, Number(req.query.radius_km))) : 6;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ success: false, error: 'invalid_coordinates' });
+
+        const q = await pool.query(
+            `SELECT r.*,
+                    rel.confirmed_votes::int AS reliability_confirmed,
+                    rel.denied_votes::int AS reliability_denied,
+                    rel.total_votes::int AS reliability_total,
+                    rel.score::numeric AS reliability_score,
+                    (6371 * acos(
+                        cos(radians($1)) * cos(radians(r.lat)) * cos(radians(r.lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(r.lat))
+                    )) AS distance_km
+             FROM driver_road_reports r
+             LEFT JOIN LATERAL (
+                 SELECT
+                     COALESCE(SUM(CASE WHEN v.vote = 'confirm' THEN 1 ELSE 0 END), 0) AS confirmed_votes,
+                     COALESCE(SUM(CASE WHEN v.vote = 'deny' THEN 1 ELSE 0 END), 0) AS denied_votes,
+                     COALESCE(COUNT(*), 0) AS total_votes,
+                     CASE
+                         WHEN COUNT(*) > 0 THEN
+                             (COALESCE(SUM(CASE WHEN v.vote = 'confirm' THEN 1 ELSE 0 END), 0)::float / COUNT(*)::float)
+                         ELSE NULL
+                     END AS score
+                 FROM driver_road_report_votes v
+                 JOIN driver_road_reports rr ON rr.id = v.report_id
+                 WHERE rr.driver_id = r.driver_id
+             ) rel ON true
+             WHERE (r.expires_at IS NULL OR r.expires_at > NOW())
+               AND (6371 * acos(
+                        cos(radians($1)) * cos(radians(r.lat)) * cos(radians(r.lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(r.lat))
+                    )) <= $3
+             ORDER BY distance_km ASC, r.created_at DESC
+             LIMIT 60`,
+            [lat, lng, radius]
+        );
+        res.json({ success: true, count: q.rows.length, data: q.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/me/map-errors', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = req.auth?.driver_id;
+        if (!driverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+        const type = String(req.body?.error_type || '').toLowerCase();
+        const allowed = new Set(['wrong_entrance', 'closed_gate', 'better_meeting_point', 'other']);
+        if (!allowed.has(type)) return res.status(400).json({ success: false, error: 'invalid_error_type' });
+        const lat = safeNumber(req.body?.lat);
+        const lng = safeNumber(req.body?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ success: false, error: 'invalid_coordinates' });
+        const title = req.body?.title ? String(req.body.title).slice(0, 120) : null;
+        const details = req.body?.details ? String(req.body.details).slice(0, 500) : null;
+
+        const insert = await pool.query(
+            `INSERT INTO driver_map_error_reports (driver_id, error_type, lat, lng, title, details)
+             VALUES ($1,$2,$3,$4,$5,$6)
+             RETURNING *`,
+            [driverId, type, lat, lng, title, details]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/drivers/:id/captain/next-trip-suggestion', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const driverRes = await pool.query('SELECT last_lat, last_lng, last_location_at FROM drivers WHERE id = $1 LIMIT 1', [driverId]);
+        const d = driverRes.rows[0] || null;
+        if (!d || !d.last_lat || !d.last_lng) return res.json({ success: true, data: null });
+
+        const lat = Number(d.last_lat);
+        const lng = Number(d.last_lng);
+        const radius = Number.isFinite(Number(req.query?.radius_km)) ? Math.max(1, Math.min(20, Number(req.query.radius_km))) : 3;
+
+        const q = await pool.query(
+            `SELECT pr.*,
+                    (6371 * acos(
+                        cos(radians($1)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(pr.pickup_lat))
+                    )) AS distance_km
+             FROM pending_ride_requests pr
+             WHERE pr.status = 'waiting'
+               AND pr.expires_at > NOW()
+               AND pr.pickup_lat IS NOT NULL AND pr.pickup_lng IS NOT NULL
+               AND (6371 * acos(
+                        cos(radians($1)) * cos(radians(pr.pickup_lat)) * cos(radians(pr.pickup_lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(pr.pickup_lat))
+                    )) <= $3
+             ORDER BY distance_km ASC, pr.created_at ASC
+             LIMIT 1`,
+            [lat, lng, radius]
+        );
+        const row = q.rows[0] || null;
+        res.json({ success: true, data: row });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Smart waiting proof (arrive + end waiting)
+app.post('/api/trips/:id/waiting/arrive', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        const tripRes = await pool.query('SELECT id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(trip.driver_id || '') !== String(authDriverId)) return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
+        const lat = safeNumber(req.body?.lat);
+        const lng = safeNumber(req.body?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ success: false, error: 'invalid_coordinates' });
+
+        const upsert = await pool.query(
+            `INSERT INTO trip_wait_proofs (trip_id, driver_id, arrived_at, arrived_lat, arrived_lng, updated_at)
+             VALUES ($1, $2, CURRENT_TIMESTAMP, $3, $4, CURRENT_TIMESTAMP)
+             ON CONFLICT (trip_id) DO UPDATE SET
+                driver_id = COALESCE(trip_wait_proofs.driver_id, EXCLUDED.driver_id),
+                arrived_at = COALESCE(trip_wait_proofs.arrived_at, EXCLUDED.arrived_at),
+                arrived_lat = COALESCE(trip_wait_proofs.arrived_lat, EXCLUDED.arrived_lat),
+                arrived_lng = COALESCE(trip_wait_proofs.arrived_lng, EXCLUDED.arrived_lng),
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [tripId, trip.driver_id || authDriverId || null, lat, lng]
+        );
+        res.status(201).json({ success: true, data: upsert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/trips/:id/waiting/end', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        const tripRes = await pool.query('SELECT id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(trip.driver_id || '') !== String(authDriverId)) return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
+        const rowRes = await pool.query('SELECT arrived_at FROM trip_wait_proofs WHERE trip_id = $1 LIMIT 1', [tripId]);
+        const arrivedAt = rowRes.rows[0]?.arrived_at ? new Date(rowRes.rows[0].arrived_at) : null;
+        const seconds = arrivedAt && Number.isFinite(arrivedAt.getTime()) ? Math.max(0, Math.round((Date.now() - arrivedAt.getTime()) / 1000)) : null;
+
+        const up = await pool.query(
+            `UPDATE trip_wait_proofs
+             SET wait_end_at = CURRENT_TIMESTAMP,
+                 wait_seconds = COALESCE(wait_seconds, $2),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE trip_id = $1
+             RETURNING *`,
+            [tripId, seconds]
+        );
+        if (up.rows.length === 0) return res.status(404).json({ success: false, error: 'waiting_not_started' });
+        res.json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Encrypted optional driver voice recording upload (trip-only)
+app.post('/api/trips/:id/driver-audio', requireRole('driver', 'admin'), audioUpload.single('audio'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        const tripRes = await pool.query('SELECT id, driver_id, status FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(trip.driver_id || '') !== String(authDriverId)) return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
+        // Restrict to in-trip contexts (assigned/ongoing/started)
+        const st = String(trip.status || '').toLowerCase();
+        if (!['assigned', 'ongoing', 'started'].includes(st)) {
+            return res.status(400).json({ success: false, error: 'audio_allowed_during_trip_only' });
+        }
+
+        const file = req.file;
+        if (!file || !file.buffer || !file.size) return res.status(400).json({ success: false, error: 'missing_audio_file' });
+
+        const enc = encryptBufferAesGcm(file.buffer);
+        const name = `trip-${tripId}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.bin`;
+        const relPath = name;
+        const full = path.join(secureAudioDir, name);
+        await fs.promises.writeFile(full, enc.ciphertext);
+
+        const insert = await pool.query(
+            `INSERT INTO trip_driver_audio_recordings (trip_id, driver_id, file_mime, file_size_bytes, algo, iv_hex, tag_hex, encrypted_rel_path)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             RETURNING id, trip_id, driver_id, file_mime, file_size_bytes, algo, created_at`,
+            [tripId, trip.driver_id || authDriverId || null, String(file.mimetype || ''), Number(file.size || 0), enc.algo, enc.iv.toString('hex'), enc.tag.toString('hex'), relPath]
+        );
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/trips/:tripId/driver-audio/:recId/download', requireRole('admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.tripId);
+        const recId = Number(req.params.recId);
+        if (!Number.isFinite(recId) || recId <= 0) return res.status(400).json({ success: false, error: 'invalid_recording_id' });
+
+        const q = await pool.query(
+            `SELECT *
+             FROM trip_driver_audio_recordings
+             WHERE id = $1 AND trip_id = $2
+             LIMIT 1`,
+            [recId, tripId]
+        );
+        const row = q.rows[0] || null;
+        if (!row) return res.status(404).json({ success: false, error: 'not_found' });
+
+        const full = path.join(secureAudioDir, String(row.encrypted_rel_path));
+        const ciphertext = await fs.promises.readFile(full);
+        const plaintext = decryptBufferAesGcm({
+            iv: Buffer.from(String(row.iv_hex), 'hex'),
+            tag: Buffer.from(String(row.tag_hex), 'hex'),
+            ciphertext
+        });
+
+        res.setHeader('Content-Type', row.file_mime || 'audio/webm');
+        res.setHeader('Content-Disposition', `attachment; filename="trip-${tripId}-audio-${recId}.webm"`);
+        res.status(200).send(plaintext);
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // Get pending rides for a specific driver (based on location and car type)
 app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'), async (req, res) => {
     try {
@@ -10901,9 +12160,32 @@ app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'),
             });
         }
 
-        const maxDistanceKm = Number.isFinite(Number(max_distance))
+        // Captain rules (optional)
+        const rulesRes = await pool.query(
+            `SELECT min_fare, max_pickup_distance_km, excluded_zones_json, preferred_axis_json
+             FROM driver_acceptance_rules
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driver_id]
+        );
+        const rules = rulesRes.rows[0] || null;
+
+        const goHomeRes = await pool.query(
+            `SELECT enabled, home_lat, home_lng, max_detour_km
+             FROM driver_go_home_settings
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driver_id]
+        );
+        const goHome = goHomeRes.rows[0] || null;
+
+        const maxFromQuery = Number.isFinite(Number(max_distance))
             ? Math.max(1, Math.min(Number(max_distance), 100))
             : MAX_ASSIGN_DISTANCE_KM;
+        const maxFromRules = rules?.max_pickup_distance_km !== undefined && rules?.max_pickup_distance_km !== null
+            ? Math.max(1, Math.min(Number(rules.max_pickup_distance_km), 100))
+            : null;
+        const maxDistanceKm = Number.isFinite(maxFromRules) ? Math.min(maxFromQuery, maxFromRules) : maxFromQuery;
 
         const queryBase = `
             SELECT
@@ -10960,10 +12242,196 @@ app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'),
                 LIMIT 30
             `, [driver_id, Number(driver.last_lat), Number(driver.last_lng), maxDistanceKm]);
 
+        const rows = result.rows || [];
+        const userIds = [...new Set(rows.map(r => r.user_id).filter(Boolean).map(Number).filter(n => Number.isFinite(n) && n > 0))];
+        const cancelMap = new Map();
+        if (userIds.length) {
+            try {
+                const canc = await pool.query(
+                    `SELECT rider_id::int AS user_id,
+                            COUNT(*)::int AS total,
+                            SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END)::int AS cancelled
+                     FROM trips
+                     WHERE rider_id = ANY($1)
+                       AND created_at >= NOW() - INTERVAL '30 days'
+                     GROUP BY 1`,
+                    [userIds]
+                );
+                for (const r of canc.rows || []) {
+                    const total = Number(r.total || 0);
+                    const cancelled = Number(r.cancelled || 0);
+                    const rate = total > 0 ? cancelled / total : null;
+                    cancelMap.set(String(r.user_id), rate);
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        const favSet = new Set();
+        try {
+            const fav = await pool.query('SELECT user_id FROM driver_favorite_passengers WHERE driver_id = $1', [driver_id]);
+            for (const f of fav.rows || []) {
+                if (f.user_id !== undefined && f.user_id !== null) favSet.add(String(f.user_id));
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        const minFare = rules?.min_fare !== undefined && rules?.min_fare !== null ? Number(rules.min_fare) : null;
+        const excludedZones = rules?.excluded_zones_json && typeof rules.excluded_zones_json === 'object' ? rules.excluded_zones_json : null;
+        const boxes = Array.isArray(excludedZones) ? excludedZones : [];
+
+        const preferredAxis = rules?.preferred_axis_json && typeof rules.preferred_axis_json === 'object' ? rules.preferred_axis_json : null;
+        const prefBearingRaw = safeNumber(preferredAxis?.bearing_deg !== undefined ? preferredAxis.bearing_deg : preferredAxis?.bearing);
+        const prefTolRaw = safeNumber(preferredAxis?.tolerance_deg !== undefined ? preferredAxis.tolerance_deg : preferredAxis?.tolerance);
+        const axisBearing = Number.isFinite(prefBearingRaw) ? ((prefBearingRaw % 360) + 360) % 360 : null;
+        const axisTolerance = Number.isFinite(prefTolRaw) ? Math.max(5, Math.min(180, prefTolRaw)) : 45;
+
+        const goHomeEnabled = !!goHome?.enabled;
+        const homeLat = goHome?.home_lat !== undefined && goHome?.home_lat !== null ? Number(goHome.home_lat) : null;
+        const homeLng = goHome?.home_lng !== undefined && goHome?.home_lng !== null ? Number(goHome.home_lng) : null;
+        const maxDetour = goHome?.max_detour_km !== undefined && goHome?.max_detour_km !== null ? Number(goHome.max_detour_km) : 2;
+
+        // Prefetch nearby road reports for simple congestion signal
+        let nearbyReports = [];
+        try {
+            const rr = await pool.query(
+                `SELECT id, report_type, lat, lng
+                 FROM driver_road_reports
+                 WHERE (expires_at IS NULL OR expires_at > NOW())
+                   AND (6371 * acos(
+                        cos(radians($1)) * cos(radians(lat)) * cos(radians(lng) - radians($2)) +
+                        sin(radians($1)) * sin(radians(lat))
+                   )) <= $3
+                 ORDER BY created_at DESC
+                 LIMIT 120`,
+                [Number(driver.last_lat), Number(driver.last_lng), Math.max(3, maxDistanceKm + 2)]
+            );
+            nearbyReports = rr.rows || [];
+        } catch (e) {
+            nearbyReports = [];
+        }
+
+        const enriched = [];
+        for (const r of rows) {
+            const fare = r.estimated_cost !== undefined && r.estimated_cost !== null ? Number(r.estimated_cost) : null;
+            if (Number.isFinite(minFare) && Number.isFinite(fare) && fare < minFare) {
+                continue;
+            }
+
+            const pLat = r.pickup_lat !== undefined && r.pickup_lat !== null ? Number(r.pickup_lat) : null;
+            const pLng = r.pickup_lng !== undefined && r.pickup_lng !== null ? Number(r.pickup_lng) : null;
+            if (boxes.length && Number.isFinite(pLat) && Number.isFinite(pLng)) {
+                const excluded = boxes.some((b) => withinBox(pLat, pLng, b));
+                if (excluded) continue;
+            }
+
+            let goHomeMeta = null;
+            if (goHomeEnabled && Number.isFinite(homeLat) && Number.isFinite(homeLng)) {
+                const dPickup = haversineKm({ lat: pLat, lng: pLng }, { lat: homeLat, lng: homeLng });
+                const dLat = r.dropoff_lat !== undefined && r.dropoff_lat !== null ? Number(r.dropoff_lat) : null;
+                const dLng = r.dropoff_lng !== undefined && r.dropoff_lng !== null ? Number(r.dropoff_lng) : null;
+                const dDrop = haversineKm({ lat: dLat, lng: dLng }, { lat: homeLat, lng: homeLng });
+                const detour = Number.isFinite(maxDetour) ? maxDetour : 2;
+                const ok = Number.isFinite(dPickup) && Number.isFinite(dDrop) ? (dDrop <= dPickup + detour) : false;
+                if (!ok) continue;
+                goHomeMeta = {
+                    enabled: true,
+                    dropoff_to_home_km: Number.isFinite(dDrop) ? Math.round(dDrop * 100) / 100 : null
+                };
+            }
+
+            const cancelRate = cancelMap.has(String(r.user_id)) ? cancelMap.get(String(r.user_id)) : null;
+            const profitability = computeProfitabilityIndicator({
+                fare: fare,
+                pickupDistanceKm: r.distance_km,
+                tripDurationMin: r.estimated_duration
+            });
+            let risk = computeRiskIndicator({
+                passengerVerifiedLevel: r.passenger_verified_level,
+                passengerCancelRate30d: cancelRate,
+                pickupDistanceKm: r.distance_km,
+                rejectionCount: r.rejection_count
+            });
+
+            // Community road reports signal: traffic report near pickup
+            let trafficNearPickup = false;
+            if (nearbyReports.length && Number.isFinite(pLat) && Number.isFinite(pLng)) {
+                trafficNearPickup = nearbyReports.some((rep) => {
+                    if (!rep) return false;
+                    const t = String(rep.report_type || '').toLowerCase();
+                    if (t !== 'traffic') return false;
+                    const rl = rep.lat !== undefined && rep.lat !== null ? Number(rep.lat) : null;
+                    const rg = rep.lng !== undefined && rep.lng !== null ? Number(rep.lng) : null;
+                    const dk = haversineKm({ lat: pLat, lng: pLng }, { lat: rl, lng: rg });
+                    return Number.isFinite(dk) && dk <= 1.2;
+                });
+            }
+            if (trafficNearPickup) {
+                const reasons = Array.isArray(risk?.reasons) ? risk.reasons.slice() : [];
+                if (!reasons.includes('congestion_report_nearby')) reasons.push('congestion_report_nearby');
+                const score = Number.isFinite(risk?.score) ? Number(risk.score) + 1 : 1;
+                const level = score >= 4 ? 'high' : score >= 2 ? 'medium' : 'low';
+                risk = { level, score, reasons };
+            }
+
+            // Preferred axis (direction) - preference only (sorting boost)
+            let axisMeta = null;
+            if (Number.isFinite(axisBearing) && Number.isFinite(pLat) && Number.isFinite(pLng)) {
+                const dLat = r.dropoff_lat !== undefined && r.dropoff_lat !== null ? Number(r.dropoff_lat) : null;
+                const dLng = r.dropoff_lng !== undefined && r.dropoff_lng !== null ? Number(r.dropoff_lng) : null;
+                const br = bearingDeg(pLat, pLng, dLat, dLng);
+                const diff = angleDiffDeg(br, axisBearing);
+                if (Number.isFinite(br) && Number.isFinite(diff)) {
+                    axisMeta = {
+                        preferred_bearing_deg: axisBearing,
+                        tolerance_deg: axisTolerance,
+                        trip_bearing_deg: Math.round(br * 10) / 10,
+                        diff_deg: Math.round(diff * 10) / 10,
+                        aligned: diff <= axisTolerance
+                    };
+                }
+            }
+
+            enriched.push({
+                ...r,
+                is_favorite: favSet.has(String(r.user_id)) ? true : false,
+                captain_profitability: profitability,
+                captain_risk: risk,
+                captain_go_home: goHomeMeta,
+                captain_axis: axisMeta,
+                passenger_cancel_rate_30d: cancelRate
+            });
+        }
+
+        enriched.sort((a, b) => {
+            const favA = a.is_favorite ? 1 : 0;
+            const favB = b.is_favorite ? 1 : 0;
+            if (favA !== favB) return favB - favA;
+            const ghA = a.captain_go_home?.dropoff_to_home_km;
+            const ghB = b.captain_go_home?.dropoff_to_home_km;
+            if (goHomeEnabled && Number.isFinite(ghA) && Number.isFinite(ghB) && ghA !== ghB) return ghA - ghB;
+
+            const axA = a.captain_axis;
+            const axB = b.captain_axis;
+            const alA = axA && axA.aligned ? 1 : 0;
+            const alB = axB && axB.aligned ? 1 : 0;
+            if (alA !== alB) return alB - alA;
+            const diffA = safeNumber(axA?.diff_deg);
+            const diffB = safeNumber(axB?.diff_deg);
+            if (Number.isFinite(diffA) && Number.isFinite(diffB) && diffA !== diffB) return diffA - diffB;
+
+            const dA = safeNumber(a.distance_km);
+            const dB = safeNumber(b.distance_km);
+            if (Number.isFinite(dA) && Number.isFinite(dB) && dA !== dB) return dA - dB;
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        });
+
         res.json({
             success: true,
-            count: result.rows.length,
-            data: result.rows
+            count: enriched.length,
+            data: enriched
         });
     } catch (err) {
         console.error('Error fetching driver pending rides:', err);
@@ -11034,6 +12502,7 @@ ensureCoreSchema()
     .then(() => ensureDriverLocationColumns())
     .then(() => ensureAdminTripCountersTables())
     .then(() => ensurePassengerFeatureTables())
+    .then(() => ensureCaptainFeatureTables())
     .then(() => {
         console.log('🔄 Initializing Driver Sync System...');
         return driverSync.initializeSyncSystem();
