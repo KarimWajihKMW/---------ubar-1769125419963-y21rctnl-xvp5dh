@@ -6890,6 +6890,101 @@ window.driverShowEarningsAssistant = async function() {
     }
 };
 
+window.driverShowRoadReportsNearby = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!currentDriverProfile?.id) {
+            showToast('سجّل دخول الكابتن أولاً');
+            return;
+        }
+
+        const loc = driverLocation || getDriverBaseLocation();
+        if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) {
+            showToast('فعّل الموقع أولاً');
+            return;
+        }
+
+        const statusEl = document.getElementById('driver-road-reports-status');
+        if (statusEl) statusEl.textContent = 'جاري التحميل...';
+
+        const resp = await ApiService.captain.listRoadReportsNearby({
+            lat: Number(loc.lat),
+            lng: Number(loc.lng),
+            radiusKm: 6
+        });
+        const rows = Array.isArray(resp?.data) ? resp.data : [];
+
+        if (!rows.length) {
+            if (statusEl) statusEl.textContent = 'لا توجد بلاغات قريبة.';
+            showToast('لا توجد بلاغات قريبة');
+            return;
+        }
+
+        const nearest = rows.find((r) => String(r?.driver_id || '') !== String(currentDriverProfile.id)) || rows[0];
+        const dist = nearest?.distance_km !== undefined && nearest?.distance_km !== null ? Number(nearest.distance_km) : null;
+        const score = nearest?.reliability_score !== undefined && nearest?.reliability_score !== null ? Number(nearest.reliability_score) : null;
+        const confirms = nearest?.confirms_count !== undefined && nearest?.confirms_count !== null ? Number(nearest.confirms_count) : 0;
+        const type = String(nearest?.report_type || 'other');
+
+        const summary = `أقرب بلاغ: ${type}${Number.isFinite(dist) ? ` (${Math.round(dist * 10) / 10} كم)` : ''}`
+            + `${Number.isFinite(score) ? ` • موثوقية: ${Math.round(score * 100)}%` : ''}`
+            + ` • تأكيدات: ${Number.isFinite(confirms) ? confirms : 0}`;
+
+        if (statusEl) statusEl.textContent = summary;
+        showToast(summary);
+
+        // Minimal UX: ask driver to confirm/deny the nearest report to build reliability
+        if (nearest && nearest.id) {
+            const ok = window.confirm(`هل البلاغ صحيح؟\n\n${summary}\n\nOK = تأكيد • Cancel = غير صحيح`);
+            await ApiService.captain.voteRoadReport(nearest.id, ok ? 'confirm' : 'deny');
+            showToast(ok ? '✅ تم تأكيد البلاغ' : '📝 تم تسجيل رفض البلاغ');
+        }
+    } catch (e) {
+        console.error(e);
+        const statusEl = document.getElementById('driver-road-reports-status');
+        if (statusEl) statusEl.textContent = 'تعذر تحميل البلاغات.';
+        showToast('تعذر تحميل البلاغات');
+    }
+};
+
+window.driverReportMapError = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        const loc = driverLocation || getDriverBaseLocation();
+        if (!loc || !Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) {
+            showToast('فعّل الموقع أولاً');
+            return;
+        }
+
+        const typeRaw = window.prompt(
+            '🗺️ نوع خطأ الخرائط:\n1) مدخل غلط\n2) بوابة مقفولة\n3) نقطة لقاء أفضل\n4) أخرى\n\nاكتب رقم من 1 إلى 4',
+            '1'
+        );
+        if (typeRaw === null) return;
+        const n = Number(String(typeRaw).trim());
+        const type = n === 1 ? 'wrong_entrance'
+            : n === 2 ? 'closed_gate'
+                : n === 3 ? 'better_meeting_point'
+                    : 'other';
+
+        const title = window.prompt('عنوان مختصر (اختياري)', '') || '';
+        const details = window.prompt('تفاصيل إضافية (اختياري)', '') || '';
+
+        await ApiService.captain.createMapError({
+            error_type: type,
+            lat: Number(loc.lat),
+            lng: Number(loc.lng),
+            title: title.trim() ? title.trim() : null,
+            details: details.trim() ? details.trim() : null
+        });
+
+        showToast('✅ تم إرسال بلاغ خطأ خرائط');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر إرسال بلاغ خرائط');
+    }
+};
+
 async function refreshDriverFatigueBadge() {
     try {
         if (currentUserRole !== 'driver') return;

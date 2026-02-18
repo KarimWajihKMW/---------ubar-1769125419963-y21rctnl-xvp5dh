@@ -2375,6 +2375,11 @@
                 </button>
                 <p id="driver-earnings-assistant-status" class="text-[11px] text-gray-500 mt-2"></p>
 
+                <button type="button" onclick="driverShowRoadReportsNearby()" class="mt-3 w-full py-3 bg-gray-50 text-gray-700 font-bold rounded-xl hover:bg-gray-100 transition-colors">
+                    📣 بلاغات الطريق القريبة
+                </button>
+                <p id="driver-road-reports-status" class="text-[11px] text-gray-500 mt-2"></p>
+
                 <button type="button" onclick="switchToPassengerMode()" class="mt-4 w-full py-3 bg-indigo-50 text-indigo-700 font-bold rounded-xl hover:bg-indigo-100 transition-colors">
                     طلب رحلة كراكب
                 </button>
@@ -2483,6 +2488,12 @@
                          </button>
                          <button type="button" onclick="driverSuggestNextTrip()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
                              ➕ رحلة بعدها
+                         </button>
+                         <button type="button" onclick="driverShowRoadReportsNearby()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             📣 بلاغات طريق
+                         </button>
+                         <button type="button" onclick="driverReportMapError()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             🗺️ خطأ خرائط
                          </button>
                      </div>
                      <button type="button" onclick="driverSOS()" class="mt-3 w-full py-3 rounded-xl bg-red-600 text-white font-extrabold hover:bg-red-700 transition-colors">
