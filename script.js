@@ -231,6 +231,15 @@ const tripEtaCache = new Map();
 // Pickup suggestion cache (latest pending suggestion per trip)
 const tripPickupSuggestionCache = new Map();
 
+// v2 - Accessibility / Messaging / Beacon
+let passengerAccessibilityProfile = null; // server-backed profile
+let activeTripAccessibilitySnapshot = null; // snapshot copied into trip at creation
+let tripMessageTemplateKey = 'other';
+let pickupBeaconActive = false;
+let pickupBeaconTimer = null;
+let accessibilityFeedbackRespected = null;
+const lastVoiceSpokenAt = new Map();
+
 // Ride options (Passenger)
 let activePriceLock = null; // { id, price, expires_at }
 
@@ -1038,12 +1047,22 @@ function initRealtimeSocket() {
         realtimeSocket.on('trip_started', (payload) => {
             const tripId = payload?.trip_id;
             if (!tripId) return;
+            try {
+                if (currentUserRole === 'passenger' && isActivePassengerTrip(tripId)) {
+                    speakTripEventOnce(`started:${tripId}`, '🚗 تم بدء الرحلة');
+                }
+            } catch (e) {}
             handleTripStartedRealtime(String(tripId));
         });
 
         realtimeSocket.on('trip_completed', (payload) => {
             const tripId = payload?.trip_id;
             if (!tripId) return;
+            try {
+                if (currentUserRole === 'passenger' && isActivePassengerTrip(tripId)) {
+                    speakTripEventOnce(`completed:${tripId}`, '🏁 تم إنهاء الرحلة');
+                }
+            } catch (e) {}
             handleTripCompletedRealtime({
                 trip_id: String(tripId),
                 duration: payload?.duration,
@@ -1076,6 +1095,47 @@ function initRealtimeSocket() {
             }
             if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
                 renderDriverEtaMeta();
+            }
+
+            // Voice-first (v2)
+            try {
+                if (currentUserRole === 'passenger' && isActivePassengerTrip(tripId)) {
+                    const eta = payload?.eta_minutes !== undefined && payload?.eta_minutes !== null ? Number(payload.eta_minutes) : null;
+                    if (Number.isFinite(eta)) {
+                        speakTripEventOnce(`eta:${tripId}`, `⏱️ السائق على بعد ${Math.round(eta)} دقيقة`);
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+        });
+
+        realtimeSocket.on('trip_message', (payload) => {
+            const tripId = payload?.trip_id;
+            const msg = payload?.message;
+            if (!tripId || !msg) return;
+
+            const isPassengerTrip = currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId);
+            const isDriverTrip = currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId);
+            if (!isPassengerTrip && !isDriverTrip) return;
+
+            appendTripMessageToChat(msg, { scroll: true, animate: true });
+        });
+
+        realtimeSocket.on('trip_accessibility_ack', (payload) => {
+            const tripId = payload?.trip_id;
+            const ack = payload?.ack;
+            if (!tripId || !ack) return;
+
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                renderPassengerAccessibilityCard({ snapshot: activeTripAccessibilitySnapshot, ack });
+                showToast('✅ السائق أكد الاطلاع على احتياجات الإتاحة');
+                speakTripEventOnce(`ack:${tripId}`, '✅ السائق أكد الاطلاع على احتياجات الإتاحة');
+            }
+
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                // ack payload is an updated trip row subset
+                renderDriverAccessibilityCard({ trip: ack });
             }
         });
 
@@ -1155,6 +1215,7 @@ function initRealtimeSocket() {
             const trip = payload?.trip || null;
             if (trip && trip.driver_id) {
                 await handlePassengerAssignedTrip(trip);
+                speakTripEventOnce(`assigned:${tripId}`, '✅ تم إسناد السائق');
                 return;
             }
 
@@ -1162,6 +1223,7 @@ function initRealtimeSocket() {
                 const res = await ApiService.trips.getById(tripId);
                 if (res?.data?.driver_id) {
                     await handlePassengerAssignedTrip(res.data);
+                    speakTripEventOnce(`assigned:${tripId}`, '✅ تم إسناد السائق');
                 }
             } catch (e) {
                 // ignore
@@ -1942,6 +2004,243 @@ function escapeHtml(str) {
         .replaceAll("'", '&#039;');
 }
 
+function hasAccessibilityNeeds(p) {
+    if (!p) return false;
+    return !!(
+        p.voice_prompts ||
+        p.text_first ||
+        p.no_calls ||
+        p.wheelchair ||
+        p.extra_time ||
+        p.simple_language ||
+        (p.notes && String(p.notes).trim())
+    );
+}
+
+async function loadPassengerAccessibilityProfile() {
+    passengerAccessibilityProfile = null;
+    try {
+        if (!window.ApiService || !ApiService.passengers || typeof ApiService.passengers.getMyAccessibilityProfile !== 'function') return;
+        const resp = await ApiService.passengers.getMyAccessibilityProfile();
+        passengerAccessibilityProfile = resp?.data || null;
+    } catch (e) {
+        passengerAccessibilityProfile = null;
+    }
+}
+
+function speakTripEventOnce(key, text) {
+    try {
+        if (!passengerAccessibilityProfile || !passengerAccessibilityProfile.voice_prompts) return;
+        if (!('speechSynthesis' in window)) return;
+        const now = Date.now();
+        const last = lastVoiceSpokenAt.get(String(key)) || 0;
+        if (now - last < 15000) return;
+        lastVoiceSpokenAt.set(String(key), now);
+
+        const utter = new SpeechSynthesisUtterance(String(text || ''));
+        utter.lang = document.documentElement.lang || 'ar';
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utter);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function buildAccessibilityLinesFromSnapshot(snapshot) {
+    const s = snapshot || null;
+    if (!s) return [];
+    const lines = [];
+    if (s.wheelchair) lines.push('🦽 كرسي متحرك');
+    if (s.extra_time) lines.push('⏱️ يحتاج وقت إضافي');
+    if (s.text_first) lines.push('💬 تواصل نصي أولاً');
+    if (s.no_calls) lines.push('📵 بدون مكالمات');
+    if (s.simple_language) lines.push('🧠 لغة بسيطة');
+    if (s.voice_prompts) lines.push('🔊 وضع الصوت مفعل');
+    if (s.notes && String(s.notes).trim()) lines.push(`📝 ${String(s.notes).trim()}`);
+    return lines;
+}
+
+function renderPassengerAccessibilityCard({ snapshot, ack } = {}) {
+    const card = document.getElementById('passenger-accessibility-card');
+    const summary = document.getElementById('passenger-accessibility-summary');
+    const status = document.getElementById('passenger-accessibility-ack-status');
+    if (!card || !summary || !status) return;
+
+    const s = snapshot || null;
+    const lines = buildAccessibilityLinesFromSnapshot(s);
+    if (!lines.length) {
+        card.classList.add('hidden');
+        return;
+    }
+    card.classList.remove('hidden');
+    summary.innerHTML = lines.map((t) => `<div>• ${escapeHtml(t)}</div>`).join('');
+
+    const ackAt = ack?.accessibility_ack_at || null;
+    status.textContent = ackAt ? '✅ تم تأكيد السائق' : 'بانتظار تأكيد السائق';
+    status.classList.toggle('border-emerald-200', !!ackAt);
+    status.classList.toggle('text-emerald-700', !!ackAt);
+}
+
+function renderDriverAccessibilityCard({ trip } = {}) {
+    const card = document.getElementById('driver-accessibility-card');
+    const summary = document.getElementById('driver-accessibility-summary');
+    const status = document.getElementById('driver-accessibility-ack-status');
+    const btn = document.getElementById('driver-accessibility-ack-btn');
+    if (!card || !summary || !status || !btn) return;
+
+    const snapshot = trip?.accessibility_snapshot_json || null;
+    const lines = buildAccessibilityLinesFromSnapshot(snapshot);
+    if (!lines.length) {
+        card.classList.add('hidden');
+        return;
+    }
+
+    card.classList.remove('hidden');
+    summary.innerHTML = lines.map((t) => `<div>• ${escapeHtml(t)}</div>`).join('');
+
+    const ackAt = trip?.accessibility_ack_at || null;
+    status.textContent = ackAt ? '✅ مؤكد' : 'غير مؤكد';
+    btn.disabled = !!ackAt;
+    btn.classList.toggle('opacity-50', !!ackAt);
+    btn.classList.toggle('cursor-not-allowed', !!ackAt);
+}
+
+window.driverAccessibilityAck = async function() {
+    if (currentUserRole !== 'driver') return;
+    if (!activeDriverTripId) return;
+    try {
+        const resp = await ApiService.trips.accessibilityAck(activeDriverTripId);
+        const ack = resp?.data || null;
+        if (ack) {
+            renderDriverAccessibilityCard({ trip: { ...ack, accessibility_snapshot_json: ack.accessibility_snapshot_json || null } });
+        }
+        showToast('✅ تم تسجيل التأكيد');
+    } catch (e) {
+        showToast('❌ تعذر تسجيل التأكيد');
+    }
+};
+
+window.setTripMessageTemplate = function(key) {
+    const k = String(key || 'other').toLowerCase();
+    tripMessageTemplateKey = k || 'other';
+    const hint = document.getElementById('chat-template-hint');
+    if (hint) hint.textContent = `تم اختيار: ${tripMessageTemplateKey}`;
+};
+
+async function loadTripMessagesIntoChat(tripId) {
+    const box = document.getElementById('chat-messages');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!tripId) return;
+    try {
+        const resp = await ApiService.trips.getMessages(tripId, { limit: 60 });
+        const rows = resp?.data || [];
+        rows.forEach((m) => appendTripMessageToChat(m, { scroll: false, animate: false }));
+        box.scrollTop = box.scrollHeight;
+    } catch (e) {
+        // ignore
+    }
+}
+
+function appendTripMessageToChat(m, { scroll = true, animate = true } = {}) {
+    const box = document.getElementById('chat-messages');
+    if (!box || !m) return;
+    const senderRole = String(m.sender_role || '').toLowerCase();
+    const isMine = (currentUserRole === 'passenger' && senderRole === 'passenger') || (currentUserRole === 'driver' && senderRole === 'driver');
+    const text = String(m.message || '').trim();
+    if (!text) return;
+
+    const time = m.created_at ? new Date(m.created_at) : new Date();
+    const timeText = time.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+    const wrapClass = isMine ? 'justify-end' : 'justify-start';
+    const bubbleClass = isMine
+        ? 'bg-indigo-600 text-white rounded-2xl rounded-tl-none'
+        : 'bg-white text-gray-800 rounded-2xl rounded-tr-none border border-gray-200';
+
+    const tpl = m.template_key ? String(m.template_key) : null;
+    const tag = tpl ? `<div class="text-[10px] font-extrabold ${isMine ? 'text-indigo-100' : 'text-gray-400'} mb-1">${escapeHtml(tpl)}</div>` : '';
+
+    const msgHtml = `
+    <div class="flex items-start ${wrapClass} ${animate ? 'msg-enter' : ''}">
+        <div class="${bubbleClass} px-4 py-2.5 shadow-sm text-sm max-w-[85%]">
+            ${tag}
+            ${escapeHtml(text)}
+            <div class="text-[10px] ${isMine ? 'text-indigo-200' : 'text-gray-400'} mt-1 text-left flex items-center justify-end gap-1">${escapeHtml(timeText)}</div>
+        </div>
+    </div>`;
+
+    box.insertAdjacentHTML('beforeend', msgHtml);
+    if (scroll) box.scrollTop = box.scrollHeight;
+}
+
+window.togglePickupBeacon = function(force = null) {
+    const next = force === null ? !pickupBeaconActive : !!force;
+    pickupBeaconActive = next;
+
+    const overlay = document.getElementById('pickup-beacon-overlay');
+    const badge = document.getElementById('pickup-beacon-badge');
+    const codeEl = document.getElementById('pickup-beacon-code');
+    if (!overlay || !badge || !codeEl) return;
+
+    if (!pickupBeaconActive) {
+        overlay.classList.add('hidden');
+        if (pickupBeaconTimer) {
+            clearInterval(pickupBeaconTimer);
+            pickupBeaconTimer = null;
+        }
+        return;
+    }
+
+    const tripId = activePassengerTripId ? String(activePassengerTripId) : '—';
+    const short = tripId.length >= 6 ? tripId.slice(-6) : tripId;
+    codeEl.textContent = `رمز بصري: ${short}`;
+    overlay.classList.remove('hidden');
+
+    let flip = false;
+    const doPulse = () => {
+        flip = !flip;
+        overlay.style.background = flip ? '#ffffff' : '#eef2ff';
+        badge.style.transform = flip ? 'scale(1.02)' : 'scale(0.98)';
+        try {
+            if (navigator.vibrate) navigator.vibrate(flip ? [80] : [30]);
+        } catch (e) {}
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.type = 'sine';
+            o.frequency.value = flip ? 880 : 660;
+            g.gain.value = 0.02;
+            o.start();
+            setTimeout(() => {
+                o.stop();
+                ctx.close();
+            }, 80);
+        } catch (e) {
+            // ignore
+        }
+    };
+
+    doPulse();
+    if (pickupBeaconTimer) clearInterval(pickupBeaconTimer);
+    pickupBeaconTimer = setInterval(doPulse, 900);
+};
+
+window.setAccessibilityFeedback = function(respected) {
+    accessibilityFeedbackRespected = respected === true ? true : respected === false ? false : null;
+    const yes = document.getElementById('acc-feedback-yes');
+    const no = document.getElementById('acc-feedback-no');
+    if (yes && no) {
+        yes.classList.toggle('bg-emerald-600', accessibilityFeedbackRespected === true);
+        yes.classList.toggle('text-white', accessibilityFeedbackRespected === true);
+        no.classList.toggle('bg-red-600', accessibilityFeedbackRespected === false);
+        no.classList.toggle('text-white', accessibilityFeedbackRespected === false);
+    }
+};
+
 async function refreshPickupHubSuggestions() {
     if (currentUserRole !== 'passenger') return;
     if (!currentPickup || !Number.isFinite(currentPickup.lat) || !Number.isFinite(currentPickup.lng)) return;
@@ -1954,7 +2253,8 @@ async function refreshPickupHubSuggestions() {
     try {
         const prefEl = document.getElementById('pickup-hub-preference');
         const preference = prefEl && prefEl.value ? String(prefEl.value) : 'clear';
-        const resp = await ApiService.pickupHubs.suggest(currentPickup.lat, currentPickup.lng, 6, preference);
+        const accessibility = hasAccessibilityNeeds(passengerAccessibilityProfile);
+        const resp = await ApiService.pickupHubs.suggest(currentPickup.lat, currentPickup.lng, 6, preference, accessibility);
         renderPickupHubSuggestions(resp?.data || []);
     } catch (e) {
         // Hide on error
@@ -4425,6 +4725,15 @@ window.resetApp = function() {
     driverLocation = null;
     nearestDriverPreview = null;
     passengerTripStartedAt = null;
+
+    // v2 transient state
+    activeTripAccessibilitySnapshot = null;
+    accessibilityFeedbackRespected = null;
+    try { window.togglePickupBeacon(false); } catch (e) {}
+    try {
+        const card = document.getElementById('passenger-accessibility-card');
+        if (card) card.classList.add('hidden');
+    } catch (e) {}
     
     // Reset payment
     selectedPaymentMethod = null;
@@ -4581,6 +4890,13 @@ window.openChat = function() {
     const inp = document.getElementById('chat-input');
     if(msgs) msgs.scrollTop = msgs.scrollHeight;
     if(inp) setTimeout(() => inp.focus(), 300);
+
+    try {
+        window.setTripMessageTemplate(tripMessageTemplateKey || 'other');
+    } catch (e) {}
+
+    const tripId = currentUserRole === 'passenger' ? activePassengerTripId : activeDriverTripId;
+    loadTripMessagesIntoChat(tripId).catch(() => {});
 };
 
 window.closeChat = function() {
@@ -4593,25 +4909,31 @@ window.openDriverProfile = function() {
 
 window.sendChatMessage = function() {
     const chatInput = document.getElementById('chat-input');
-    const chatMessages = document.getElementById('chat-messages');
     const text = chatInput.value.trim();
     if(!text) return;
 
-    const msgHtml = `
-    <div class="flex items-start justify-end msg-enter">
-        <div class="bg-indigo-600 text-white rounded-2xl rounded-tl-none px-4 py-2.5 shadow-md text-sm max-w-[85%]">
-            ${text}
-            <div class="text-[10px] text-indigo-200 mt-1 text-left flex items-center justify-end gap-1">
-                ${new Date().toLocaleTimeString('ar-EG', {hour: '2-digit', minute:'2-digit'})} <i class="fas fa-check-double"></i>
-            </div>
-        </div>
-    </div>`;
-    
-    chatMessages.insertAdjacentHTML('beforeend', msgHtml);
-    chatInput.value = '';
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    const tripId = currentUserRole === 'passenger' ? activePassengerTripId : activeDriverTripId;
+    if (!tripId) {
+        showToast('تعذر تحديد الرحلة');
+        return;
+    }
 
-    simulateDriverResponse(text);
+    const payload = {
+        template_key: tripMessageTemplateKey || 'other',
+        message: String(text).slice(0, 200)
+    };
+
+    chatInput.value = '';
+
+    ApiService.trips.sendMessage(tripId, payload)
+        .then((resp) => {
+            const m = resp?.data || null;
+            if (m) appendTripMessageToChat(m, { scroll: true, animate: true });
+        })
+        .catch((e) => {
+            console.error('sendMessage failed:', e);
+            showToast('❌ تعذر إرسال الرسالة');
+        });
 };
 
 window.driverRejectRequest = async function() {
@@ -4703,6 +5025,16 @@ window.driverAcceptRequest = async function() {
             subscribeTripRealtime(activeDriverTripId);
             loadTripEtaMeta(activeDriverTripId);
             loadTripPickupSuggestions(activeDriverTripId);
+
+            // v2: show accessibility snapshot + ack
+            try {
+                const tripRes = await ApiService.trips.getById(activeDriverTripId);
+                if (tripRes?.data) {
+                    renderDriverAccessibilityCard({ trip: tripRes.data });
+                }
+            } catch (e) {
+                // ignore
+            }
         }
 
         const waiting = document.getElementById('driver-status-waiting');
@@ -5204,6 +5536,20 @@ async function fetchNearestDriverPreview(pickup, carType) {
 async function handlePassengerAssignedTrip(trip) {
     activePassengerTripId = trip.id || activePassengerTripId;
 
+    // v2: snapshot + ack UI
+    try {
+        activeTripAccessibilitySnapshot = trip?.accessibility_snapshot_json || activeTripAccessibilitySnapshot;
+        renderPassengerAccessibilityCard({
+            snapshot: activeTripAccessibilitySnapshot,
+            ack: {
+                accessibility_ack_at: trip?.accessibility_ack_at || null,
+                accessibility_ack_by_driver_id: trip?.accessibility_ack_by_driver_id || null
+            }
+        });
+    } catch (e) {
+        // ignore
+    }
+
     // Realtime subscribe for trip state + live driver location
     if (activePassengerTripId) {
         subscribeTripRealtime(activePassengerTripId);
@@ -5395,6 +5741,7 @@ window.requestRide = async function() {
 
         const created = await ApiService.trips.create(tripPayload);
         activePassengerTripId = created?.data?.id || null;
+        activeTripAccessibilitySnapshot = created?.data?.accessibility_snapshot_json || null;
         if (activePassengerTripId) {
             // Apply multi-stops (reprices server-side)
             if (pendingStops.length) {
@@ -5498,6 +5845,9 @@ function initPassengerMode() {
     if (world) world.classList.add('hidden');
     initLeafletMap();
     updateUIWithUserData();
+
+    // v2: server-backed accessibility profile (voice-first + hub ranking)
+    loadPassengerAccessibilityProfile().catch(() => {});
     
     // Load saved places
     savedPlaces.load();
@@ -7681,6 +8031,23 @@ window.submitTripCompletionDone = async function() {
         }
 
         showToast('شكراً لتقييمك!');
+
+        // v2: Accessibility feedback (non-blocking)
+        try {
+            const reasonEl = document.getElementById('acc-feedback-reason');
+            const reason = reasonEl ? String(reasonEl.value || '').trim() : '';
+            if (typeof accessibilityFeedbackRespected === 'boolean') {
+                const statusEl = document.getElementById('acc-feedback-status');
+                if (statusEl) statusEl.textContent = 'جاري إرسال تغذية راجعة...';
+                await ApiService.trips.submitAccessibilityFeedback(tripId, {
+                    respected: accessibilityFeedbackRespected,
+                    reason: reason || undefined
+                });
+                if (statusEl) statusEl.textContent = '✅ تم إرسال تغذية راجعة للإتاحة.';
+            }
+        } catch (e) {
+            // ignore
+        }
     } catch (error) {
         console.error('Failed to rate driver:', error);
         showToast('تعذر إرسال التقييم حالياً');

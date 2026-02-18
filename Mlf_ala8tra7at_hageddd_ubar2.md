@@ -175,3 +175,60 @@
 - Phase 1 (أساسي): Accessibility Profile + Snapshot + Driver Ack
 - Phase 2 (تجربة): Messaging Board + Voice-first + Beacon
 - Phase 3 (تحسين): Hubs ranking + Emergency card + Feedback
+
+---
+
+## 9) Implementation Status (داخل هذا الريبو)
+
+تم تنفيذ كل عناصر v2 المذكورة أعلاه داخل التطبيق الحالي (بدون صفحات جديدة)، بتاريخ: 2026-02-18.
+
+### ✅ Database / Schema
+- تم إضافة جداول/أعمدة داخل `ensurePassengerFeatureTables()` في `server.js`:
+  - `passenger_accessibility_profiles`
+  - `passenger_emergency_profiles`
+  - `trip_messages`
+  - `trip_accessibility_feedback`
+  - أعمدة داخل `trips`: `accessibility_snapshot_json`, `accessibility_snapshot_at`, `accessibility_ack_at`, `accessibility_ack_by_driver_id`
+  - أعمدة داخل `pickup_hubs`: `wheelchair_accessible`, `ramp_available`, `low_traffic`, `good_lighting`
+
+### ✅ API Endpoints
+- Accessibility Profile:
+  - `GET /api/passengers/me/accessibility`
+  - `PUT /api/passengers/me/accessibility`
+- Emergency Info Card:
+  - `GET /api/passengers/me/emergency-profile`
+  - `PUT /api/passengers/me/emergency-profile`
+- Trip Accessibility Snapshot:
+  - يتم نسخ Snapshot تلقائيًا داخل `POST /api/trips` (عند إنشاء رحلة)
+- Driver Accessibility Acknowledgement:
+  - `POST /api/trips/:id/accessibility-ack`
+- Accessible Messaging Board:
+  - `GET /api/trips/:id/messages`
+  - `POST /api/trips/:id/messages`
+- Accessibility Feedback:
+  - `POST /api/trips/:id/accessibility-feedback`
+
+### ✅ Socket.IO Events
+- `trip_accessibility_ack` (Room: `trip:<id>` + `user:<id>`)
+- `trip_message` (Room: `trip:<id>`)
+
+### ✅ UI (بدون صفحات جديدة)
+- `settings.html/settings.js`: إضافة وحفظ/تحميل
+  - ملف الإتاحة (Accessibility Profile)
+  - بطاقة الطوارئ (Opt-in)
+- `index.html/script.js`:
+  - عرض Snapshot للراكب داخل شاشة الرحلة
+  - تأكيد السائق داخل لوحة السائق
+  - لوحة رسائل موجهة (Templates) داخل شاشة المراسلة
+  - Voice-first Passenger Mode (Web Speech API) عند تفعيل `voice_prompts`
+  - Pickup Beacon Mode داخل شاشة انتظار السائق
+  - نموذج Accessibility Feedback بعد الرحلة
+  - ترجيح اقتراح Pickup Hubs تلقائيًا عند وجود احتياجات إتاحة
+
+### ✅ Tests
+- تحديث اختبار `test-passenger-features.js` لتغطية:
+  - Accessibility profile + Snapshot
+  - Emergency profile + emergency response
+  - Trip messages
+  - Accessibility ack
+  - Accessibility feedback

@@ -938,6 +938,12 @@ async function ensurePassengerFeatureTables() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+
+        // Accessibility ranking metadata (v2)
+        await pool.query('ALTER TABLE pickup_hubs ADD COLUMN IF NOT EXISTS wheelchair_accessible BOOLEAN NOT NULL DEFAULT false;');
+        await pool.query('ALTER TABLE pickup_hubs ADD COLUMN IF NOT EXISTS ramp_available BOOLEAN NOT NULL DEFAULT false;');
+        await pool.query('ALTER TABLE pickup_hubs ADD COLUMN IF NOT EXISTS low_traffic BOOLEAN NOT NULL DEFAULT false;');
+        await pool.query('ALTER TABLE pickup_hubs ADD COLUMN IF NOT EXISTS good_lighting BOOLEAN NOT NULL DEFAULT false;');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_pickup_hubs_active ON pickup_hubs(is_active);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_pickup_hubs_coords ON pickup_hubs(lat, lng);');
 
@@ -963,6 +969,72 @@ async function ensurePassengerFeatureTables() {
 
         // Link trip -> hub
         await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS pickup_hub_id INTEGER REFERENCES pickup_hubs(id) ON DELETE SET NULL;');
+
+        // --- Accessibility profile (v2) ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_accessibility_profiles (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                voice_prompts BOOLEAN NOT NULL DEFAULT false,
+                text_first BOOLEAN NOT NULL DEFAULT false,
+                no_calls BOOLEAN NOT NULL DEFAULT false,
+                wheelchair BOOLEAN NOT NULL DEFAULT false,
+                extra_time BOOLEAN NOT NULL DEFAULT false,
+                simple_language BOOLEAN NOT NULL DEFAULT false,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // --- Emergency info card (opt-in, v2) ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_emergency_profiles (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                opt_in BOOLEAN NOT NULL DEFAULT false,
+                contact_name TEXT,
+                contact_channel VARCHAR(20) NOT NULL DEFAULT 'phone',
+                contact_value TEXT,
+                medical_note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Trip snapshot + driver acknowledgement (v2)
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS accessibility_snapshot_json JSONB;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS accessibility_snapshot_at TIMESTAMP;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS accessibility_ack_at TIMESTAMP;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS accessibility_ack_by_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL;');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trips_accessibility_ack ON trips(accessibility_ack_at DESC);');
+
+        // --- Trip messaging board (v2) ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_messages (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                sender_role VARCHAR(20) NOT NULL,
+                sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                sender_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                template_key VARCHAR(40),
+                message TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, created_at DESC);');
+
+        // --- Accessibility feedback after trip (v2) ---
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_accessibility_feedback (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                respected BOOLEAN NOT NULL,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (trip_id, user_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_accessibility_feedback_trip ON trip_accessibility_feedback(trip_id, created_at DESC);');
 
         // Driver suggestions for pickup hub/location
         await pool.query(`
@@ -1556,6 +1628,40 @@ app.get('/api/pickup-hubs/suggest', async (req, res) => {
         const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 20) : 8;
         const preference = req.query.preference ? String(req.query.preference).toLowerCase() : 'clear';
 
+        // Optional accessibility ranking (v2): default to enabled if passenger has any accessibility needs
+        const accessibilityQueryFlag = String(req.query.accessibility || '').toLowerCase();
+        let accessibility = null;
+        let preferAccessibilityRanking = accessibilityQueryFlag === '1' || accessibilityQueryFlag === 'true';
+        try {
+            const authRole = String(req.auth?.role || '').toLowerCase();
+            const authUserId = req.auth?.uid;
+            if ((authRole === 'passenger' || authRole === 'admin') && authUserId) {
+                const profRes = await pool.query(
+                    `SELECT voice_prompts, text_first, no_calls, wheelchair, extra_time, simple_language
+                     FROM passenger_accessibility_profiles
+                     WHERE user_id = $1
+                     LIMIT 1`,
+                    [authUserId]
+                );
+                accessibility = profRes.rows[0] || null;
+                if (!preferAccessibilityRanking && accessibility) {
+                    preferAccessibilityRanking =
+                        !!accessibility.wheelchair ||
+                        !!accessibility.extra_time ||
+                        !!accessibility.simple_language ||
+                        !!accessibility.text_first ||
+                        !!accessibility.no_calls ||
+                        !!accessibility.voice_prompts;
+                }
+            }
+        } catch (e) {
+            accessibility = null;
+        }
+
+        const needsWheelchair = !!accessibility?.wheelchair;
+        const wantsLowTraffic = !!accessibility?.extra_time;
+        const wantsGoodLighting = !!accessibility?.simple_language;
+
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
             return res.status(400).json({ success: false, error: 'lat and lng are required' });
         }
@@ -1564,6 +1670,7 @@ app.get('/api/pickup-hubs/suggest', async (req, res) => {
 
         const result = await pool.query(
             `SELECT id, title, category, lat, lng,
+                    wheelchair_accessible, ramp_available, low_traffic, good_lighting,
                     (6371 * acos(
                         cos(radians($1)) * cos(radians(lat)) * cos(radians(lng) - radians($2)) +
                         sin(radians($1)) * sin(radians(lat))
@@ -1576,12 +1683,377 @@ app.get('/api/pickup-hubs/suggest', async (req, res) => {
                     WHEN $4::boolean = true THEN 1
                     ELSE 0
                 END ASC,
+                CASE
+                    WHEN $5::boolean = true AND $6::boolean = true AND wheelchair_accessible = true THEN 0
+                    WHEN $5::boolean = true AND $6::boolean = true THEN 1
+                    ELSE 0
+                END ASC,
+                CASE
+                    WHEN $5::boolean = true AND $7::boolean = true AND low_traffic = true THEN 0
+                    WHEN $5::boolean = true AND $7::boolean = true THEN 1
+                    ELSE 0
+                END ASC,
+                CASE
+                    WHEN $5::boolean = true AND $8::boolean = true AND good_lighting = true THEN 0
+                    WHEN $5::boolean = true AND $8::boolean = true THEN 1
+                    ELSE 0
+                END ASC,
                 distance_km ASC
              LIMIT $3`,
-            [lat, lng, limit, safePref]
+            [lat, lng, limit, safePref, preferAccessibilityRanking, needsWheelchair, wantsLowTraffic, wantsGoodLighting]
         );
 
         res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Passenger Accessibility Profile (v2) ---
+
+app.get('/api/passengers/me/accessibility', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT user_id, voice_prompts, text_first, no_calls, wheelchair, extra_time, simple_language, notes, created_at, updated_at
+             FROM passenger_accessibility_profiles
+             WHERE user_id = $1
+             LIMIT 1`,
+            [userId]
+        );
+        const row = result.rows[0] || null;
+        if (!row) {
+            return res.json({
+                success: true,
+                data: {
+                    user_id: Number(userId),
+                    voice_prompts: false,
+                    text_first: false,
+                    no_calls: false,
+                    wheelchair: false,
+                    extra_time: false,
+                    simple_language: false,
+                    notes: null,
+                    created_at: null,
+                    updated_at: null
+                }
+            });
+        }
+
+        res.json({ success: true, data: row });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.put('/api/passengers/me/accessibility', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const payload = req.body || {};
+        const notes = payload.notes !== undefined && payload.notes !== null ? String(payload.notes) : null;
+        if (notes !== null && notes.length > 800) {
+            return res.status(400).json({ success: false, error: 'notes is too long' });
+        }
+
+        const voicePrompts = payload.voice_prompts !== undefined ? !!payload.voice_prompts : false;
+        const textFirst = payload.text_first !== undefined ? !!payload.text_first : false;
+        const noCalls = payload.no_calls !== undefined ? !!payload.no_calls : false;
+        const wheelchair = payload.wheelchair !== undefined ? !!payload.wheelchair : false;
+        const extraTime = payload.extra_time !== undefined ? !!payload.extra_time : false;
+        const simpleLanguage = payload.simple_language !== undefined ? !!payload.simple_language : false;
+
+        const upsert = await pool.query(
+            `INSERT INTO passenger_accessibility_profiles (
+                user_id, voice_prompts, text_first, no_calls, wheelchair, extra_time, simple_language, notes, created_at, updated_at
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7, NULLIF($8,''), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT (user_id) DO UPDATE SET
+                voice_prompts = EXCLUDED.voice_prompts,
+                text_first = EXCLUDED.text_first,
+                no_calls = EXCLUDED.no_calls,
+                wheelchair = EXCLUDED.wheelchair,
+                extra_time = EXCLUDED.extra_time,
+                simple_language = EXCLUDED.simple_language,
+                notes = EXCLUDED.notes,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING user_id, voice_prompts, text_first, no_calls, wheelchair, extra_time, simple_language, notes, created_at, updated_at`,
+            [userId, voicePrompts, textFirst, noCalls, wheelchair, extraTime, simpleLanguage, notes || '']
+        );
+
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Passenger Emergency Info Card (Opt-in, v2) ---
+
+app.get('/api/passengers/me/emergency-profile', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT user_id, opt_in, contact_name, contact_channel, contact_value, medical_note, created_at, updated_at
+             FROM passenger_emergency_profiles
+             WHERE user_id = $1
+             LIMIT 1`,
+            [userId]
+        );
+        const row = result.rows[0] || null;
+        if (!row) {
+            return res.json({
+                success: true,
+                data: {
+                    user_id: Number(userId),
+                    opt_in: false,
+                    contact_name: null,
+                    contact_channel: 'phone',
+                    contact_value: null,
+                    medical_note: null,
+                    created_at: null,
+                    updated_at: null
+                }
+            });
+        }
+        res.json({ success: true, data: row });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.put('/api/passengers/me/emergency-profile', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const payload = req.body || {};
+        const optIn = payload.opt_in !== undefined ? !!payload.opt_in : false;
+
+        const contactName = payload.contact_name !== undefined && payload.contact_name !== null ? String(payload.contact_name) : '';
+        const contactChannel = payload.contact_channel !== undefined && payload.contact_channel !== null ? String(payload.contact_channel).toLowerCase() : 'phone';
+        const contactValue = payload.contact_value !== undefined && payload.contact_value !== null ? String(payload.contact_value) : '';
+        const medicalNote = payload.medical_note !== undefined && payload.medical_note !== null ? String(payload.medical_note) : '';
+
+        if (contactName.length > 120) return res.status(400).json({ success: false, error: 'contact_name is too long' });
+        if (contactChannel.length > 20) return res.status(400).json({ success: false, error: 'contact_channel is too long' });
+        if (contactValue.length > 200) return res.status(400).json({ success: false, error: 'contact_value is too long' });
+        if (medicalNote.length > 400) return res.status(400).json({ success: false, error: 'medical_note is too long' });
+
+        const normalizedChannel = ['phone', 'sms', 'email', 'whatsapp'].includes(contactChannel) ? contactChannel : 'phone';
+
+        const upsert = await pool.query(
+            `INSERT INTO passenger_emergency_profiles (
+                user_id, opt_in, contact_name, contact_channel, contact_value, medical_note, created_at, updated_at
+             ) VALUES ($1,$2, NULLIF($3,''), $4, NULLIF($5,''), NULLIF($6,''), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT (user_id) DO UPDATE SET
+                opt_in = EXCLUDED.opt_in,
+                contact_name = EXCLUDED.contact_name,
+                contact_channel = EXCLUDED.contact_channel,
+                contact_value = EXCLUDED.contact_value,
+                medical_note = EXCLUDED.medical_note,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING user_id, opt_in, contact_name, contact_channel, contact_value, medical_note, created_at, updated_at`,
+            [
+                userId,
+                optIn,
+                optIn ? contactName : '',
+                normalizedChannel,
+                optIn ? contactValue : '',
+                optIn ? medicalNote : ''
+            ]
+        );
+
+        res.json({ success: true, data: upsert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Trip Messaging Board (v2) ---
+
+const TRIP_MESSAGE_TEMPLATE_KEYS = new Set([
+    'pickup',
+    'accessibility',
+    'location',
+    'arrival',
+    'wait',
+    'other'
+]);
+
+app.get('/api/trips/:id/messages', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 100) : 50;
+        const msgs = await pool.query(
+            `SELECT id, trip_id, sender_role, sender_user_id, sender_driver_id, template_key, message, created_at
+             FROM trip_messages
+             WHERE trip_id = $1
+             ORDER BY created_at ASC
+             LIMIT $2`,
+            [tripId, limit]
+        );
+        res.json({ success: true, data: msgs.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/trips/:id/messages', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const templateKeyRaw = req.body?.template_key !== undefined && req.body?.template_key !== null ? String(req.body.template_key) : '';
+        const templateKey = templateKeyRaw ? templateKeyRaw.toLowerCase() : null;
+        if (templateKey && !TRIP_MESSAGE_TEMPLATE_KEYS.has(templateKey)) {
+            return res.status(400).json({ success: false, error: 'Invalid template_key' });
+        }
+
+        const messageRaw = req.body?.message !== undefined && req.body?.message !== null ? String(req.body.message) : '';
+        const message = messageRaw.trim();
+        if (!message) return res.status(400).json({ success: false, error: 'message is required' });
+        if (message.length > 200) return res.status(400).json({ success: false, error: 'message is too long' });
+
+        const senderRole = authRole || 'unknown';
+        const senderUserId = senderRole === 'passenger' || senderRole === 'admin' ? (authUserId || null) : null;
+        const senderDriverId = senderRole === 'driver' ? (authDriverId || null) : null;
+
+        const insert = await pool.query(
+            `INSERT INTO trip_messages (trip_id, sender_role, sender_user_id, sender_driver_id, template_key, message)
+             VALUES ($1,$2,$3,$4, NULLIF($5,''), $6)
+             RETURNING id, trip_id, sender_role, sender_user_id, sender_driver_id, template_key, message, created_at`,
+            [tripId, senderRole, senderUserId, senderDriverId, templateKey || '', message]
+        );
+
+        try {
+            io.to(tripRoom(tripId)).emit('trip_message', { trip_id: String(tripId), message: insert.rows[0] });
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Driver Accessibility Acknowledgement (v2) ---
+
+app.post('/api/trips/:id/accessibility-ack', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        if (!tripRow) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(tripRow.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        const effectiveDriverId = authRole === 'driver'
+            ? authDriverId
+            : (req.body?.driver_id !== undefined && req.body?.driver_id !== null ? Number(req.body.driver_id) : (tripRow.driver_id ? Number(tripRow.driver_id) : null));
+
+        const updated = await pool.query(
+            `UPDATE trips
+             SET accessibility_ack_at = COALESCE(accessibility_ack_at, CURRENT_TIMESTAMP),
+                 accessibility_ack_by_driver_id = COALESCE(accessibility_ack_by_driver_id, $1),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2
+             RETURNING id, accessibility_ack_at, accessibility_ack_by_driver_id, accessibility_snapshot_json, accessibility_snapshot_at`,
+            [effectiveDriverId, tripId]
+        );
+
+        try {
+            io.to(tripRoom(tripId)).emit('trip_accessibility_ack', {
+                trip_id: String(tripId),
+                ack: updated.rows[0]
+            });
+
+            if (tripRow?.user_id) {
+                io.to(userRoom(tripRow.user_id)).emit('trip_accessibility_ack', {
+                    trip_id: String(tripId),
+                    ack: updated.rows[0]
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: updated.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Accessibility Feedback (v2) ---
+
+app.post('/api/trips/:id/accessibility-feedback', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const status = String(tripRow?.status || '').toLowerCase();
+        const tripStatus = String(tripRow?.trip_status || '').toLowerCase();
+        const isEnded = status === 'completed' || status === 'rated' || tripStatus === 'completed' || tripStatus === 'rated';
+        if (!isEnded) {
+            return res.status(409).json({ success: false, error: 'Trip is not completed yet' });
+        }
+
+        const respected = req.body?.respected;
+        if (typeof respected !== 'boolean') {
+            return res.status(400).json({ success: false, error: 'respected must be boolean' });
+        }
+
+        const reason = req.body?.reason !== undefined && req.body?.reason !== null ? String(req.body.reason).trim() : '';
+        if (reason.length > 300) return res.status(400).json({ success: false, error: 'reason is too long' });
+
+        const userId = authRole === 'passenger' ? authUserId : (req.body?.user_id !== undefined && req.body?.user_id !== null ? Number(req.body.user_id) : authUserId);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const upsert = await pool.query(
+            `INSERT INTO trip_accessibility_feedback (trip_id, user_id, respected, reason)
+             VALUES ($1,$2,$3, NULLIF($4,''))
+             ON CONFLICT (trip_id, user_id) DO UPDATE SET
+                respected = EXCLUDED.respected,
+                reason = EXCLUDED.reason
+             RETURNING id, trip_id, user_id, respected, reason, created_at`,
+            [tripId, userId, respected, reason]
+        );
+
+        res.status(201).json({ success: true, data: upsert.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -3518,7 +3990,36 @@ app.post('/api/trips/:id/safety/emergency', requireAuth, async (req, res) => {
             // ignore
         }
 
-        res.status(201).json({ success: true, data: insert.rows[0] });
+        // Emergency Info Card (opt-in): only return to passenger/admin (do not broadcast)
+        let emergencyCard = null;
+        try {
+            if (authRole === 'passenger' || authRole === 'admin') {
+                const userId = tripRow?.user_id ? Number(tripRow.user_id) : null;
+                if (userId) {
+                    const em = await pool.query(
+                        `SELECT opt_in, contact_name, contact_channel, contact_value, medical_note, updated_at
+                         FROM passenger_emergency_profiles
+                         WHERE user_id = $1
+                         LIMIT 1`,
+                        [userId]
+                    );
+                    const row = em.rows[0] || null;
+                    if (row && row.opt_in) {
+                        emergencyCard = {
+                            contact_name: row.contact_name || null,
+                            contact_channel: row.contact_channel || 'phone',
+                            contact_value: row.contact_value || null,
+                            medical_note: row.medical_note || null,
+                            updated_at: row.updated_at || null
+                        };
+                    }
+                }
+            }
+        } catch (e) {
+            emergencyCard = null;
+        }
+
+        res.status(201).json({ success: true, data: insert.rows[0], emergency_card: emergencyCard });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -4500,6 +5001,41 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
 
         const effectiveRiderId = authRole === 'passenger' ? authUserId : (rider_id || user_id);
 
+        // Accessibility Snapshot (v2): copy profile state into trip at creation
+        let accessibilitySnapshot = null;
+        try {
+            if (effectiveRiderId) {
+                const profRes = await pool.query(
+                    `SELECT voice_prompts, text_first, no_calls, wheelchair, extra_time, simple_language, notes, updated_at
+                     FROM passenger_accessibility_profiles
+                     WHERE user_id = $1
+                     LIMIT 1`,
+                    [effectiveRiderId]
+                );
+                const prof = profRes.rows[0] || null;
+                if (prof) {
+                    const snapshot = {
+                        voice_prompts: !!prof.voice_prompts,
+                        text_first: !!prof.text_first,
+                        no_calls: !!prof.no_calls,
+                        wheelchair: !!prof.wheelchair,
+                        extra_time: !!prof.extra_time,
+                        simple_language: !!prof.simple_language,
+                        notes: prof.notes ? String(prof.notes) : null,
+                        source: 'passenger_accessibility_profiles',
+                        profile_updated_at: prof.updated_at || null
+                    };
+                    const hasAny =
+                        snapshot.voice_prompts || snapshot.text_first || snapshot.no_calls ||
+                        snapshot.wheelchair || snapshot.extra_time || snapshot.simple_language ||
+                        (snapshot.notes && snapshot.notes.trim());
+                    accessibilitySnapshot = hasAny ? snapshot : null;
+                }
+            }
+        } catch (e) {
+            accessibilitySnapshot = null;
+        }
+
         // Optional: passenger note from template
         let effectivePassengerNote = passenger_note !== undefined && passenger_note !== null ? String(passenger_note) : null;
         if (!effectivePassengerNote && passenger_note_template_id !== undefined && passenger_note_template_id !== null) {
@@ -4706,8 +5242,9 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                 distance, distance_km,
                 duration, duration_minutes,
                 payment_method, status, driver_name, source,
-                pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id, quiet_mode
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+                pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id, quiet_mode,
+                accessibility_snapshot_json, accessibility_snapshot_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29::jsonb, $30)
             RETURNING *
         `, [
             tripId, effectiveRiderId, effectiveRiderId, driver_id, effectivePickupLocation, dropoff_location,
@@ -4721,7 +5258,9 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             effectivePassengerNote ? String(effectivePassengerNote) : null,
             familyMember ? Number(familyMember.id) : null,
             lockedPriceRow ? Number(lockedPriceRow.id) : null,
-            quietModeEnabled
+            quietModeEnabled,
+            accessibilitySnapshot ? JSON.stringify(accessibilitySnapshot) : null,
+            accessibilitySnapshot ? new Date().toISOString() : null
         ]);
 
         let createdTrip = result.rows[0];

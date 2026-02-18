@@ -233,6 +233,42 @@ async function run() {
     throw new Error('Envelope check should force cash when exceeded');
   }
 
+  // 3️⃣d) Accessibility profile + Emergency card (v2)
+  console.log('\n3️⃣d Accessibility + Emergency (v2)...');
+  const accPut = await jsonFetch(`${baseURL}/passengers/me/accessibility`, {
+    method: 'PUT',
+    headers: p1Headers,
+    body: JSON.stringify({
+      voice_prompts: true,
+      text_first: true,
+      no_calls: true,
+      wheelchair: true,
+      extra_time: true,
+      simple_language: true,
+      notes: 'اختبار ملف الإتاحة'
+    })
+  });
+  if (!accPut.res.ok) throw new Error(`Accessibility PUT failed: ${accPut.data.error || accPut.res.status}`);
+  const accGet = await jsonFetch(`${baseURL}/passengers/me/accessibility`, { headers: p1Headers });
+  if (!accGet.res.ok) throw new Error(`Accessibility GET failed: ${accGet.data.error || accGet.res.status}`);
+  if (accGet.data.data.wheelchair !== true) throw new Error('Accessibility profile should include wheelchair=true');
+
+  const emPut = await jsonFetch(`${baseURL}/passengers/me/emergency-profile`, {
+    method: 'PUT',
+    headers: p1Headers,
+    body: JSON.stringify({
+      opt_in: true,
+      contact_name: 'Emergency Contact',
+      contact_channel: 'phone',
+      contact_value: '0500000000',
+      medical_note: 'حساسية (اختبار)'
+    })
+  });
+  if (!emPut.res.ok) throw new Error(`Emergency profile PUT failed: ${emPut.data.error || emPut.res.status}`);
+  const emGet = await jsonFetch(`${baseURL}/passengers/me/emergency-profile`, { headers: p1Headers });
+  if (!emGet.res.ok) throw new Error(`Emergency profile GET failed: ${emGet.data.error || emGet.res.status}`);
+  if (emGet.data.data.opt_in !== true) throw new Error('Emergency profile should be opt_in=true');
+
   // 4) Create trip with hub + note + family + price lock
   console.log('\n4️⃣ Create trip with hub/note/family/lock...');
   const tripCreate = await jsonFetch(`${baseURL}/trips`, {
@@ -261,7 +297,82 @@ async function run() {
   });
   if (!tripCreate.res.ok) throw new Error(`Trip create failed: ${tripCreate.data.error || tripCreate.res.status}`);
   const tripId = tripCreate.data.data.id;
+  const snapshot = tripCreate.data.data.accessibility_snapshot_json || null;
+  if (!snapshot || snapshot.wheelchair !== true) {
+    throw new Error('Trip accessibility_snapshot_json should be copied from profile (wheelchair=true)');
+  }
   console.log('✅ Trip created:', tripId);
+
+  // 4️⃣b) Trip messaging board (v2)
+  console.log('\n4️⃣b Trip messages (v2)...');
+  const msgSend = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/messages`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ template_key: 'pickup', message: 'أنا عند البوابة الرئيسية' })
+  });
+  if (!msgSend.res.ok) throw new Error(`Trip message send failed: ${msgSend.data.error || msgSend.res.status}`);
+  const msgList = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/messages?limit=10`, { headers: p1Headers });
+  if (!msgList.res.ok) throw new Error(`Trip messages list failed: ${msgList.data.error || msgList.res.status}`);
+  if (!Array.isArray(msgList.data.data) || msgList.data.data.length < 1) throw new Error('Trip messages should return at least one message');
+
+  // 4️⃣c) Driver accessibility acknowledgement (v2) - tested via admin path
+  console.log('\n4️⃣c Driver accessibility ack (v2)...');
+  const ack = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(tripId)}/accessibility-ack`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ driver_id: driverId })
+  });
+  if (!ack.res.ok) throw new Error(`Accessibility ack failed: ${ack.data.error || ack.res.status}`);
+  if (!ack.data.data.accessibility_ack_at) throw new Error('Ack response should include accessibility_ack_at');
+
+  // 4️⃣d) Accessibility feedback (v2)
+  console.log('\n4️⃣d Accessibility feedback (v2)...');
+  const fbTripCreate = await jsonFetch(`${baseURL}/trips`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({
+      pickup_location: 'FB pickup',
+      dropoff_location: 'FB dropoff',
+      pickup_lat: 24.7136,
+      pickup_lng: 46.6753,
+      pickup_accuracy: 6.1,
+      pickup_timestamp: Date.now(),
+      dropoff_lat: 24.6917,
+      dropoff_lng: 46.6853,
+      car_type: 'economy',
+      cost: 10,
+      distance: 1,
+      duration: 10,
+      payment_method: 'cash',
+      status: 'pending',
+      source: 'passenger_app'
+    })
+  });
+  if (!fbTripCreate.res.ok) throw new Error(`Feedback trip create failed: ${fbTripCreate.data.error || fbTripCreate.res.status}`);
+  const fbTripId = fbTripCreate.data.data.id;
+
+  const fbBefore = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(fbTripId)}/accessibility-feedback`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ respected: true, reason: 'اختبار' })
+  });
+  if (fbBefore.res.status !== 409) {
+    throw new Error(`Expected feedback before completion to be 409, got ${fbBefore.res.status}`);
+  }
+
+  const completeForFb = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(fbTripId)}/status`, {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: JSON.stringify({ status: 'completed', trip_status: 'completed' })
+  });
+  if (!completeForFb.res.ok) throw new Error(`Trip complete for feedback failed: ${completeForFb.data.error || completeForFb.res.status}`);
+
+  const fbAfter = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(fbTripId)}/accessibility-feedback`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ respected: true, reason: 'تم احترام الاحتياجات' })
+  });
+  if (!fbAfter.res.ok) throw new Error(`Feedback after completion failed: ${fbAfter.data.error || fbAfter.res.status}`);
 
   // 5) Favorite captain
   console.log('\n5️⃣ Favorites...');
@@ -325,7 +436,10 @@ async function run() {
     body: JSON.stringify({ message: 'اختبار زر طوارئ' })
   });
   if (!emergency.res.ok) throw new Error(`Emergency failed: ${emergency.data.error || emergency.res.status}`);
-  console.log('✅ Safety OK');
+  if (!emergency.data.emergency_card || emergency.data.emergency_card.contact_name !== 'Emergency Contact') {
+    throw new Error('Emergency should return emergency_card for passenger when opt_in=true');
+  }
+  console.log('✅ Safety OK + emergency card');
 
   // 9) Support ticket (no attachment)
   console.log('\n9️⃣ Support ticket...');

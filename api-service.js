@@ -260,6 +260,35 @@ const ApiService = {
             });
         },
 
+        // --- Trip Messaging Board (v2) ---
+        async getMessages(tripId, params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/messages${queryString ? `?${queryString}` : ''}`);
+        },
+
+        async sendMessage(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/messages`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // --- Driver Accessibility Acknowledgement (v2) ---
+        async accessibilityAck(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/accessibility-ack`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // --- Accessibility Feedback (v2) ---
+        async submitAccessibilityFeedback(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/accessibility-feedback`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
         async emergency(tripId, message = null) {
             return ApiService.request(`/trips/${encodeURIComponent(tripId)}/safety/emergency`, {
                 method: 'POST',
@@ -323,13 +352,41 @@ const ApiService = {
         }
     },
 
+    // Passenger profile endpoints (v2)
+    passengers: {
+        async getMyAccessibilityProfile(params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/passengers/me/accessibility${queryString ? `?${queryString}` : ''}`);
+        },
+
+        async updateMyAccessibilityProfile(payload = {}) {
+            return ApiService.request('/passengers/me/accessibility', {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getMyEmergencyProfile(params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/passengers/me/emergency-profile${queryString ? `?${queryString}` : ''}`);
+        },
+
+        async updateMyEmergencyProfile(payload = {}) {
+            return ApiService.request('/passengers/me/emergency-profile', {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        }
+    },
+
     pickupHubs: {
-        async suggest(lat, lng, limit = null, preference = null) {
+        async suggest(lat, lng, limit = null, preference = null, accessibility = null) {
             const params = new URLSearchParams();
             params.set('lat', lat);
             params.set('lng', lng);
             if (Number.isFinite(limit)) params.set('limit', limit);
             if (preference) params.set('preference', preference);
+            if (accessibility === true) params.set('accessibility', '1');
             return ApiService.request(`/pickup-hubs/suggest?${params.toString()}`);
         }
     },

@@ -222,6 +222,157 @@ async function saveBudgetEnvelope() {
     if (statusEl) statusEl.textContent = '✅ تم حفظ الميزانية.';
 }
 
+async function loadAccessibilityProfile() {
+    const statusEl = document.getElementById('acc-status');
+    const voiceEl = document.getElementById('acc-voice-prompts');
+    const textEl = document.getElementById('acc-text-first');
+    const noCallsEl = document.getElementById('acc-no-calls');
+    const wheelEl = document.getElementById('acc-wheelchair');
+    const extraEl = document.getElementById('acc-extra-time');
+    const simpleEl = document.getElementById('acc-simple-language');
+    const notesEl = document.getElementById('acc-notes');
+    if (!voiceEl || !textEl || !noCallsEl || !wheelEl || !extraEl || !simpleEl || !notesEl) return;
+
+    if (!getToken()) {
+        if (statusEl) statusEl.textContent = 'سجّل الدخول لعرض/حفظ ملف الإتاحة.';
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = 'جاري التحميل...';
+    const { res, data } = await apiJson('/api/passengers/me/accessibility');
+    if (!res.ok || !data.success) {
+        if (statusEl) statusEl.textContent = 'تعذر تحميل ملف الإتاحة.';
+        return;
+    }
+
+    const row = data.data || {};
+    voiceEl.checked = !!row.voice_prompts;
+    textEl.checked = !!row.text_first;
+    noCallsEl.checked = !!row.no_calls;
+    wheelEl.checked = !!row.wheelchair;
+    extraEl.checked = !!row.extra_time;
+    simpleEl.checked = !!row.simple_language;
+    notesEl.value = row.notes ? String(row.notes) : '';
+    if (statusEl) statusEl.textContent = 'تم تحميل ملف الإتاحة.';
+}
+
+async function saveAccessibilityProfile() {
+    const statusEl = document.getElementById('acc-status');
+    const voiceEl = document.getElementById('acc-voice-prompts');
+    const textEl = document.getElementById('acc-text-first');
+    const noCallsEl = document.getElementById('acc-no-calls');
+    const wheelEl = document.getElementById('acc-wheelchair');
+    const extraEl = document.getElementById('acc-extra-time');
+    const simpleEl = document.getElementById('acc-simple-language');
+    const notesEl = document.getElementById('acc-notes');
+    if (!voiceEl || !textEl || !noCallsEl || !wheelEl || !extraEl || !simpleEl || !notesEl) return;
+
+    if (!getToken()) {
+        if (statusEl) statusEl.textContent = 'سجّل الدخول أولاً.';
+        return;
+    }
+
+    const payload = {
+        voice_prompts: !!voiceEl.checked,
+        text_first: !!textEl.checked,
+        no_calls: !!noCallsEl.checked,
+        wheelchair: !!wheelEl.checked,
+        extra_time: !!extraEl.checked,
+        simple_language: !!simpleEl.checked,
+        notes: notesEl.value ? String(notesEl.value) : null
+    };
+
+    if (statusEl) statusEl.textContent = 'جاري الحفظ...';
+    const { res, data } = await apiJson('/api/passengers/me/accessibility', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!res.ok || !data.success) {
+        if (statusEl) statusEl.textContent = 'تعذر حفظ ملف الإتاحة.';
+        return;
+    }
+    if (statusEl) statusEl.textContent = '✅ تم حفظ ملف الإتاحة.';
+}
+
+function setEmergencyInputsEnabled(enabled) {
+    const ids = ['em-contact-name', 'em-contact-channel', 'em-contact-value', 'em-medical-note'];
+    ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !enabled;
+    });
+}
+
+async function loadEmergencyProfile() {
+    const statusEl = document.getElementById('em-status');
+    const optEl = document.getElementById('em-opt-in');
+    const nameEl = document.getElementById('em-contact-name');
+    const chanEl = document.getElementById('em-contact-channel');
+    const valEl = document.getElementById('em-contact-value');
+    const medEl = document.getElementById('em-medical-note');
+    if (!optEl || !nameEl || !chanEl || !valEl || !medEl) return;
+
+    if (!getToken()) {
+        setEmergencyInputsEnabled(false);
+        if (statusEl) statusEl.textContent = 'سجّل الدخول لعرض/حفظ بطاقة الطوارئ.';
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = 'جاري التحميل...';
+    const { res, data } = await apiJson('/api/passengers/me/emergency-profile');
+    if (!res.ok || !data.success) {
+        if (statusEl) statusEl.textContent = 'تعذر تحميل بطاقة الطوارئ.';
+        return;
+    }
+
+    const row = data.data || {};
+    optEl.checked = !!row.opt_in;
+    nameEl.value = row.contact_name ? String(row.contact_name) : '';
+    chanEl.value = row.contact_channel ? String(row.contact_channel) : 'phone';
+    valEl.value = row.contact_value ? String(row.contact_value) : '';
+    medEl.value = row.medical_note ? String(row.medical_note) : '';
+    setEmergencyInputsEnabled(!!optEl.checked);
+    if (statusEl) statusEl.textContent = 'تم تحميل بطاقة الطوارئ.';
+}
+
+async function saveEmergencyProfile() {
+    const statusEl = document.getElementById('em-status');
+    const optEl = document.getElementById('em-opt-in');
+    const nameEl = document.getElementById('em-contact-name');
+    const chanEl = document.getElementById('em-contact-channel');
+    const valEl = document.getElementById('em-contact-value');
+    const medEl = document.getElementById('em-medical-note');
+    if (!optEl || !nameEl || !chanEl || !valEl || !medEl) return;
+
+    if (!getToken()) {
+        if (statusEl) statusEl.textContent = 'سجّل الدخول أولاً.';
+        return;
+    }
+
+    const payload = {
+        opt_in: !!optEl.checked,
+        contact_name: nameEl.value ? String(nameEl.value) : null,
+        contact_channel: chanEl.value ? String(chanEl.value) : 'phone',
+        contact_value: valEl.value ? String(valEl.value) : null,
+        medical_note: medEl.value ? String(medEl.value) : null
+    };
+
+    if (statusEl) statusEl.textContent = 'جاري الحفظ...';
+    const { res, data } = await apiJson('/api/passengers/me/emergency-profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!res.ok || !data.success) {
+        if (statusEl) statusEl.textContent = 'تعذر حفظ بطاقة الطوارئ.';
+        return;
+    }
+    setEmergencyInputsEnabled(!!optEl.checked);
+    if (statusEl) statusEl.textContent = '✅ تم حفظ بطاقة الطوارئ.';
+}
+
 function loadPrefs() {
     const defaults = ROLE === 'driver' ? DRIVER_PREF_DEFAULTS : PASSENGER_PREF_DEFAULTS;
     try {
@@ -331,5 +482,21 @@ window.addEventListener('DOMContentLoaded', () => {
     const budgetSave = document.getElementById('budget-save');
     if (budgetSave) budgetSave.addEventListener('click', () => {
         saveBudgetEnvelope().catch(() => {});
+    });
+
+    loadAccessibilityProfile().catch(() => {});
+    const accSave = document.getElementById('acc-save');
+    if (accSave) accSave.addEventListener('click', () => {
+        saveAccessibilityProfile().catch(() => {});
+    });
+
+    loadEmergencyProfile().catch(() => {});
+    const emSave = document.getElementById('em-save');
+    if (emSave) emSave.addEventListener('click', () => {
+        saveEmergencyProfile().catch(() => {});
+    });
+    const emOpt = document.getElementById('em-opt-in');
+    if (emOpt) emOpt.addEventListener('change', () => {
+        setEmergencyInputsEnabled(!!emOpt.checked);
     });
 });
