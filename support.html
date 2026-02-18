@@ -81,6 +81,22 @@
             <div id="tickets-empty" class="text-gray-500 text-sm hidden">لا توجد تذاكر حتى الآن.</div>
             <div id="tickets-list" class="space-y-3"></div>
         </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">📦 المفقودات (Lost &amp; Found)</h2>
+            <p class="text-gray-500 text-sm mb-4">بلاغات مرتبطة بالرحلات لمتابعة الحالة.</p>
+            <div id="lost-loading" class="text-gray-500 text-sm">جاري التحميل...</div>
+            <div id="lost-empty" class="text-gray-500 text-sm hidden">لا توجد بلاغات حتى الآن.</div>
+            <div id="lost-list" class="space-y-3"></div>
+        </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">💰 طلبات مراجعة/استرجاع</h2>
+            <p class="text-gray-500 text-sm mb-4">طلبات مرتبطة بالرحلات لمراجعة الأجرة أو استرجاع جزء منها.</p>
+            <div id="refund-loading" class="text-gray-500 text-sm">جاري التحميل...</div>
+            <div id="refund-empty" class="text-gray-500 text-sm hidden">لا توجد طلبات حتى الآن.</div>
+            <div id="refund-list" class="space-y-3"></div>
+        </div>
         
         <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-6">
             <h2 class="text-lg font-bold text-gray-800 mb-4">طرق التواصل</h2>
@@ -313,7 +329,100 @@
             });
         }
 
-        window.addEventListener('DOMContentLoaded', setupTickets);
+        function renderLostItems(items) {
+            const list = document.getElementById('lost-list');
+            const empty = document.getElementById('lost-empty');
+            const loading = document.getElementById('lost-loading');
+            if (loading) loading.classList.add('hidden');
+            if (!list || !empty) return;
+
+            const rows = Array.isArray(items) ? items : [];
+            if (!rows.length) {
+                empty.classList.remove('hidden');
+                list.innerHTML = '';
+                return;
+            }
+            empty.classList.add('hidden');
+
+            list.innerHTML = rows.map((x) => {
+                const status = (x.status || 'open').toString();
+                const trip = x.trip_id ? `رحلة: ${x.trip_id}` : 'بدون رحلة';
+                const route = [x.pickup_location, x.dropoff_location].filter(Boolean).join(' → ');
+                return `
+                    <div class="bg-gray-50 border border-gray-100 rounded-2xl p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="font-extrabold text-gray-800">بلاغ مفقودات</div>
+                            <div class="text-xs font-extrabold px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700">${status}</div>
+                        </div>
+                        <div class="text-gray-500 text-sm font-bold mt-1">${trip}${route ? ` • ${route}` : ''} • ${formatDate(x.created_at)}</div>
+                        <div class="text-gray-700 text-sm mt-2">${(x.description || '').toString()}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadLostItems() {
+            const loading = document.getElementById('lost-loading');
+            if (loading) loading.classList.remove('hidden');
+            try {
+                const resp = await ApiService.request('/support/me/lost-items');
+                renderLostItems(resp?.data || []);
+            } catch (e) {
+                renderLostItems([]);
+            }
+        }
+
+        function renderRefundRequests(items) {
+            const list = document.getElementById('refund-list');
+            const empty = document.getElementById('refund-empty');
+            const loading = document.getElementById('refund-loading');
+            if (loading) loading.classList.add('hidden');
+            if (!list || !empty) return;
+
+            const rows = Array.isArray(items) ? items : [];
+            if (!rows.length) {
+                empty.classList.remove('hidden');
+                list.innerHTML = '';
+                return;
+            }
+            empty.classList.add('hidden');
+
+            list.innerHTML = rows.map((x) => {
+                const status = (x.status || 'pending').toString();
+                const trip = x.trip_id ? `رحلة: ${x.trip_id}` : 'بدون رحلة';
+                const amt = x.amount_requested !== null && x.amount_requested !== undefined ? `${x.amount_requested} ر.س` : '—';
+                const route = [x.pickup_location, x.dropoff_location].filter(Boolean).join(' → ');
+                return `
+                    <div class="bg-gray-50 border border-gray-100 rounded-2xl p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="font-extrabold text-gray-800">طلب مراجعة/استرجاع</div>
+                            <div class="text-xs font-extrabold px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700">${status}</div>
+                        </div>
+                        <div class="text-gray-500 text-sm font-bold mt-1">${trip}${route ? ` • ${route}` : ''} • ${formatDate(x.created_at)}</div>
+                        <div class="text-gray-700 text-sm mt-2">${(x.reason || '').toString()}</div>
+                        <div class="text-gray-600 text-xs font-bold mt-2">المبلغ المطلوب: ${amt}</div>
+                        ${x.resolution_note ? `<div class="text-xs text-gray-500 font-bold mt-2">قرار: ${(x.resolution_note || '').toString()}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadRefundRequests() {
+            const loading = document.getElementById('refund-loading');
+            if (loading) loading.classList.remove('hidden');
+            try {
+                const resp = await ApiService.request('/support/me/refund-requests');
+                renderRefundRequests(resp?.data || []);
+            } catch (e) {
+                renderRefundRequests([]);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            await setupTickets();
+            await loadLostItems();
+            await loadRefundRequests();
+        });
     </script>
     <script>
         (function() {

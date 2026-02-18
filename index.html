@@ -1028,13 +1028,23 @@
                         <span class="text-xs sm:text-sm text-gray-600 font-bold group-hover:text-gray-800 transition-colors">العمل</span>
                         <span id="work-set-indicator" class="hidden absolute top-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></span>
                     </button>
-                    <button onclick="selectSavedPlace('favorite')" oncontextmenu="savePlaceAs(event, 'favorite')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
-                        <div class="w-14 h-14 sm:w-16 sm:h-16 bg-gray-50 rounded-xl sm:rounded-2xl flex items-center justify-center text-yellow-500 mb-2 group-hover:bg-yellow-400 group-hover:text-white transition-all shadow-sm group-hover:shadow-lg">
-                            <i class="fas fa-star text-lg sm:text-xl"></i>
+                    <button onclick="openSavedPlacesList()" oncontextmenu="savePlaceAs(event, 'custom')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
+                        <div class="w-14 h-14 sm:w-16 sm:h-16 bg-gray-50 rounded-xl sm:rounded-2xl flex items-center justify-center text-indigo-600 mb-2 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm group-hover:shadow-lg">
+                            <i class="fas fa-bookmark text-lg sm:text-xl"></i>
                         </div>
-                        <span class="text-xs sm:text-sm text-gray-600 font-bold group-hover:text-yellow-500 transition-colors">المفضلة</span>
+                        <span class="text-xs sm:text-sm text-gray-600 font-bold group-hover:text-indigo-600 transition-colors">المحفوظة</span>
                         <span id="favorite-set-indicator" class="hidden absolute top-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></span>
                     </button>
+                </div>
+
+                <!-- Trip Templates (v3) -->
+                <div class="mt-6 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-sm font-extrabold text-gray-800">📌 قوالب رحلات</p>
+                        <button type="button" onclick="refreshTripTemplatesUI()" class="text-xs font-bold text-indigo-600 hover:text-indigo-700">تحديث</button>
+                    </div>
+                    <div id="trip-templates-empty" class="text-xs text-gray-500 font-bold">لا توجد قوالب حتى الآن.</div>
+                    <div id="trip-templates-list" class="mt-2 flex flex-wrap gap-2"></div>
                 </div>
                 
                 <!-- Promo Card -->
@@ -1267,6 +1277,10 @@
                         <div id="match-timeline-items" class="space-y-2 text-sm text-gray-700"></div>
                     </div>
                 </div>
+
+                <button id="save-template-btn" type="button" onclick="saveCurrentTripAsTemplate()" class="hidden mt-5 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-2xl transition-colors">
+                    💾 حفظ كقالب
+                </button>
 
                 <button class="mt-8 text-red-500 font-bold text-sm bg-red-50 px-6 py-2 rounded-full hover:bg-red-100 transition-colors" onclick="resetApp()">إلغاء الطلب</button>
             </div>
@@ -1747,6 +1761,24 @@
                         <p id="acc-feedback-status" class="text-[11px] text-gray-500 mt-2"></p>
                     </div>
 
+                    <!-- Tipping (v3) -->
+                    <div class="bg-white border border-gray-200 rounded-2xl p-5 mb-6">
+                        <h3 class="text-sm font-extrabold text-gray-800 mb-2">💸 بقشيش (اختياري)</h3>
+                        <p class="text-[11px] text-gray-500 mb-3">لو حابب تشكر الكابتن بعد الرحلة</p>
+
+                        <div class="grid grid-cols-3 gap-2">
+                            <button type="button" onclick="sendTip(2)" class="py-2.5 rounded-xl bg-gray-50 text-gray-700 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">2 ر.س</button>
+                            <button type="button" onclick="sendTip(5)" class="py-2.5 rounded-xl bg-gray-50 text-gray-700 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">5 ر.س</button>
+                            <button type="button" onclick="sendTip(10)" class="py-2.5 rounded-xl bg-gray-50 text-gray-700 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">10 ر.س</button>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 mt-3">
+                            <input id="tip-custom-amount" type="number" inputmode="decimal" min="0" step="0.5" class="px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none" placeholder="مبلغ آخر" />
+                            <button type="button" onclick="sendCustomTip()" class="py-2.5 rounded-xl bg-indigo-600 text-white font-extrabold hover:bg-indigo-700 transition-colors">إرسال</button>
+                        </div>
+                        <p id="tip-status" class="text-[11px] text-gray-500 mt-2"></p>
+                    </div>
+
                     <!-- Driver rating section -->
                     <div class="bg-white border border-gray-200 rounded-2xl p-5">
                         <h3 class="text-lg font-extrabold text-gray-800 mb-3">قيّم السائق</h3>
@@ -2181,11 +2213,20 @@
 
                 <!-- Action Buttons -->
                 <div class="grid grid-cols-2 gap-3">
-                    <button class="bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">
+                    <button id="trip-detail-rebook-btn" type="button" onclick="rebookTripFromDetails()" class="bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">
                         <i class="fas fa-redo ml-2"></i> إعادة الطلب
                     </button>
-                    <button class="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold hover:bg-indigo-100 transition-colors">
+                    <button id="trip-detail-receipt-btn" type="button" onclick="downloadReceiptFromDetails()" class="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold hover:bg-indigo-100 transition-colors">
                         <i class="fas fa-download ml-2"></i> تحميل الفاتورة
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mt-3">
+                    <button id="trip-detail-lost-btn" type="button" onclick="reportLostItemFromDetails()" class="bg-amber-50 text-amber-700 py-3 rounded-xl font-bold hover:bg-amber-100 transition-colors">
+                        <i class="fas fa-box-open ml-2"></i> نسيت حاجة؟
+                    </button>
+                    <button id="trip-detail-refund-btn" type="button" onclick="requestRefundFromDetails()" class="bg-red-50 text-red-700 py-3 rounded-xl font-bold hover:bg-red-100 transition-colors">
+                        <i class="fas fa-hand-holding-dollar ml-2"></i> طلب مراجعة/استرجاع
                     </button>
                 </div>
             </div>

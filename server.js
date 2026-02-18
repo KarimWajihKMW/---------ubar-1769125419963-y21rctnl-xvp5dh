@@ -608,6 +608,167 @@ const DEFAULT_ADMIN_USERS = [
     }
 ];
 
+// Ensure core schema exists (fresh DB safety)
+async function ensureCoreSchema() {
+    const client = await pool.connect();
+    try {
+        // Enum type used by trips.trip_status
+        await client.query(`
+            DO $$
+            BEGIN
+                CREATE TYPE trip_status_enum AS ENUM ('pending', 'accepted', 'arrived', 'started', 'completed', 'rated');
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                phone VARCHAR(20) UNIQUE NOT NULL,
+                name VARCHAR(100),
+                email VARCHAR(100) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                role VARCHAR(20) DEFAULT 'passenger',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS drivers (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                phone VARCHAR(20) UNIQUE NOT NULL,
+                email VARCHAR(100) UNIQUE,
+                password VARCHAR(255),
+                car_type VARCHAR(50) DEFAULT 'economy',
+                car_plate VARCHAR(20),
+                approval_status VARCHAR(20) DEFAULT 'pending',
+                approved_by INTEGER,
+                approved_at TIMESTAMP,
+                rejection_reason TEXT,
+                rating DECIMAL(3, 2) DEFAULT 5.00,
+                total_trips INTEGER DEFAULT 0,
+                total_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                balance DECIMAL(10, 2) DEFAULT 0.00,
+                today_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                today_trips_count INTEGER DEFAULT 0,
+                last_earnings_update DATE DEFAULT CURRENT_DATE,
+                status VARCHAR(20) DEFAULT 'offline',
+                last_lat DECIMAL(10, 8),
+                last_lng DECIMAL(11, 8),
+                last_location_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS driver_earnings (
+                id SERIAL PRIMARY KEY,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE CASCADE,
+                date DATE NOT NULL DEFAULT CURRENT_DATE,
+                today_trips INTEGER DEFAULT 0,
+                today_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                total_trips INTEGER DEFAULT 0,
+                total_earnings DECIMAL(10, 2) DEFAULT 0.00,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(driver_id, date)
+            );
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS trips (
+                id VARCHAR(50) PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id),
+                rider_id INTEGER REFERENCES users(id),
+                driver_id INTEGER REFERENCES drivers(id),
+                pickup_location VARCHAR(255) NOT NULL,
+                dropoff_location VARCHAR(255) NOT NULL,
+                pickup_lat DECIMAL(10, 8),
+                pickup_lng DECIMAL(11, 8),
+                pickup_accuracy DOUBLE PRECISION,
+                pickup_timestamp BIGINT,
+                dropoff_lat DECIMAL(10, 8),
+                dropoff_lng DECIMAL(11, 8),
+                car_type VARCHAR(50) DEFAULT 'economy',
+                cost DECIMAL(10, 2) NOT NULL,
+                price DECIMAL(10, 2),
+                distance DECIMAL(10, 2),
+                distance_km DECIMAL(10, 2),
+                duration INTEGER,
+                duration_minutes INTEGER,
+                payment_method VARCHAR(20) DEFAULT 'cash',
+                status VARCHAR(20) DEFAULT 'pending',
+                trip_status trip_status_enum DEFAULT 'pending',
+                source VARCHAR(40) DEFAULT 'passenger_app',
+                rating INTEGER,
+                review TEXT,
+                passenger_rating INTEGER,
+                rider_rating INTEGER,
+                driver_rating INTEGER,
+                passenger_review TEXT,
+                driver_review TEXT,
+                driver_name VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                cancelled_at TIMESTAMP
+            );
+        `);
+
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS pending_ride_requests (
+                id SERIAL PRIMARY KEY,
+                request_id VARCHAR(50) UNIQUE NOT NULL,
+                trip_id VARCHAR(50),
+                source VARCHAR(40) DEFAULT 'manual',
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                passenger_name VARCHAR(100),
+                passenger_phone VARCHAR(20),
+                pickup_location VARCHAR(255) NOT NULL,
+                dropoff_location VARCHAR(255) NOT NULL,
+                pickup_lat DECIMAL(10, 8),
+                pickup_lng DECIMAL(11, 8),
+                pickup_accuracy DOUBLE PRECISION,
+                pickup_timestamp BIGINT,
+                dropoff_lat DECIMAL(10, 8),
+                dropoff_lng DECIMAL(11, 8),
+                car_type VARCHAR(50) DEFAULT 'economy',
+                estimated_cost DECIMAL(10, 2),
+                estimated_distance DECIMAL(10, 2),
+                estimated_duration INTEGER,
+                payment_method VARCHAR(20) DEFAULT 'cash',
+                status VARCHAR(20) DEFAULT 'waiting',
+                assigned_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                assigned_at TIMESTAMP,
+                rejected_by INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+                rejection_count INTEGER DEFAULT 0,
+                expires_at TIMESTAMP,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trips_user_id ON trips(user_id);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trips_driver_id ON trips(driver_id);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trips_created_at ON trips(created_at DESC);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_pending_rides_status ON pending_ride_requests(status);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_pending_rides_created_at ON pending_ride_requests(created_at DESC);');
+
+        console.log('✅ Core schema ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure core schema:', err.message);
+    } finally {
+        client.release();
+    }
+}
+
 async function ensureDefaultAdmins() {
     try {
         for (const admin of DEFAULT_ADMIN_USERS) {
@@ -1367,6 +1528,117 @@ async function ensurePassengerFeatureTables() {
             ON wallet_transactions(owner_type, owner_id, reference_type, reference_id)
             WHERE reference_type IS NOT NULL AND reference_id IS NOT NULL;
         `);
+
+        // ==================== PASSENGER FEATURES (v3) ====================
+
+        // (A) Saved Places
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_saved_places (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                label VARCHAR(20) NOT NULL,
+                name VARCHAR(120) NOT NULL,
+                lat DECIMAL(10, 8) NOT NULL,
+                lng DECIMAL(11, 8) NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_saved_places_user ON passenger_saved_places(user_id, created_at DESC);');
+        // Enforce one home/work place per user (custom can be multiple)
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_passenger_saved_places_home_work
+            ON passenger_saved_places(user_id, label)
+            WHERE label IN ('home', 'work');
+        `);
+
+        // (B) Trip Templates
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_trip_templates (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(120) NOT NULL,
+                payload_json JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_trip_templates_user ON passenger_trip_templates(user_id, created_at DESC);');
+
+        // (C) Lost & Found
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS lost_items (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                description TEXT NOT NULL,
+                contact_method VARCHAR(60),
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_lost_items_user ON lost_items(user_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_lost_items_trip ON lost_items(trip_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_lost_items_status ON lost_items(status, created_at DESC);');
+
+        // (D) Tipping
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_tips (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                amount DECIMAL(12, 2) NOT NULL,
+                method VARCHAR(20) NOT NULL DEFAULT 'cash',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (trip_id, user_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_tips_trip ON trip_tips(trip_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_tips_driver ON trip_tips(driver_id, created_at DESC);');
+
+        // (E) Ride Pass / Subscription
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS passenger_ride_passes (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                type VARCHAR(60) NOT NULL,
+                rules_json JSONB,
+                valid_from TIMESTAMP,
+                valid_to TIMESTAMP,
+                status VARCHAR(20) NOT NULL DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_passenger_ride_passes_user ON passenger_ride_passes(user_id, status, valid_to DESC);');
+
+        // Store pass effect on trip
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS ride_pass_id BIGINT REFERENCES passenger_ride_passes(id) ON DELETE SET NULL;');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS fare_before_discount DECIMAL(12, 2);');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS discount_amount DECIMAL(12, 2);');
+        await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS discount_meta_json JSONB;');
+
+        // (F) Fare Review / Refund Request
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS refund_requests (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                reason TEXT NOT NULL,
+                amount_requested DECIMAL(12, 2),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                resolution_note TEXT,
+                reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (trip_id, user_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_refund_requests_user ON refund_requests(user_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_refund_requests_status ON refund_requests(status, created_at DESC);');
+
+        // (G) Smart Rebook - no table required
 
         console.log('✅ Passenger feature tables ensured');
     } catch (err) {
@@ -4541,6 +4813,711 @@ app.patch('/api/admin/support/tickets/:id', requireRole('admin'), async (req, re
     }
 });
 
+// ==================== PASSENGER FEATURES (v3) ====================
+
+// --- Saved Places ---
+
+app.get('/api/passengers/me/places', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT *
+             FROM passenger_saved_places
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 200`,
+            [userId]
+        );
+
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/places', requireRole('passenger', 'admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.body?.user_id ? Number(req.body.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const label = req.body?.label ? String(req.body.label).toLowerCase().trim() : null;
+        const name = req.body?.name ? String(req.body.name).trim() : null;
+        const lat = req.body?.lat !== undefined && req.body?.lat !== null ? Number(req.body.lat) : null;
+        const lng = req.body?.lng !== undefined && req.body?.lng !== null ? Number(req.body.lng) : null;
+        const notes = req.body?.notes !== undefined && req.body?.notes !== null ? String(req.body.notes) : null;
+
+        if (!label || !['home', 'work', 'custom'].includes(label)) {
+            return res.status(400).json({ success: false, error: 'label must be home/work/custom' });
+        }
+        if (!name) return res.status(400).json({ success: false, error: 'name is required' });
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return res.status(400).json({ success: false, error: 'Invalid coordinates' });
+        }
+
+        await client.query('BEGIN');
+
+        // Home/work: replace existing row to keep one per user
+        if (label === 'home' || label === 'work') {
+            await client.query(
+                `DELETE FROM passenger_saved_places
+                 WHERE user_id = $1 AND label = $2`,
+                [userId, label]
+            );
+        }
+
+        const insert = await client.query(
+            `INSERT INTO passenger_saved_places (user_id, label, name, lat, lng, notes)
+             VALUES ($1,$2,$3,$4,$5,NULLIF($6,''))
+             RETURNING *`,
+            [userId, label, name, lat, lng, notes || '']
+        );
+
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) {}
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.delete('/api/passengers/me/places/:id', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (authRole === 'passenger' && !userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+        const params = [id];
+        let where = 'WHERE id = $1';
+        if (authRole === 'passenger') {
+            params.push(userId);
+            where += ` AND user_id = $2`;
+        }
+
+        const del = await pool.query(
+            `DELETE FROM passenger_saved_places
+             ${where}
+             RETURNING *`,
+            params
+        );
+
+        if (del.rows.length === 0) return res.status(404).json({ success: false, error: 'Place not found' });
+        res.json({ success: true, data: del.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Trip Templates ---
+
+app.get('/api/passengers/me/trip-templates', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT *
+             FROM passenger_trip_templates
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 200`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/trip-templates', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.body?.user_id ? Number(req.body.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const title = req.body?.title ? String(req.body.title).trim() : null;
+        const payload = req.body?.payload_json !== undefined ? req.body.payload_json : req.body?.payload;
+        if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+        if (!payload || typeof payload !== 'object') return res.status(400).json({ success: false, error: 'payload_json must be an object' });
+
+        const insert = await pool.query(
+            `INSERT INTO passenger_trip_templates (user_id, title, payload_json)
+             VALUES ($1,$2,$3::jsonb)
+             RETURNING *`,
+            [userId, title, JSON.stringify(payload)]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/passengers/me/trip-templates/:id', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (authRole === 'passenger' && !userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+        const params = [id];
+        let where = 'WHERE id = $1';
+        if (authRole === 'passenger') {
+            params.push(userId);
+            where += ` AND user_id = $2`;
+        }
+
+        const del = await pool.query(
+            `DELETE FROM passenger_trip_templates
+             ${where}
+             RETURNING *`,
+            params
+        );
+        if (del.rows.length === 0) return res.status(404).json({ success: false, error: 'Template not found' });
+        res.json({ success: true, data: del.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Ride Passes ---
+
+app.get('/api/passengers/me/passes', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const includeInactive = String(req.query.include_inactive || '').toLowerCase() === '1' || String(req.query.include_inactive || '').toLowerCase() === 'true';
+        const params = [userId];
+        let where = 'WHERE user_id = $1';
+        if (!includeInactive) {
+            where += " AND status = 'active'";
+        }
+
+        const result = await pool.query(
+            `SELECT *
+             FROM passenger_ride_passes
+             ${where}
+             ORDER BY COALESCE(valid_to, NOW() + INTERVAL '10 years') DESC, created_at DESC
+             LIMIT 200`,
+            params
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/passengers/me/passes', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.body?.user_id ? Number(req.body.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const type = req.body?.type ? String(req.body.type).trim() : null;
+        const rules = req.body?.rules_json !== undefined ? req.body.rules_json : req.body?.rules;
+        const status = req.body?.status ? String(req.body.status).trim() : 'active';
+        const validFrom = req.body?.valid_from ? new Date(req.body.valid_from) : null;
+        const validTo = req.body?.valid_to ? new Date(req.body.valid_to) : null;
+
+        if (!type) return res.status(400).json({ success: false, error: 'type is required' });
+        if (rules !== null && rules !== undefined && typeof rules !== 'object') {
+            return res.status(400).json({ success: false, error: 'rules_json must be an object' });
+        }
+
+        const insert = await pool.query(
+            `INSERT INTO passenger_ride_passes (user_id, type, rules_json, valid_from, valid_to, status)
+             VALUES ($1,$2,$3::jsonb,$4,$5,$6)
+             RETURNING *`,
+            [
+                userId,
+                type,
+                rules ? JSON.stringify(rules) : null,
+                validFrom && Number.isFinite(validFrom.getTime()) ? validFrom.toISOString() : null,
+                validTo && Number.isFinite(validTo.getTime()) ? validTo.toISOString() : null,
+                status
+            ]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Lost & Found ---
+
+app.post('/api/trips/:id/lost-items', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const description = req.body?.description ? String(req.body.description).trim() : null;
+        const contactMethod = req.body?.contact_method !== undefined && req.body?.contact_method !== null ? String(req.body.contact_method).trim() : null;
+        if (!description) return res.status(400).json({ success: false, error: 'description is required' });
+
+        const tripRes = await pool.query('SELECT id, user_id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const insert = await pool.query(
+            `INSERT INTO lost_items (trip_id, user_id, description, contact_method)
+             VALUES ($1,$2,$3,NULLIF($4,''))
+             RETURNING *`,
+            [tripId, tripRow.user_id || authUserId || null, description, contactMethod || '']
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/support/me/lost-items', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT li.*, t.pickup_location, t.dropoff_location, t.status AS trip_status
+             FROM lost_items li
+             LEFT JOIN trips t ON t.id = li.trip_id
+             WHERE li.user_id = $1
+             ORDER BY li.created_at DESC
+             LIMIT 200`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/admin/lost-items', requireRole('admin'), async (req, res) => {
+    try {
+        const status = req.query.status ? String(req.query.status) : null;
+        const params = [];
+        let where = '';
+        if (status) {
+            params.push(status);
+            where = `WHERE li.status = $${params.length}`;
+        }
+
+        const result = await pool.query(
+            `SELECT li.*, u.name AS user_name, u.phone AS user_phone, u.email AS user_email,
+                    t.pickup_location, t.dropoff_location, t.status AS trip_status
+             FROM lost_items li
+             LEFT JOIN users u ON u.id = li.user_id
+             LEFT JOIN trips t ON t.id = li.trip_id
+             ${where}
+             ORDER BY li.created_at DESC
+             LIMIT 500`,
+            params
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.patch('/api/admin/lost-items/:id', requireRole('admin'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const nextStatus = req.body?.status ? String(req.body.status) : null;
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (!nextStatus) return res.status(400).json({ success: false, error: 'status is required' });
+
+        const updated = await pool.query(
+            `UPDATE lost_items
+             SET status = $2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING *`,
+            [id, nextStatus]
+        );
+        if (updated.rows.length === 0) return res.status(404).json({ success: false, error: 'Lost item not found' });
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Refund Requests ---
+
+app.post('/api/trips/:id/refund-request', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const reason = req.body?.reason ? String(req.body.reason).trim() : null;
+        const amountRequested = req.body?.amount_requested !== undefined && req.body?.amount_requested !== null ? Number(req.body.amount_requested) : null;
+        if (!reason) return res.status(400).json({ success: false, error: 'reason is required' });
+        if (amountRequested !== null && (!Number.isFinite(amountRequested) || amountRequested < 0)) {
+            return res.status(400).json({ success: false, error: 'Invalid amount_requested' });
+        }
+
+        const tripRes = await pool.query('SELECT id, user_id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const insert = await pool.query(
+            `INSERT INTO refund_requests (trip_id, user_id, reason, amount_requested)
+             VALUES ($1,$2,$3,$4)
+             ON CONFLICT (trip_id, user_id)
+             DO UPDATE SET
+                reason = EXCLUDED.reason,
+                amount_requested = EXCLUDED.amount_requested,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [tripId, tripRow.user_id || authUserId || null, reason, amountRequested]
+        );
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/support/me/refund-requests', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
+
+        const result = await pool.query(
+            `SELECT rr.*, t.pickup_location, t.dropoff_location, t.status AS trip_status
+             FROM refund_requests rr
+             LEFT JOIN trips t ON t.id = rr.trip_id
+             WHERE rr.user_id = $1
+             ORDER BY rr.created_at DESC
+             LIMIT 200`,
+            [userId]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/admin/refund-requests', requireRole('admin'), async (req, res) => {
+    try {
+        const status = req.query.status ? String(req.query.status) : null;
+        const params = [];
+        let where = '';
+        if (status) {
+            params.push(status);
+            where = `WHERE rr.status = $${params.length}`;
+        }
+
+        const result = await pool.query(
+            `SELECT rr.*, u.name AS user_name, u.phone AS user_phone, u.email AS user_email,
+                    t.pickup_location, t.dropoff_location, t.status AS trip_status
+             FROM refund_requests rr
+             LEFT JOIN users u ON u.id = rr.user_id
+             LEFT JOIN trips t ON t.id = rr.trip_id
+             ${where}
+             ORDER BY rr.created_at DESC
+             LIMIT 500`,
+            params
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.patch('/api/admin/refund-requests/:id', requireRole('admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const id = Number(req.params.id);
+        const nextStatus = req.body?.status ? String(req.body.status).toLowerCase() : null;
+        const resolutionNote = req.body?.resolution_note !== undefined && req.body?.resolution_note !== null ? String(req.body.resolution_note) : null;
+        const approvedAmount = req.body?.amount_approved !== undefined && req.body?.amount_approved !== null ? Number(req.body.amount_approved) : null;
+
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (!nextStatus || !['pending', 'approved', 'rejected'].includes(nextStatus)) {
+            return res.status(400).json({ success: false, error: 'status must be pending/approved/rejected' });
+        }
+
+        await client.query('BEGIN');
+
+        const rrRes = await client.query(
+            `SELECT *
+             FROM refund_requests
+             WHERE id = $1
+             FOR UPDATE`,
+            [id]
+        );
+        const rr = rrRes.rows[0] || null;
+        if (!rr) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: 'Refund request not found' });
+        }
+
+        const userId = rr.user_id ? Number(rr.user_id) : null;
+        const amountBase = rr.amount_requested !== null && rr.amount_requested !== undefined ? Number(rr.amount_requested) : null;
+        const amountToCredit = nextStatus === 'approved'
+            ? (approvedAmount !== null && approvedAmount !== undefined ? approvedAmount : amountBase)
+            : null;
+
+        if (nextStatus === 'approved') {
+            if (!userId) {
+                throw new Error('refund_request_missing_user');
+            }
+            if (!Number.isFinite(amountToCredit) || amountToCredit <= 0) {
+                throw new Error('invalid_approved_amount');
+            }
+
+            await client.query(
+                `INSERT INTO wallet_transactions (
+                    owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_by_user_id, created_by_role
+                 ) VALUES ('user', $1, $2, 'SAR', $3, 'refund', $4, $5, 'admin')
+                 ON CONFLICT DO NOTHING`,
+                [
+                    userId,
+                    Math.abs(amountToCredit),
+                    `Refund for trip ${String(rr.trip_id || '')}`,
+                    `refund:${String(id)}`,
+                    req.auth?.uid || null
+                ]
+            );
+
+            // Backward-compat cached balance
+            await client.query(
+                `UPDATE users
+                 SET balance = COALESCE(balance, 0) + $1,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [Math.abs(amountToCredit), userId]
+            );
+        }
+
+        const updated = await client.query(
+            `UPDATE refund_requests
+             SET status = $2,
+                 resolution_note = NULLIF($3,''),
+                 reviewed_by = $4,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING *`,
+            [id, nextStatus, resolutionNote || '', req.auth?.uid || null]
+        );
+
+        await client.query('COMMIT');
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) {}
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// --- Tipping (after trip) ---
+
+app.post('/api/trips/:id/tip', requireRole('passenger', 'admin'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const tripId = String(req.params.id);
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+
+        const amount = req.body?.amount !== undefined && req.body?.amount !== null ? Number(req.body.amount) : null;
+        const method = req.body?.method ? String(req.body.method).toLowerCase() : 'cash';
+        if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ success: false, error: 'amount must be > 0' });
+        if (!['cash', 'wallet'].includes(method)) return res.status(400).json({ success: false, error: 'method must be cash/wallet' });
+
+        const tripRes = await client.query(
+            `SELECT id, user_id, driver_id, status
+             FROM trips
+             WHERE id = $1
+             LIMIT 1
+             FOR UPDATE`,
+            [tripId]
+        );
+        const tripRow = tripRes.rows[0] || null;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+        if (!tripRow) return res.status(404).json({ success: false, error: 'Trip not found' });
+        if (String(tripRow.status || '').toLowerCase() !== 'completed') {
+            return res.status(409).json({ success: false, error: 'Tip is allowed after trip completion only' });
+        }
+        if (!tripRow.driver_id) {
+            return res.status(409).json({ success: false, error: 'Trip has no driver' });
+        }
+
+        await client.query('BEGIN');
+
+        const inserted = await client.query(
+            `INSERT INTO trip_tips (trip_id, user_id, driver_id, amount, method)
+             VALUES ($1,$2,$3,$4,$5)
+             ON CONFLICT (trip_id, user_id)
+             DO NOTHING
+             RETURNING *`,
+            [tripId, tripRow.user_id || authUserId, tripRow.driver_id, amount, method]
+        );
+
+        // If already tipped, return existing
+        let tipRow = inserted.rows[0] || null;
+        if (!tipRow) {
+            const existing = await client.query(
+                `SELECT * FROM trip_tips WHERE trip_id = $1 AND user_id = $2 LIMIT 1`,
+                [tripId, tripRow.user_id || authUserId]
+            );
+            tipRow = existing.rows[0] || null;
+            await client.query('ROLLBACK');
+            return res.status(200).json({ success: true, data: tipRow, meta: { deduped: true } });
+        }
+
+        if (method === 'wallet') {
+            const owner = { owner_type: 'user', owner_id: Number(tripRow.user_id || authUserId) };
+            const balance = await getWalletBalance(client, owner);
+            if (balance < amount) {
+                throw new Error('Insufficient wallet balance');
+            }
+
+            await client.query(
+                `INSERT INTO wallet_transactions (
+                    owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_by_user_id, created_by_role
+                 ) VALUES ('user', $1, $2, 'SAR', $3, 'tip', $4, $5, $6)
+                 ON CONFLICT DO NOTHING`,
+                [
+                    owner.owner_id,
+                    -Math.abs(amount),
+                    `Tip for trip ${tripId}`,
+                    `tip:${tripId}`,
+                    owner.owner_id,
+                    authRole
+                ]
+            );
+
+            // Backward-compat cached balance
+            await client.query(
+                `UPDATE users
+                 SET balance = COALESCE(balance, 0) - $1,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [Math.abs(amount), owner.owner_id]
+            );
+        }
+
+        // Credit driver earnings/balance (best-effort)
+        await client.query(
+            `UPDATE drivers
+             SET total_earnings = COALESCE(total_earnings, 0) + $1,
+                 balance = COALESCE(balance, 0) + $1,
+                 today_earnings = COALESCE(today_earnings, 0) + $1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [Math.abs(amount), tripRow.driver_id]
+        );
+
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, data: tipRow });
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) {}
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// --- Smart Rebook ---
+
+app.post('/api/trips/:id/rebook', requireRole('passenger', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId: null });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+        if (!tripRow) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        const st = String(tripRow.status || '').toLowerCase();
+        if (!(st === 'cancelled' || st === 'pending')) {
+            return res.status(409).json({ success: false, error: 'Rebook is allowed for cancelled/timeout trips only' });
+        }
+
+        const newTripId = `TR-${Date.now()}`;
+        const baseCost = tripRow.cost !== undefined && tripRow.cost !== null ? Number(tripRow.cost) : 0;
+
+        const created = await pool.query(
+            `INSERT INTO trips (
+                id, user_id, rider_id, driver_id,
+                pickup_location, dropoff_location,
+                pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp,
+                dropoff_lat, dropoff_lng,
+                car_type, cost, price,
+                distance, distance_km, duration, duration_minutes,
+                payment_method, status, driver_name, source,
+                pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id, quiet_mode
+            ) VALUES (
+                $1,$2,$3,NULL,
+                $4,$5,
+                $6,$7,NULL,NULL,
+                $8,$9,
+                $10,$11,$11,
+                $12,$12,$13,$13,
+                $14,'pending',NULL,'rebook',
+                $15,$16,$17,NULL,$18
+            )
+            RETURNING *`,
+            [
+                newTripId,
+                tripRow.user_id,
+                tripRow.user_id,
+                tripRow.pickup_location,
+                tripRow.dropoff_location,
+                tripRow.pickup_lat,
+                tripRow.pickup_lng,
+                tripRow.dropoff_lat,
+                tripRow.dropoff_lng,
+                tripRow.car_type || 'economy',
+                Number.isFinite(baseCost) ? baseCost : 0,
+                tripRow.distance_km !== undefined && tripRow.distance_km !== null ? Number(tripRow.distance_km) : (tripRow.distance !== undefined && tripRow.distance !== null ? Number(tripRow.distance) : null),
+                tripRow.duration_minutes !== undefined && tripRow.duration_minutes !== null ? Number(tripRow.duration_minutes) : (tripRow.duration !== undefined && tripRow.duration !== null ? Number(tripRow.duration) : null),
+                tripRow.payment_method || 'cash',
+                tripRow.pickup_hub_id || null,
+                tripRow.passenger_note || null,
+                tripRow.booked_for_family_member_id || null,
+                !!tripRow.quiet_mode
+            ]
+        );
+
+        const newTrip = created.rows[0];
+
+        // Realtime: notify passenger room
+        try {
+            if (newTrip?.user_id) {
+                io.to(userRoom(newTrip.user_id)).emit('trip_rebooked', {
+                    old_trip_id: tripId,
+                    new_trip_id: String(newTrip.id),
+                    status: 'pending'
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        res.status(201).json({ success: true, data: newTrip });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // --- Receipts ---
 
 app.get('/api/trips/:id/receipt', requireAuth, async (req, res) => {
@@ -4570,11 +5547,26 @@ app.get('/api/trips/:id/receipt', requireAuth, async (req, res) => {
             [tripId]
         );
 
+        const tips = await pool.query(
+            `SELECT id, user_id, driver_id, amount, method, created_at
+             FROM trip_tips
+             WHERE trip_id = $1
+             ORDER BY created_at ASC`,
+            [tripId]
+        );
+
         res.json({
             success: true,
             data: {
                 trip: tripRow,
-                split_fare: split.rows
+                split_fare: split.rows,
+                tips: tips.rows,
+                discount: {
+                    ride_pass_id: tripRow.ride_pass_id || null,
+                    fare_before_discount: tripRow.fare_before_discount !== undefined ? tripRow.fare_before_discount : null,
+                    discount_amount: tripRow.discount_amount !== undefined ? tripRow.discount_amount : null,
+                    discount_meta: tripRow.discount_meta_json || null
+                }
             }
         });
     } catch (err) {
@@ -5233,6 +6225,76 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
         const effectiveDistance = distance_km !== undefined && distance_km !== null ? distance_km : distance;
         const effectiveDuration = duration_minutes !== undefined && duration_minutes !== null ? duration_minutes : duration;
 
+        // (v3) Ride Pass / Subscription discount (skip when a price lock is used)
+        let ridePassRow = null;
+        let fareBeforeDiscount = null;
+        let discountAmount = null;
+        let discountMeta = null;
+        try {
+            const base = effectiveCost !== undefined && effectiveCost !== null ? Number(effectiveCost) : null;
+            const riderIdNum = effectiveRiderId !== undefined && effectiveRiderId !== null ? Number(effectiveRiderId) : null;
+
+            if (!lockedPriceRow && Number.isFinite(riderIdNum) && riderIdNum > 0 && Number.isFinite(base) && base > 0) {
+                const passRes = await pool.query(
+                    `SELECT *
+                     FROM passenger_ride_passes
+                     WHERE user_id = $1
+                       AND status = 'active'
+                       AND (valid_from IS NULL OR valid_from <= NOW())
+                       AND (valid_to IS NULL OR valid_to >= NOW())
+                     ORDER BY COALESCE(valid_to, NOW() + INTERVAL '10 years') DESC, created_at DESC
+                     LIMIT 1`,
+                    [riderIdNum]
+                );
+                ridePassRow = passRes.rows[0] || null;
+
+                const rules = ridePassRow && ridePassRow.rules_json ? ridePassRow.rules_json : null;
+                if (ridePassRow && rules && typeof rules === 'object') {
+                    const discountType = rules.discount_type ? String(rules.discount_type).toLowerCase() : 'percent';
+                    const value = rules.value !== undefined && rules.value !== null ? Number(rules.value) : null;
+                    const maxDiscount = rules.max_discount !== undefined && rules.max_discount !== null ? Number(rules.max_discount) : null;
+                    const minFare = rules.min_fare !== undefined && rules.min_fare !== null ? Number(rules.min_fare) : null;
+
+                    if ((!Number.isFinite(minFare) || base >= minFare) && Number.isFinite(value) && value > 0) {
+                        let raw = 0;
+                        if (discountType === 'fixed') {
+                            raw = value;
+                        } else {
+                            // default percent
+                            raw = (base * value) / 100;
+                        }
+                        let applied = Math.max(0, Math.min(base, Math.round(raw * 100) / 100));
+                        if (Number.isFinite(maxDiscount) && maxDiscount > 0) {
+                            applied = Math.min(applied, maxDiscount);
+                        }
+
+                        if (applied > 0.001) {
+                            fareBeforeDiscount = Math.round(base * 100) / 100;
+                            discountAmount = Math.round(applied * 100) / 100;
+                            discountMeta = {
+                                source: 'ride_pass',
+                                ride_pass_id: ridePassRow.id,
+                                ride_pass_type: ridePassRow.type || null,
+                                rules_applied: {
+                                    discount_type: discountType,
+                                    value,
+                                    max_discount: Number.isFinite(maxDiscount) ? maxDiscount : null,
+                                    min_fare: Number.isFinite(minFare) ? minFare : null
+                                }
+                            };
+                            effectiveCost = Math.max(0, Math.round((base - discountAmount) * 100) / 100);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // non-blocking
+            ridePassRow = null;
+            fareBeforeDiscount = null;
+            discountAmount = null;
+            discountMeta = null;
+        }
+
         const result = await pool.query(`
             INSERT INTO trips (
                 id, user_id, rider_id, driver_id, pickup_location, dropoff_location,
@@ -5243,8 +6305,9 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
                 duration, duration_minutes,
                 payment_method, status, driver_name, source,
                 pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id, quiet_mode,
-                accessibility_snapshot_json, accessibility_snapshot_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29::jsonb, $30)
+                accessibility_snapshot_json, accessibility_snapshot_at,
+                ride_pass_id, fare_before_discount, discount_amount, discount_meta_json
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29::jsonb, $30, $31, $32, $33, $34::jsonb)
             RETURNING *
         `, [
             tripId, effectiveRiderId, effectiveRiderId, driver_id, effectivePickupLocation, dropoff_location,
@@ -5260,7 +6323,11 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             lockedPriceRow ? Number(lockedPriceRow.id) : null,
             quietModeEnabled,
             accessibilitySnapshot ? JSON.stringify(accessibilitySnapshot) : null,
-            accessibilitySnapshot ? new Date().toISOString() : null
+            accessibilitySnapshot ? new Date().toISOString() : null,
+            ridePassRow ? Number(ridePassRow.id) : null,
+            fareBeforeDiscount !== null ? fareBeforeDiscount : null,
+            discountAmount !== null ? discountAmount : null,
+            discountMeta ? JSON.stringify(discountMeta) : null
         ]);
 
         let createdTrip = result.rows[0];
@@ -9952,7 +11019,8 @@ function startGuardianCron() {
 }
 
 // Start server
-ensureDefaultAdmins()
+ensureCoreSchema()
+    .then(() => ensureDefaultAdmins())
     .then(() => ensureDefaultOffers())
     .then(() => ensureWalletTables())
     .then(() => ensureUserProfileColumns())

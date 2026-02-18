@@ -773,6 +773,201 @@ async function run() {
   if (!receipt.res.ok) throw new Error(`Receipt failed: ${receipt.data.error || receipt.res.status}`);
   console.log('✅ Receipt OK');
 
+  // 15) Saved Places (v3)
+  console.log('\n1️⃣5️⃣ Saved Places (v3)...');
+  const spHome = await jsonFetch(`${baseURL}/passengers/me/places`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ label: 'home', name: 'البيت', lat: 24.7136, lng: 46.6753 })
+  });
+  if (!spHome.res.ok) throw new Error(`Saved place (home) failed: ${spHome.data.error || spHome.res.status}`);
+
+  const spWork = await jsonFetch(`${baseURL}/passengers/me/places`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ label: 'work', name: 'الشغل', lat: 24.6917, lng: 46.6853 })
+  });
+  if (!spWork.res.ok) throw new Error(`Saved place (work) failed: ${spWork.data.error || spWork.res.status}`);
+
+  const spCustom = await jsonFetch(`${baseURL}/passengers/me/places`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ label: 'custom', name: 'مكان محفوظ', lat: 24.7001, lng: 46.6801, notes: 'بوابة' })
+  });
+  if (!spCustom.res.ok) throw new Error(`Saved place (custom) failed: ${spCustom.data.error || spCustom.res.status}`);
+
+  const spList = await jsonFetch(`${baseURL}/passengers/me/places`, { headers: p1Headers });
+  if (!spList.res.ok) throw new Error(`Saved places list failed: ${spList.data.error || spList.res.status}`);
+  if (!Array.isArray(spList.data.data) || spList.data.data.length < 2) throw new Error('Saved places list missing rows');
+
+  const spDelId = spCustom.data.data.id;
+  const spDel = await jsonFetch(`${baseURL}/passengers/me/places/${encodeURIComponent(String(spDelId))}`, {
+    method: 'DELETE',
+    headers: p1Headers
+  });
+  if (!spDel.res.ok) throw new Error(`Saved place delete failed: ${spDel.data.error || spDel.res.status}`);
+
+  // 16) Trip Templates (v3)
+  console.log('\n1️⃣6️⃣ Trip Templates (v3)...');
+  const tplCreate = await jsonFetch(`${baseURL}/passengers/me/trip-templates`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({
+      title: 'قالب سريع',
+      payload_json: {
+        dropoff_location: 'وجهة القالب',
+        dropoff_lat: 24.6917,
+        dropoff_lng: 46.6853,
+        car_type: 'economy',
+        payment_method: 'cash',
+        passenger_note: 'من فضلك بسرعة'
+      }
+    })
+  });
+  if (!tplCreate.res.ok) throw new Error(`Template create failed: ${tplCreate.data.error || tplCreate.res.status}`);
+  const tplId = tplCreate.data.data.id;
+
+  const tplList = await jsonFetch(`${baseURL}/passengers/me/trip-templates`, { headers: p1Headers });
+  if (!tplList.res.ok) throw new Error(`Template list failed: ${tplList.data.error || tplList.res.status}`);
+  if (!Array.isArray(tplList.data.data) || tplList.data.data.length < 1) throw new Error('Template list empty');
+
+  const tplDel = await jsonFetch(`${baseURL}/passengers/me/trip-templates/${encodeURIComponent(String(tplId))}`, {
+    method: 'DELETE',
+    headers: p1Headers
+  });
+  if (!tplDel.res.ok) throw new Error(`Template delete failed: ${tplDel.data.error || tplDel.res.status}`);
+
+  // 17) Ride Pass discount applied on trip creation (v3)
+  console.log('\n1️⃣7️⃣ Ride Pass (v3)...');
+  const passCreate = await jsonFetch(`${baseURL}/passengers/me/passes`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({
+      type: 'اختبار-خصم',
+      rules_json: { discount_type: 'percent', value: 10, max_discount: 20 },
+      status: 'active',
+      valid_to: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    })
+  });
+  if (!passCreate.res.ok) throw new Error(`Pass create failed: ${passCreate.data.error || passCreate.res.status}`);
+
+  const passTrip = await jsonFetch(`${baseURL}/trips`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({
+      pickup_location: 'Pickup pass',
+      dropoff_location: 'Dropoff pass',
+      pickup_lat: 24.7136,
+      pickup_lng: 46.6753,
+      pickup_accuracy: 7,
+      pickup_timestamp: Date.now(),
+      dropoff_lat: 24.6917,
+      dropoff_lng: 46.6853,
+      car_type: 'economy',
+      cost: 100,
+      distance: 10,
+      duration: 20,
+      payment_method: 'cash',
+      source: 'passenger_app'
+    })
+  });
+  if (!passTrip.res.ok) throw new Error(`Trip with pass create failed: ${passTrip.data.error || passTrip.res.status}`);
+  const passTripRow = passTrip.data.data;
+  if (!(Number(passTripRow.cost) < 100)) {
+    throw new Error(`Expected discounted cost < 100, got: ${passTripRow.cost}`);
+  }
+  if (!passTripRow.discount_amount) {
+    throw new Error('Expected discount_amount on trip');
+  }
+  console.log('✅ Pass discount applied:', { before: passTripRow.fare_before_discount, discount: passTripRow.discount_amount, after: passTripRow.cost });
+
+  // 18) Lost & Found (v3)
+  console.log('\n1️⃣8️⃣ Lost & Found (v3)...');
+  const lostCreate = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(splitTripId)}/lost-items`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ description: 'محفظة', contact_method: 'phone' })
+  });
+  if (!lostCreate.res.ok) throw new Error(`Lost item create failed: ${lostCreate.data.error || lostCreate.res.status}`);
+
+  const lostMine = await jsonFetch(`${baseURL}/support/me/lost-items`, { headers: p1Headers });
+  if (!lostMine.res.ok) throw new Error(`Lost items list failed: ${lostMine.data.error || lostMine.res.status}`);
+  if (!Array.isArray(lostMine.data.data) || lostMine.data.data.length < 1) throw new Error('Lost items list empty');
+
+  const lostAdmin = await jsonFetch(`${baseURL}/admin/lost-items`, { headers: adminHeaders });
+  if (!lostAdmin.res.ok) throw new Error(`Admin lost items failed: ${lostAdmin.data.error || lostAdmin.res.status}`);
+
+  const lostId = lostCreate.data.data.id;
+  const lostUpdate = await jsonFetch(`${baseURL}/admin/lost-items/${encodeURIComponent(String(lostId))}`, {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: JSON.stringify({ status: 'resolved' })
+  });
+  if (!lostUpdate.res.ok) throw new Error(`Admin lost update failed: ${lostUpdate.data.error || lostUpdate.res.status}`);
+
+  // 19) Refund Requests (v3)
+  console.log('\n1️⃣9️⃣ Refund Requests (v3)...');
+  const beforeRefundBal = await getWalletBalance(p1.token);
+
+  const rrCreate = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(splitTripId)}/refund-request`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ reason: 'مشكلة في الأجرة', amount_requested: 5 })
+  });
+  if (!rrCreate.res.ok) throw new Error(`Refund request create failed: ${rrCreate.data.error || rrCreate.res.status}`);
+  const rrId = rrCreate.data.data.id;
+
+  const rrMine = await jsonFetch(`${baseURL}/support/me/refund-requests`, { headers: p1Headers });
+  if (!rrMine.res.ok) throw new Error(`Refund requests list failed: ${rrMine.data.error || rrMine.res.status}`);
+  if (!Array.isArray(rrMine.data.data) || rrMine.data.data.length < 1) throw new Error('Refund requests list empty');
+
+  const rrAdmin = await jsonFetch(`${baseURL}/admin/refund-requests`, { headers: adminHeaders });
+  if (!rrAdmin.res.ok) throw new Error(`Admin refund requests failed: ${rrAdmin.data.error || rrAdmin.res.status}`);
+
+  const rrApprove = await jsonFetch(`${baseURL}/admin/refund-requests/${encodeURIComponent(String(rrId))}`, {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: JSON.stringify({ status: 'approved', amount_approved: 5, resolution_note: 'تمت الموافقة' })
+  });
+  if (!rrApprove.res.ok) throw new Error(`Refund approve failed: ${rrApprove.data.error || rrApprove.res.status}`);
+
+  const afterRefundBal = await getWalletBalance(p1.token);
+  if (afterRefundBal < beforeRefundBal + 5) {
+    throw new Error(`Expected wallet credit after refund. Before=${beforeRefundBal}, After=${afterRefundBal}`);
+  }
+
+  // 20) Tip after trip (v3)
+  console.log('\n2️⃣0️⃣ Tip (v3)...');
+  const tip = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(splitTripId)}/tip`, {
+    method: 'POST',
+    headers: p1Headers,
+    body: JSON.stringify({ amount: 2, method: 'cash' })
+  });
+  if (!tip.res.ok) throw new Error(`Tip failed: ${tip.data.error || tip.res.status}`);
+
+  const receipt2 = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(splitTripId)}/receipt`, { headers: p1Headers });
+  if (!receipt2.res.ok) throw new Error(`Receipt (after tip) failed: ${receipt2.data.error || receipt2.res.status}`);
+  const tips = Array.isArray(receipt2.data.data?.tips) ? receipt2.data.data.tips : [];
+  if (!tips.length) throw new Error('Expected tips array in receipt');
+  console.log('✅ Tip recorded in receipt');
+
+  // 21) Smart Rebook (v3)
+  console.log('\n2️⃣1️⃣ Smart Rebook (v3)...');
+  const cancel = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(passTripRow.id)}/status`, {
+    method: 'PATCH',
+    headers: p1Headers,
+    body: JSON.stringify({ status: 'cancelled' })
+  });
+  if (!cancel.res.ok) throw new Error(`Cancel trip failed: ${cancel.data.error || cancel.res.status}`);
+
+  const rebook = await jsonFetch(`${baseURL}/trips/${encodeURIComponent(passTripRow.id)}/rebook`, {
+    method: 'POST',
+    headers: p1Headers
+  });
+  if (!rebook.res.ok) throw new Error(`Rebook failed: ${rebook.data.error || rebook.res.status}`);
+  if (!rebook.data.data?.id) throw new Error('Rebook missing new trip id');
+  console.log('✅ Rebook created:', rebook.data.data.id);
+
   console.log('\n✅ Passenger features tests finished');
 }
 

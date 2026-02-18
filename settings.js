@@ -373,6 +373,198 @@ async function saveEmergencyProfile() {
     if (statusEl) statusEl.textContent = '✅ تم حفظ بطاقة الطوارئ.';
 }
 
+// ==================== Passenger Features (v3) ====================
+
+function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text || '';
+}
+
+function renderSavedPlaces(rows) {
+    const list = document.getElementById('sp-list');
+    if (!list) return;
+    const items = Array.isArray(rows) ? rows : [];
+    if (!items.length) {
+        list.innerHTML = '<div class="text-xs text-gray-500 font-bold">لا توجد أماكن محفوظة.</div>';
+        return;
+    }
+
+    const labelMap = { home: 'البيت', work: 'الشغل', custom: 'محفوظ' };
+    list.innerHTML = items.map((p) => {
+        const label = labelMap[String(p.label || '').toLowerCase()] || (p.label || 'place');
+        const name = p.name || '—';
+        const coords = (p.lat !== null && p.lng !== null) ? `${p.lat}, ${p.lng}` : '';
+        return `
+            <div class="bg-white rounded-xl border border-gray-200 px-3 py-2 flex items-center justify-between">
+                <div class="text-right">
+                    <div class="text-xs text-gray-500 font-bold">${label}</div>
+                    <div class="text-sm text-gray-800 font-extrabold">${name}</div>
+                    <div class="text-[11px] text-gray-500 font-bold">${coords}</div>
+                </div>
+                <button type="button" class="sp-del text-xs font-extrabold text-red-600 hover:text-red-700" data-id="${String(p.id)}">حذف</button>
+            </div>
+        `;
+    }).join('');
+
+    list.querySelectorAll('button.sp-del[data-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = Number(btn.getAttribute('data-id'));
+            if (!Number.isFinite(id) || id <= 0) return;
+            deleteSavedPlace(id).catch(() => {});
+        });
+    });
+}
+
+async function loadSavedPlacesUI() {
+    if (!getToken()) {
+        setText('sp-status', 'سجّل الدخول لإدارة الأماكن المحفوظة.');
+        renderSavedPlaces([]);
+        return;
+    }
+    setText('sp-status', 'جاري التحميل...');
+    const { res, data } = await apiJson('/api/passengers/me/places');
+    if (!res.ok || !data.success) {
+        setText('sp-status', 'تعذر تحميل الأماكن.');
+        renderSavedPlaces([]);
+        return;
+    }
+    setText('sp-status', '');
+    renderSavedPlaces(data.data || []);
+}
+
+async function saveSavedPlaceUI() {
+    if (!getToken()) {
+        setText('sp-status', 'سجّل الدخول أولاً.');
+        return;
+    }
+
+    const label = document.getElementById('sp-label')?.value || 'custom';
+    const name = document.getElementById('sp-name')?.value?.trim() || '';
+    const lat = document.getElementById('sp-lat')?.value !== '' ? Number(document.getElementById('sp-lat').value) : null;
+    const lng = document.getElementById('sp-lng')?.value !== '' ? Number(document.getElementById('sp-lng').value) : null;
+    const notes = document.getElementById('sp-notes')?.value?.trim() || '';
+
+    if (!name) {
+        setText('sp-status', 'اكتب الاسم.');
+        return;
+    }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        setText('sp-status', 'إحداثيات غير صحيحة.');
+        return;
+    }
+
+    setText('sp-status', 'جاري الحفظ...');
+    const { res, data } = await apiJson('/api/passengers/me/places', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, name, lat, lng, notes })
+    });
+    if (!res.ok || !data.success) {
+        setText('sp-status', 'تعذر حفظ المكان.');
+        return;
+    }
+    setText('sp-status', '✅ تم الحفظ.');
+    await loadSavedPlacesUI();
+}
+
+async function deleteSavedPlace(id) {
+    if (!getToken()) return;
+    setText('sp-status', 'جاري الحذف...');
+    const { res, data } = await apiJson(`/api/passengers/me/places/${encodeURIComponent(String(id))}`, {
+        method: 'DELETE'
+    });
+    if (!res.ok || !data.success) {
+        setText('sp-status', 'تعذر حذف المكان.');
+        return;
+    }
+    setText('sp-status', '✅ تم الحذف.');
+    await loadSavedPlacesUI();
+}
+
+function renderPasses(rows) {
+    const list = document.getElementById('pass-list');
+    if (!list) return;
+    const items = Array.isArray(rows) ? rows : [];
+    if (!items.length) {
+        list.innerHTML = '<div class="text-xs text-gray-500 font-bold">لا توجد باقات نشطة.</div>';
+        return;
+    }
+
+    list.innerHTML = items.map((p) => {
+        const type = p.type || 'pass';
+        const validTo = p.valid_to ? new Date(p.valid_to).toLocaleString('ar-EG') : 'غير محدد';
+        const rules = p.rules_json && typeof p.rules_json === 'object' ? p.rules_json : null;
+        const desc = rules && rules.value ? `${rules.discount_type === 'fixed' ? rules.value + ' ر.س' : rules.value + '%'} خصم` : '—';
+        return `
+            <div class="bg-white rounded-xl border border-gray-200 px-3 py-2">
+                <div class="flex items-center justify-between">
+                    <div class="text-sm text-gray-800 font-extrabold">${type}</div>
+                    <div class="text-xs text-gray-500 font-bold">${desc}</div>
+                </div>
+                <div class="text-[11px] text-gray-500 font-bold mt-1">ينتهي: ${validTo}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function loadPassesUI() {
+    if (!getToken()) {
+        setText('pass-status', 'سجّل الدخول لعرض الباقات.');
+        renderPasses([]);
+        return;
+    }
+    setText('pass-status', 'جاري التحميل...');
+    const { res, data } = await apiJson('/api/passengers/me/passes');
+    if (!res.ok || !data.success) {
+        setText('pass-status', 'تعذر تحميل الباقات.');
+        renderPasses([]);
+        return;
+    }
+    setText('pass-status', '');
+    renderPasses(data.data || []);
+}
+
+async function buyPassUI() {
+    if (!getToken()) {
+        setText('pass-status', 'سجّل الدخول أولاً.');
+        return;
+    }
+
+    const type = document.getElementById('pass-type')?.value?.trim() || '';
+    const discount = document.getElementById('pass-discount')?.value !== '' ? Number(document.getElementById('pass-discount').value) : null;
+    const validToRaw = document.getElementById('pass-valid-to')?.value || '';
+
+    if (!type) {
+        setText('pass-status', 'اكتب اسم/نوع الباقة.');
+        return;
+    }
+    if (!Number.isFinite(discount) || discount <= 0) {
+        setText('pass-status', 'اكتب نسبة خصم صحيحة.');
+        return;
+    }
+
+    const valid_to = validToRaw ? new Date(validToRaw) : null;
+    const payload = {
+        type,
+        rules_json: { discount_type: 'percent', value: discount },
+        valid_to: valid_to && Number.isFinite(valid_to.getTime()) ? valid_to.toISOString() : null,
+        status: 'active'
+    };
+
+    setText('pass-status', 'جاري التفعيل...');
+    const { res, data } = await apiJson('/api/passengers/me/passes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok || !data.success) {
+        setText('pass-status', 'تعذر تفعيل الباقة.');
+        return;
+    }
+    setText('pass-status', '✅ تم تفعيل الباقة.');
+    await loadPassesUI();
+}
+
 function loadPrefs() {
     const defaults = ROLE === 'driver' ? DRIVER_PREF_DEFAULTS : PASSENGER_PREF_DEFAULTS;
     try {
@@ -498,5 +690,27 @@ window.addEventListener('DOMContentLoaded', () => {
     const emOpt = document.getElementById('em-opt-in');
     if (emOpt) emOpt.addEventListener('change', () => {
         setEmergencyInputsEnabled(!!emOpt.checked);
+    });
+
+    // v3 Saved Places
+    loadSavedPlacesUI().catch(() => {});
+    const spSave = document.getElementById('sp-save');
+    if (spSave) spSave.addEventListener('click', () => {
+        saveSavedPlaceUI().catch(() => {});
+    });
+    const spRefresh = document.getElementById('sp-refresh');
+    if (spRefresh) spRefresh.addEventListener('click', () => {
+        loadSavedPlacesUI().catch(() => {});
+    });
+
+    // v3 Ride Pass
+    loadPassesUI().catch(() => {});
+    const passBuy = document.getElementById('pass-buy');
+    if (passBuy) passBuy.addEventListener('click', () => {
+        buyPassUI().catch(() => {});
+    });
+    const passRefresh = document.getElementById('pass-refresh');
+    if (passRefresh) passRefresh.addEventListener('click', () => {
+        loadPassesUI().catch(() => {});
     });
 });

@@ -171,6 +171,20 @@ async function testAPI() {
         data = await response.json();
         console.log('✅ Pickup updated:', data.data);
 
+        // Ensure a driver exists for assignment (fresh DB friendly)
+        console.log('\n9️⃣b Ensuring a driver exists...');
+        const driverEmail = `api_driver_${Date.now()}@ubar.sa`;
+        const driverPhone = `05${Math.floor(Math.random() * 90000000 + 10000000)}`;
+        response = await fetch(`${baseURL}/drivers/resolve?email=${encodeURIComponent(driverEmail)}&phone=${encodeURIComponent(driverPhone)}&auto_create=1`, {
+            headers: adminHeaders
+        });
+        data = await response.json();
+        if (!response.ok || !data.success || !data.data?.id) {
+            throw new Error(`Driver resolve failed: ${data.error || response.status}`);
+        }
+        const driverId = data.data.id;
+        console.log('✅ Driver ready:', driverId);
+
         // Test 9: Get next pending trip (nearest by driver location)
         console.log('\n9️⃣ Testing get next pending trip...');
         response = await fetch(`${baseURL}/trips/pending/next?car_type=economy&lat=24.7136&lng=46.6753`, { headers: adminHeaders });
@@ -182,7 +196,7 @@ async function testAPI() {
         response = await fetch(`${baseURL}/trips/${createdTripId}/assign`, {
             method: 'PATCH',
             headers: adminHeaders,
-            body: JSON.stringify({ driver_id: 1, driver_name: 'أحمد عبدالله المالكي' })
+            body: JSON.stringify({ driver_id: driverId, driver_name: 'أحمد عبدالله المالكي' })
         });
         data = await response.json();
         console.log('✅ Assigned trip status:', data.data.status);

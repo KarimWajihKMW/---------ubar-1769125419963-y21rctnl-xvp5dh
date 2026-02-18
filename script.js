@@ -1860,42 +1860,76 @@ function isMapWorldActive() {
 const savedPlaces = {
     home: null,
     work: null,
-    favorite: null,
+    custom: [],
     _storageKey: 'akwadra_saved_places',
     
-    load() {
+    async load() {
         try {
             const data = SafeStorage.getItem(this._storageKey);
             if (data) {
                 const parsed = JSON.parse(data);
                 this.home = parsed.home || null;
                 this.work = parsed.work || null;
-                this.favorite = parsed.favorite || null;
+                this.custom = Array.isArray(parsed.custom) ? parsed.custom : [];
                 this.updateIndicators();
             }
         } catch (e) {
             console.warn('Failed to load saved places', e);
         }
+
+        // Prefer server-backed saved places when logged in
+        try {
+            if (!window.ApiService || typeof ApiService.request !== 'function') return;
+            const token = window.Auth && typeof window.Auth.getToken === 'function' ? window.Auth.getToken() : null;
+            if (!token) return;
+
+            const resp = await ApiService.request('/passengers/me/places');
+            const rows = Array.isArray(resp?.data) ? resp.data : [];
+            const home = rows.find(r => String(r.label || '').toLowerCase() === 'home') || null;
+            const work = rows.find(r => String(r.label || '').toLowerCase() === 'work') || null;
+            const custom = rows.filter(r => String(r.label || '').toLowerCase() === 'custom');
+
+            this.home = home ? { lat: Number(home.lat), lng: Number(home.lng), label: home.name || 'المنزل' } : this.home;
+            this.work = work ? { lat: Number(work.lat), lng: Number(work.lng), label: work.name || 'العمل' } : this.work;
+            this.custom = custom.map((c) => ({
+                id: c.id,
+                lat: Number(c.lat),
+                lng: Number(c.lng),
+                label: c.name || 'مكان محفوظ'
+            })).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lng));
+
+            this.save();
+        } catch (e) {
+            // non-blocking
+        }
     },
     
     save() {
-        const data = { home: this.home, work: this.work, favorite: this.favorite };
+        const data = { home: this.home, work: this.work, custom: this.custom };
         SafeStorage.setItem(this._storageKey, JSON.stringify(data));
         this.updateIndicators();
     },
     
     set(type, location) {
-        if (!['home', 'work', 'favorite'].includes(type)) return;
-        this[type] = location;
+        if (!['home', 'work', 'custom'].includes(type)) return;
+        if (type === 'custom') {
+            if (!location) return;
+            this.custom = Array.isArray(this.custom) ? this.custom : [];
+            this.custom.unshift(location);
+            this.custom = this.custom.slice(0, 50);
+        } else {
+            this[type] = location;
+        }
         this.save();
     },
     
     get(type) {
-        return this[type];
+        if (type === 'custom') return Array.isArray(this.custom) ? this.custom : [];
+        return this[type] || null;
     },
     
     updateIndicators() {
-        ['home', 'work', 'favorite'].forEach(type => {
+        ['home', 'work'].forEach(type => {
             const indicator = document.getElementById(`${type}-set-indicator`);
             if (indicator) {
                 if (this[type]) {
@@ -1905,6 +1939,136 @@ const savedPlaces = {
                 }
             }
         });
+
+        // Reuse existing indicator id for "saved" bucket
+        const favIndicator = document.getElementById('favorite-set-indicator');
+        if (favIndicator) {
+            const hasCustom = Array.isArray(this.custom) && this.custom.length > 0;
+            favIndicator.classList.toggle('hidden', !hasCustom);
+        }
+    }
+};
+
+// Trip templates (v3)
+const tripTemplates = {
+    rows: [],
+    async load() {
+        try {
+            if (!window.ApiService || typeof ApiService.request !== 'function') return;
+            const token = window.Auth && typeof window.Auth.getToken === 'function' ? window.Auth.getToken() : null;
+            if (!token) return;
+            const resp = await ApiService.request('/passengers/me/trip-templates');
+            this.rows = Array.isArray(resp?.data) ? resp.data : [];
+        } catch (e) {
+            this.rows = [];
+        }
+        this.render();
+    },
+    render() {
+        const list = document.getElementById('trip-templates-list');
+        const empty = document.getElementById('trip-templates-empty');
+        if (!list || !empty) return;
+        const rows = Array.isArray(this.rows) ? this.rows : [];
+        if (!rows.length) {
+            empty.classList.remove('hidden');
+            list.innerHTML = '';
+            return;
+        }
+        empty.classList.add('hidden');
+        list.innerHTML = rows.slice(0, 12).map((t) => {
+            const title = (t.title || 'قالب').toString();
+            return `<button type="button" data-tpl-id="${String(t.id)}" class="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-700 font-extrabold text-xs hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 transition-colors">${escapeHtml(title)}</button>`;
+        }).join('');
+        list.querySelectorAll('button[data-tpl-id]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = Number(btn.getAttribute('data-tpl-id'));
+                const tpl = rows.find(r => Number(r.id) === id);
+                if (tpl) applyTripTemplate(tpl);
+            });
+        });
+    }
+};
+
+let lastTripPayloadForTemplate = null;
+
+window.refreshTripTemplatesUI = function() {
+    tripTemplates.load();
+};
+
+function getTripTemplatePayload(tpl) {
+    const p = tpl?.payload_json || null;
+    if (!p || typeof p !== 'object') return null;
+    return p;
+}
+
+function applyTripTemplate(tpl) {
+    const p = getTripTemplatePayload(tpl);
+    if (!p) {
+        showToast('⚠️ قالب غير صالح');
+        return;
+    }
+
+    // Destination
+    const dl = p.dropoff_lat !== undefined ? Number(p.dropoff_lat) : (p.dropoffLat !== undefined ? Number(p.dropoffLat) : null);
+    const dg = p.dropoff_lng !== undefined ? Number(p.dropoff_lng) : (p.dropoffLng !== undefined ? Number(p.dropoffLng) : null);
+    const label = p.dropoff_location || p.dropoffLocation || tpl.title || 'الوجهة';
+    if (Number.isFinite(dl) && Number.isFinite(dg)) {
+        setDestination({ lat: dl, lng: dg }, String(label));
+        if (leafletMap) {
+            leafletMap.setView([dl, dg], 15);
+        }
+        const destInput = document.getElementById('dest-input');
+        if (destInput) destInput.value = String(label);
+    }
+
+    // Car type
+    if (p.car_type) {
+        try {
+            selectCarType(String(p.car_type));
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    // Passenger note
+    const note = p.passenger_note !== undefined ? String(p.passenger_note || '').trim() : '';
+    const noteCustomEl = document.getElementById('ride-note-custom');
+    if (noteCustomEl && note) noteCustomEl.value = note;
+
+    showToast('✅ تم تطبيق القالب');
+}
+
+window.saveCurrentTripAsTemplate = async function() {
+    try {
+        if (!lastTripPayloadForTemplate) {
+            showToast('لا توجد بيانات لحفظ القالب');
+            return;
+        }
+
+        const title = window.prompt('اكتب اسم القالب', 'قالب جديد');
+        if (!title) return;
+
+        const payload = {
+            dropoff_location: lastTripPayloadForTemplate.dropoff_location,
+            dropoff_lat: lastTripPayloadForTemplate.dropoff_lat,
+            dropoff_lng: lastTripPayloadForTemplate.dropoff_lng,
+            car_type: lastTripPayloadForTemplate.car_type,
+            payment_method: lastTripPayloadForTemplate.payment_method,
+            passenger_note: lastTripPayloadForTemplate.passenger_note || null
+        };
+
+        await ApiService.request('/passengers/me/trip-templates', {
+            method: 'POST',
+            body: JSON.stringify({ title: String(title).trim(), payload_json: payload })
+        });
+
+        showToast('✅ تم حفظ القالب');
+        const btn = document.getElementById('save-template-btn');
+        if (btn) btn.classList.add('hidden');
+        lastTripPayloadForTemplate = null;
+        tripTemplates.load();
+    } catch (e) {
+        showToast('❌ تعذر حفظ القالب');
     }
 };
 
@@ -2969,20 +3133,46 @@ window.useCurrentLocation = useCurrentLocation;
 
 // Saved places functionality
 window.selectSavedPlace = function(type) {
-    const place = savedPlaces.get(type);
-    if (!place) {
-        const labels = { home: 'المنزل', work: 'العمل', favorite: 'المفضلة' };
-        showToast(`لم يتم حفظ عنوان ${labels[type]} بعد. اضغط مطولاً للحفظ`);
+    if (type === 'home' || type === 'work') {
+        const place = savedPlaces.get(type);
+        if (!place) {
+            const labels = { home: 'المنزل', work: 'العمل' };
+            showToast(`لم يتم حفظ عنوان ${labels[type]} بعد. اضغط مطولاً للحفظ`);
+            return;
+        }
+
+        setDestination(place, place.label);
+        if (leafletMap) {
+            leafletMap.setView([place.lat, place.lng], 15);
+        }
+
+        const destInput = document.getElementById('dest-input');
+        if (destInput) destInput.value = place.label;
         return;
     }
-    
-    // Set as destination
+    // custom list is opened via openSavedPlacesList()
+};
+
+window.openSavedPlacesList = function() {
+    const rows = savedPlaces.get('custom') || [];
+    if (!rows.length) {
+        showToast('لا توجد أماكن محفوظة بعد (اضغط مطولاً للحفظ)');
+        return;
+    }
+
+    const lines = rows.slice(0, 10).map((p, idx) => `${idx + 1}) ${p.label || 'مكان محفوظ'}`).join('\n');
+    const raw = window.prompt(`اختر رقم المكان:\n${lines}`, '1');
+    if (!raw) return;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1 || n > rows.length) {
+        showToast('اختيار غير صحيح');
+        return;
+    }
+    const place = rows[n - 1];
     setDestination(place, place.label);
     if (leafletMap) {
         leafletMap.setView([place.lat, place.lng], 15);
     }
-    
-    // Update destination input
     const destInput = document.getElementById('dest-input');
     if (destInput) destInput.value = place.label;
 };
@@ -2996,10 +3186,43 @@ window.savePlaceAs = function(event, type) {
     
     // Prefer destination if set, else pickup
     const location = currentDestination || currentPickup;
-    savedPlaces.set(type, location);
-    
-    const labels = { home: 'المنزل', work: 'العمل', favorite: 'المفضلة' };
-    showToast(`تم حفظ الموقع كـ ${labels[type]}`);
+
+    const token = window.Auth && typeof window.Auth.getToken === 'function' ? window.Auth.getToken() : null;
+    if (!token || !window.ApiService) {
+        showToast('سجّل الدخول لحفظ الأماكن');
+        return;
+    }
+
+    const labels = { home: 'المنزل', work: 'العمل', custom: 'محفوظة' };
+
+    let name = null;
+    if (type === 'custom') {
+        name = window.prompt('اكتب اسم المكان', (currentDestination?.label || 'مكان محفوظ'));
+        if (!name) return;
+    } else {
+        name = type === 'home' ? 'المنزل' : 'العمل';
+    }
+
+    ApiService.request('/passengers/me/places', {
+        method: 'POST',
+        body: JSON.stringify({
+            label: type,
+            name,
+            lat: location.lat,
+            lng: location.lng,
+            notes: null
+        })
+    }).then((resp) => {
+        const row = resp?.data || null;
+        if (type === 'home' || type === 'work') {
+            savedPlaces.set(type, { lat: location.lat, lng: location.lng, label: row?.name || name });
+        } else {
+            savedPlaces.set('custom', { id: row?.id, lat: location.lat, lng: location.lng, label: row?.name || name });
+        }
+        showToast(`تم حفظ الموقع كـ ${labels[type]}`);
+    }).catch(() => {
+        showToast('❌ تعذر حفظ المكان');
+    });
 };
 
 // Live driver tracking on Leaflet map
@@ -5742,6 +5965,23 @@ window.requestRide = async function() {
         const created = await ApiService.trips.create(tripPayload);
         activePassengerTripId = created?.data?.id || null;
         activeTripAccessibilitySnapshot = created?.data?.accessibility_snapshot_json || null;
+
+        // v3: allow saving this request as a Trip Template (after create)
+        try {
+            lastTripPayloadForTemplate = {
+                dropoff_location: tripPayload.dropoff_location,
+                dropoff_lat: tripPayload.dropoff_lat,
+                dropoff_lng: tripPayload.dropoff_lng,
+                car_type: tripPayload.car_type,
+                payment_method: tripPayload.payment_method,
+                passenger_note: tripPayload.passenger_note || null
+            };
+            const btn = document.getElementById('save-template-btn');
+            if (btn) btn.classList.remove('hidden');
+        } catch (e) {
+            // ignore
+        }
+
         if (activePassengerTripId) {
             // Apply multi-stops (reprices server-side)
             if (pendingStops.length) {
@@ -5849,8 +6089,11 @@ function initPassengerMode() {
     // v2: server-backed accessibility profile (voice-first + hub ranking)
     loadPassengerAccessibilityProfile().catch(() => {});
     
-    // Load saved places
-    savedPlaces.load();
+    // Load saved places (v3 server-backed when logged in)
+    Promise.resolve(savedPlaces.load()).catch(() => {});
+
+    // Load trip templates (v3)
+    Promise.resolve(tripTemplates.load()).catch(() => {});
     
     // Schedule later toggle handler
     const scheduleCheck = document.getElementById('schedule-later-check');
@@ -8884,7 +9127,8 @@ window.showTripDetails = function(tripId) {
     const formattedDateTime = date.toLocaleDateString('ar-EG') + ' • ' + date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
     
     document.getElementById('trip-detail-status').className = `inline-block px-4 py-2 rounded-full font-bold text-sm ${statusColors[trip.status] || statusColors.completed}`;
-    document.getElementById('trip-detail-status').innerHTML = `<i class="fas fa-check-circle ml-1"></i> ${statusLabels[trip.status] || statusLabels.completed}`;
+    const statusIcon = trip.status === 'cancelled' ? 'fa-times-circle' : 'fa-check-circle';
+    document.getElementById('trip-detail-status').innerHTML = `<i class="fas ${statusIcon} ml-1"></i> ${statusLabels[trip.status] || statusLabels.completed}`;
     document.getElementById('trip-detail-id').innerText = trip.id;
     document.getElementById('trip-detail-date').innerText = formattedDateTime;
     document.getElementById('trip-detail-pickup').innerText = trip.pickup || 'حدد موقعك';
@@ -8911,6 +9155,152 @@ window.showTripDetails = function(tripId) {
     ratingContainer.nextElementSibling.innerText = `(${rating} نجوم)`;
     
     window.switchSection('trip-details');
+
+    // v3 actions visibility
+    try {
+        const rebookBtn = document.getElementById('trip-detail-rebook-btn');
+        if (rebookBtn) {
+            rebookBtn.style.display = trip.status === 'cancelled' ? '' : 'none';
+        }
+    } catch (e) {
+        // ignore
+    }
+};
+
+// ==================== PASSENGER FEATURES (v3) - UI actions ====================
+
+function getTripIdFromTripDetailsUI() {
+    const tripId = (document.getElementById('trip-detail-id')?.innerText || '').trim();
+    return tripId || null;
+}
+
+window.downloadReceiptFromDetails = async function() {
+    try {
+        const tripId = getTripIdFromTripDetailsUI();
+        if (!tripId) return showToast('تعذر تحديد رقم الرحلة');
+        const receipt = await ApiService.trips.getReceipt(tripId);
+        const data = receipt?.data || null;
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `receipt_${tripId}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast('✅ تم تحميل الفاتورة');
+    } catch (e) {
+        showToast('❌ تعذر تحميل الفاتورة');
+    }
+};
+
+window.reportLostItemFromDetails = async function() {
+    try {
+        const tripId = getTripIdFromTripDetailsUI();
+        if (!tripId) return showToast('تعذر تحديد رقم الرحلة');
+        const description = window.prompt('اكتب وصف الشيء المفقود', '');
+        if (!description) return;
+        const contact = window.prompt('طريقة التواصل (اختياري) مثال: رقم/واتساب/إيميل', '');
+
+        await ApiService.request(`/trips/${encodeURIComponent(tripId)}/lost-items`, {
+            method: 'POST',
+            body: JSON.stringify({ description, contact_method: contact || null })
+        });
+        showToast('✅ تم إرسال بلاغ المفقودات');
+    } catch (e) {
+        showToast('❌ تعذر إرسال البلاغ');
+    }
+};
+
+window.requestRefundFromDetails = async function() {
+    try {
+        const tripId = getTripIdFromTripDetailsUI();
+        if (!tripId) return showToast('تعذر تحديد رقم الرحلة');
+        const reason = window.prompt('سبب المراجعة/الاسترجاع', '');
+        if (!reason) return;
+        const amountRaw = window.prompt('المبلغ المطلوب (اختياري)', '');
+        const amountRequested = amountRaw ? Number(amountRaw) : null;
+        if (amountRequested !== null && (!Number.isFinite(amountRequested) || amountRequested < 0)) {
+            showToast('مبلغ غير صحيح');
+            return;
+        }
+
+        await ApiService.request(`/trips/${encodeURIComponent(tripId)}/refund-request`, {
+            method: 'POST',
+            body: JSON.stringify({ reason, amount_requested: amountRequested })
+        });
+        showToast('✅ تم إرسال الطلب');
+    } catch (e) {
+        showToast('❌ تعذر إرسال الطلب');
+    }
+};
+
+window.rebookTripFromDetails = async function() {
+    try {
+        const tripId = getTripIdFromTripDetailsUI();
+        if (!tripId) return showToast('تعذر تحديد رقم الرحلة');
+        const created = await ApiService.request(`/trips/${encodeURIComponent(tripId)}/rebook`, { method: 'POST' });
+        const newTrip = created?.data || null;
+        if (!newTrip?.id) {
+            showToast('❌ تعذر إعادة الطلب');
+            return;
+        }
+
+        // Refresh local state and start match flow
+        try {
+            activePassengerTripId = String(newTrip.id);
+            currentCarType = newTrip.car_type || currentCarType;
+            currentTripPrice = Number(newTrip.cost || newTrip.price || currentTripPrice || 0);
+            currentPickup = {
+                lat: Number(newTrip.pickup_lat),
+                lng: Number(newTrip.pickup_lng),
+                label: newTrip.pickup_location || 'نقطة الالتقاط'
+            };
+            currentDestination = {
+                lat: Number(newTrip.dropoff_lat),
+                lng: Number(newTrip.dropoff_lng),
+                label: newTrip.dropoff_location || 'الوجهة'
+            };
+        } catch (e) {
+            // ignore
+        }
+
+        window.switchSection('loading');
+        resetMatchTimelineUI();
+        fetchNearestDriverPreview(currentPickup, currentCarType);
+        startPassengerMatchPolling(activePassengerTripId);
+        showToast('✅ تم إنشاء طلب جديد');
+    } catch (e) {
+        showToast('❌ تعذر إعادة الطلب');
+    }
+};
+
+window.sendTip = async function(amount) {
+    try {
+        const tripId = (document.getElementById('payment-success-trip-id')?.innerText || '').trim() || lastCompletedTrip?.id;
+        if (!tripId) return showToast('تعذر تحديد رقم الرحلة');
+        const statusEl = document.getElementById('tip-status');
+        if (statusEl) statusEl.textContent = 'جاري الإرسال...';
+        await ApiService.request(`/trips/${encodeURIComponent(tripId)}/tip`, {
+            method: 'POST',
+            body: JSON.stringify({ amount: Number(amount), method: 'cash' })
+        });
+        if (statusEl) statusEl.textContent = '✅ تم إرسال البقشيش.';
+    } catch (e) {
+        const statusEl = document.getElementById('tip-status');
+        if (statusEl) statusEl.textContent = '❌ تعذر إرسال البقشيش.';
+    }
+};
+
+window.sendCustomTip = function() {
+    const inp = document.getElementById('tip-custom-amount');
+    const amount = inp && inp.value !== '' ? Number(inp.value) : null;
+    if (!Number.isFinite(amount) || amount <= 0) {
+        showToast('اكتب مبلغ صحيح');
+        return;
+    }
+    window.sendTip(amount);
 };
 
 // Initialize trip history when profile is opened + keep section history
