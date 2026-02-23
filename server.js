@@ -1393,6 +1393,7 @@ async function ensureCaptainV4Tables() {
                 role VARCHAR(20),
                 rating INTEGER,
                 cause_key VARCHAR(60),
+                suggested_action_key VARCHAR(60),
                 note TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -1402,10 +1403,27 @@ async function ensureCaptainV4Tables() {
         await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS passenger_rating_cause_key VARCHAR(60);');
         await pool.query('ALTER TABLE trips ADD COLUMN IF NOT EXISTS passenger_rating_cause_note TEXT;');
 
+        // Backfill-safe: in case table existed before column was added
+        await pool.query('ALTER TABLE trip_feedback ADD COLUMN IF NOT EXISTS suggested_action_key VARCHAR(60);');
+
         console.log('✅ Captain v4 tables/columns ensured');
     } catch (err) {
         console.error('❌ Failed to ensure captain v4 tables:', err.message);
     }
+}
+
+function suggestFeedbackActionKey(causeKey) {
+    const k = causeKey !== undefined && causeKey !== null ? String(causeKey).trim().toLowerCase() : '';
+    if (!k) return null;
+    const map = {
+        meetpoint: 'improve_meetpoint_flow',
+        route_change: 'use_justified_messages',
+        stop: 'use_stops_and_justify',
+        payment: 'confirm_payment_method',
+        behavior: 'review_behavior_report',
+        other: 'collect_more_details'
+    };
+    return map[k] || null;
 }
 
 function timelineSecretKey() {
@@ -3938,6 +3956,17 @@ app.patch('/api/trips/:id/pickup-suggestions/:sid/decision', requireRole('passen
 
         await client.query('COMMIT');
 
+        // v4 timeline: record the passenger decision on suggested meet point
+        try {
+            await appendTripTimelineEvent({
+                tripId: String(tripId),
+                eventType: 'pickup_suggestion_decision',
+                payloadJson: { suggestion_id: suggestionId, decision }
+            });
+        } catch (e) {
+            // non-blocking
+        }
+
         try {
             io.to(tripRoom(tripId)).emit('pickup_suggestion_decided', {
                 trip_id: String(tripId),
@@ -4024,6 +4053,20 @@ app.patch('/api/trips/:id/eta', requireRole('driver', 'admin'), async (req, res)
             io.to(tripRoom(tripId)).emit('trip_eta_update', { trip_id: String(tripId), ...updated.rows[0] });
         } catch (e) {
             // ignore
+        }
+
+        // v4 timeline: ETA updates are part of justified change history
+        try {
+            await appendTripTimelineEvent({
+                tripId: String(tripId),
+                eventType: 'eta_updated',
+                payloadJson: {
+                    eta_minutes: updated.rows?.[0]?.eta_minutes !== undefined && updated.rows?.[0]?.eta_minutes !== null ? Number(updated.rows[0].eta_minutes) : null,
+                    eta_reason: updated.rows?.[0]?.eta_reason ? String(updated.rows[0].eta_reason) : null
+                }
+            });
+        } catch (e) {
+            // non-blocking
         }
 
         res.json({ success: true, data: updated.rows[0] });
@@ -5431,6 +5474,17 @@ app.post('/api/trips/:id/stops', requireRole('passenger', 'admin'), async (req, 
         );
 
         await client.query('COMMIT');
+
+        // v4 timeline: stops are a common dispute trigger
+        try {
+            await appendTripTimelineEvent({
+                tripId: String(tripId),
+                eventType: 'stops_set',
+                payloadJson: { count: Array.isArray(stops) ? stops.length : 0 }
+            });
+        } catch (e) {
+            // non-blocking
+        }
         res.json({ success: true, trip: updatedTripRes.rows[0] });
     } catch (err) {
         try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
@@ -7946,6 +8000,23 @@ app.patch('/api/trips/:id/pickup', requireRole('passenger', 'admin'), async (req
             // ignore
         }
 
+        // v4 timeline: record pickup updates (helps disputes about meet point changes)
+        try {
+            await appendTripTimelineEvent({
+                tripId: String(id),
+                eventType: 'pickup_updated',
+                payloadJson: {
+                    pickup_lat: pickupLat,
+                    pickup_lng: pickupLng,
+                    pickup_accuracy: pickupAccuracy,
+                    pickup_timestamp: pickupTimestamp,
+                    source: source || null
+                }
+            });
+        } catch (e) {
+            // non-blocking
+        }
+
         res.json({ success: true, data: tripResult.rows[0] });
     } catch (err) {
         console.error('Error updating trip pickup location:', err);
@@ -8708,6 +8779,32 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
             console.warn('⚠️ Failed to emit trip realtime event:', err.message);
         }
 
+        // v4 timeline: record status transitions (started/completed/cancelled/rated)
+        try {
+            const updatedTrip = result.rows[0];
+            const afterStatus = updatedTrip?.status !== undefined && updatedTrip?.status !== null ? String(updatedTrip.status) : String(status || '');
+            const afterTripStatus = updatedTrip?.trip_status !== undefined && updatedTrip?.trip_status !== null
+                ? String(updatedTrip.trip_status)
+                : (nextTripStatus ? String(nextTripStatus) : '');
+            const beforeStatusStr = beforeStatus !== undefined && beforeStatus !== null ? String(beforeStatus) : '';
+            const beforeTripStatusStr = beforeTripStatus !== undefined && beforeTripStatus !== null ? String(beforeTripStatus) : '';
+            if (afterStatus !== beforeStatusStr || afterTripStatus !== beforeTripStatusStr) {
+                await appendTripTimelineEvent({
+                    tripId: String(id),
+                    eventType: 'trip_status_change',
+                    payloadJson: {
+                        from_status: beforeStatusStr || null,
+                        to_status: afterStatus || null,
+                        from_trip_status: beforeTripStatusStr || null,
+                        to_trip_status: afterTripStatus || null,
+                        by_role: authRole || null
+                    }
+                });
+            }
+        } catch (e) {
+            // non-blocking
+        }
+
         // Cause-based feedback: store only when passenger submits a rating
         try {
             const updatedTrip = result.rows[0];
@@ -8719,12 +8816,13 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
                 const noteRaw = cause_note !== undefined && cause_note !== null ? String(cause_note).trim() : '';
                 const key = keyRaw ? keyRaw.slice(0, 60) : null;
                 const note = noteRaw ? noteRaw.slice(0, 300) : null;
+                const actionKey = key ? suggestFeedbackActionKey(key) : null;
 
                 if (key || note) {
                     await pool.query(
-                        `INSERT INTO trip_feedback (trip_id, user_id, role, rating, cause_key, note)
-                         VALUES ($1,$2,$3,$4, NULLIF($5,''), NULLIF($6,''))`,
-                        [String(id), authUserId || null, authRole, Number.isFinite(rk) ? rk : null, key || '', note || '']
+                        `INSERT INTO trip_feedback (trip_id, user_id, role, rating, cause_key, suggested_action_key, note)
+                         VALUES ($1,$2,$3,$4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''))`,
+                        [String(id), authUserId || null, authRole, Number.isFinite(rk) ? rk : null, key || '', actionKey || '', note || '']
                     );
                     await pool.query(
                         `UPDATE trips
@@ -9414,11 +9512,12 @@ async function rateDriverHandler(req, res) {
             const noteRaw = cause_note !== undefined && cause_note !== null ? String(cause_note).trim() : '';
             const key = keyRaw ? keyRaw.slice(0, 60) : null;
             const note = noteRaw ? noteRaw.slice(0, 300) : null;
+            const actionKey = key ? suggestFeedbackActionKey(key) : null;
             if (key || note) {
                 await pool.query(
-                    `INSERT INTO trip_feedback (trip_id, user_id, role, rating, cause_key, note)
-                     VALUES ($1,$2,$3,$4, NULLIF($5,''), NULLIF($6,''))`,
-                    [String(tripId), authUserId || null, authRole, Math.trunc(normalizedRating), key || '', note || '']
+                    `INSERT INTO trip_feedback (trip_id, user_id, role, rating, cause_key, suggested_action_key, note)
+                     VALUES ($1,$2,$3,$4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''))`,
+                    [String(tripId), authUserId || null, authRole, Math.trunc(normalizedRating), key || '', actionKey || '', note || '']
                 );
                 await pool.query(
                     `UPDATE trips
