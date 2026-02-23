@@ -284,6 +284,15 @@ let driverAudioStream = null;
 let driverAudioChunks = [];
 let driverAudioRecording = false;
 
+// Captain-only: Reposition Coach
+let lastRepositionSuggestions = [];
+let repositionLoading = false;
+
+// Captain-only: Trip Swap Market
+let activeTripSwapOffer = null; // { id, trip_id, expires_at }
+let tripSwapCountdownTimer = null;
+let swapInboxOffers = []; // { offer, trip, meta, received_at }
+
 // Passenger live tracking (real trip mode)
 let passengerLiveTrackingInterval = null;
 let passengerLiveTrackingTripId = null;
@@ -1349,11 +1358,236 @@ function initRealtimeSocket() {
                 // ignore
             }
         });
+
+        // Trip Swap Market (Captain)
+        realtimeSocket.on('trip_swap_offer', (payload) => {
+            try {
+                if (currentUserRole !== 'driver') return;
+                const offer = payload?.offer || null;
+                const trip = payload?.trip || null;
+                if (!offer?.id || !trip?.id) return;
+
+                // Ignore if already have an active trip (keep MVP simple)
+                if (activeDriverTripId) return;
+
+                const exists = swapInboxOffers.some(x => String(x?.offer?.id) === String(offer.id));
+                if (exists) return;
+                swapInboxOffers.unshift({ offer, trip, meta: payload?.meta || null, received_at: Date.now() });
+                swapInboxOffers = swapInboxOffers.slice(0, 3);
+                renderSwapInbox();
+            } catch (e) {
+                // ignore
+            }
+        });
+
+        realtimeSocket.on('trip_swap_cancelled', (payload) => {
+            try {
+                if (currentUserRole !== 'driver') return;
+                const offerId = payload?.offer_id;
+                if (!offerId) return;
+                swapInboxOffers = swapInboxOffers.filter(x => String(x?.offer?.id) !== String(offerId));
+                renderSwapInbox();
+            } catch (e) {
+                // ignore
+            }
+        });
+
+        realtimeSocket.on('trip_swap_accepted', async (payload) => {
+            try {
+                const tripId = payload?.trip_id;
+                if (!tripId) return;
+                const trip = payload?.trip || null;
+                const newDriverId = payload?.new_driver_id;
+
+                // Passenger: driver changed before start
+                if (currentUserRole === 'passenger' && isActivePassengerTrip(tripId) && trip) {
+                    showToast('🔁 تم تبديل الكابتن للرحلة');
+                    await handlePassengerAssignedTrip(trip);
+                }
+
+                // Driver: if we were the old driver and got swapped out
+                if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                    const myId = currentDriverProfile?.id;
+                    if (myId && newDriverId && String(myId) !== String(newDriverId)) {
+                        showToast('🔁 تم تبديل الرحلة لكابتن آخر');
+                        clearActiveTripSwapState();
+                        activeDriverTripId = null;
+                        currentIncomingTrip = null;
+                        try { stopDriverTripSocketLocationUpdates(); } catch (e) {}
+                        try { realtimeSocket && realtimeSocket.emit && realtimeSocket.emit('unsubscribe_trip', { trip_id: String(tripId) }); } catch (e) {}
+
+                        const activePanel = document.getElementById('driver-active-trip');
+                        if (activePanel) activePanel.classList.add('hidden');
+                        const waiting = document.getElementById('driver-status-waiting');
+                        if (waiting) waiting.classList.remove('hidden');
+                        triggerDriverRequestPolling();
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+        });
     } catch (err) {
         console.warn('⚠️ Realtime socket init failed:', err.message || err);
         realtimeSocket = null;
         realtimeConnected = false;
     }
+}
+
+function clearActiveTripSwapState() {
+    activeTripSwapOffer = null;
+    if (tripSwapCountdownTimer) {
+        clearInterval(tripSwapCountdownTimer);
+        tripSwapCountdownTimer = null;
+    }
+    updateDriverTripSwapCard();
+}
+
+function updateDriverTripSwapCard() {
+    const card = document.getElementById('driver-trip-swap-card');
+    const status = document.getElementById('driver-trip-swap-status');
+    const offerBtn = document.getElementById('driver-trip-swap-offer-btn');
+    const cancelBtn = document.getElementById('driver-trip-swap-cancel-btn');
+
+    const visible = currentUserRole === 'driver' && !!activeDriverTripId && !driverTripStarted && !driverAwaitingPayment;
+    if (card) card.classList.toggle('hidden', !visible);
+    if (!visible) {
+        if (status) status.textContent = '—';
+        if (offerBtn) offerBtn.disabled = false;
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        }
+        return;
+    }
+
+    if (!activeTripSwapOffer) {
+        if (status) status.textContent = 'جاهز';
+        if (offerBtn) offerBtn.disabled = false;
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.classList.add('opacity-60', 'cursor-not-allowed');
+        }
+        return;
+    }
+
+    const exp = activeTripSwapOffer.expires_at ? new Date(activeTripSwapOffer.expires_at).getTime() : NaN;
+    const leftSec = Number.isFinite(exp) ? Math.max(0, Math.round((exp - Date.now()) / 1000)) : null;
+    if (status) status.textContent = Number.isFinite(leftSec) ? `مفتوح (${leftSec}s)` : 'مفتوح';
+    if (offerBtn) offerBtn.disabled = true;
+    if (cancelBtn) {
+        cancelBtn.disabled = false;
+        cancelBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+    }
+}
+
+function renderSwapInbox() {
+    const wrap = document.getElementById('driver-swap-inbox');
+    const items = document.getElementById('driver-swap-inbox-items');
+    const status = document.getElementById('driver-swap-inbox-status');
+    if (!wrap || !items) return;
+
+    const show = currentUserRole === 'driver' && swapInboxOffers.length > 0 && !activeDriverTripId;
+    wrap.classList.toggle('hidden', !show);
+    items.innerHTML = '';
+    if (!show) {
+        if (status) status.textContent = '';
+        return;
+    }
+
+    for (const x of swapInboxOffers) {
+        const offer = x.offer || {};
+        const trip = x.trip || {};
+        const dist = x.meta?.distance_km;
+
+        const el = document.createElement('div');
+        el.className = 'bg-white border border-amber-200 rounded-xl p-3';
+        el.innerHTML = `
+            <div class="flex items-start justify-between gap-3">
+                <div class="flex-1">
+                    <p class="text-xs font-extrabold text-gray-800">رحلة #${escapeHtml(String(trip.id || '-'))}</p>
+                    <p class="text-[11px] text-gray-600 font-bold mt-1">${escapeHtml(String(trip.pickup_location || 'نقطة الالتقاط'))} → ${escapeHtml(String(trip.dropoff_location || 'الوجهة'))}</p>
+                    <p class="text-[11px] text-gray-600 font-bold mt-1">السعر: ${escapeHtml(String(trip.cost || '-'))}${Number.isFinite(dist) ? ` • قربك: ${escapeHtml(String(dist))} كم` : ''}</p>
+                </div>
+                <div class="flex flex-col gap-2">
+                    <button type="button" class="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-extrabold hover:bg-emerald-700" data-action="accept">قبول</button>
+                    <button type="button" class="px-3 py-2 rounded-lg bg-red-50 text-red-700 text-xs font-extrabold hover:bg-red-100" data-action="reject">رفض</button>
+                </div>
+            </div>
+        `;
+
+        const acceptBtn = el.querySelector('button[data-action="accept"]');
+        const rejectBtn = el.querySelector('button[data-action="reject"]');
+        if (acceptBtn) {
+            acceptBtn.addEventListener('click', async () => {
+                try {
+                    acceptBtn.disabled = true;
+                    const resp = await ApiService.captain.tripSwapAccept(String(trip.id), { offer_id: offer.id });
+                    if (!resp?.success) throw new Error(resp?.error || 'failed');
+
+                    // Load full trip data so driver UI works
+                    const tripRes = await ApiService.trips.getById(String(trip.id));
+                    const fullTrip = tripRes?.data || trip;
+                    activeDriverTripId = String(fullTrip.id || trip.id);
+                    currentIncomingTrip = fullTrip;
+                    subscribeTripRealtime(activeDriverTripId);
+                    loadTripEtaMeta(activeDriverTripId);
+                    loadTripPickupSuggestions(activeDriverTripId);
+
+                    const waiting = document.getElementById('driver-status-waiting');
+                    if (waiting) waiting.classList.add('hidden');
+                    const incoming = document.getElementById('driver-incoming-request');
+                    if (incoming) incoming.classList.add('hidden');
+                    const active = document.getElementById('driver-active-trip');
+                    if (active) active.classList.remove('hidden');
+                    setDriverPanelVisible(true);
+                    setDriverAwaitingPayment(false);
+                    setDriverStartReady(false);
+                    setDriverTripStarted(false);
+
+                    try {
+                        if (fullTrip.pickup_lat !== undefined && fullTrip.pickup_lat !== null && fullTrip.pickup_lng !== undefined && fullTrip.pickup_lng !== null) {
+                            setPassengerPickup({
+                                lat: Number(fullTrip.pickup_lat),
+                                lng: Number(fullTrip.pickup_lng),
+                                phone: fullTrip.passenger_phone
+                            }, fullTrip.pickup_location);
+                        }
+                    } catch (e) {}
+
+                    try { startDriverToPassengerRoute(); } catch (e) {}
+                    showToast('✅ تم قبول تبديل الرحلة');
+
+                    swapInboxOffers = swapInboxOffers.filter(y => String(y?.offer?.id) !== String(offer.id));
+                    renderSwapInbox();
+                    updateDriverTripSwapCard();
+                } catch (e) {
+                    console.error(e);
+                    showToast('تعذر قبول العرض');
+                } finally {
+                    acceptBtn.disabled = false;
+                }
+            });
+        }
+
+        if (rejectBtn) {
+            rejectBtn.addEventListener('click', async () => {
+                try {
+                    rejectBtn.disabled = true;
+                    await ApiService.captain.tripSwapReject(String(trip.id), { offer_id: offer.id });
+                } catch (e) {
+                    // non-blocking
+                } finally {
+                    swapInboxOffers = swapInboxOffers.filter(y => String(y?.offer?.id) !== String(offer.id));
+                    renderSwapInbox();
+                    showToast('تم رفض العرض');
+                }
+            });
+        }
+
+        items.appendChild(el);
+    }
+    if (status) status.textContent = swapInboxOffers.length ? `عدد العروض: ${swapInboxOffers.length}` : '';
 }
 
 function showPassengerSafetyBanner(text) {
@@ -5469,11 +5703,13 @@ function setDriverTripStarted(started) {
     }
 
     updateDriverActiveStatusBadge();
+    try { updateDriverTripSwapCard(); } catch (e) {}
 }
 
 function setDriverStartReady(ready) {
     driverStartReady = ready;
     setDriverTripStarted(driverTripStarted);
+    try { updateDriverTripSwapCard(); } catch (e) {}
 }
 
 function setDriverAwaitingPayment(ready) {
@@ -7279,6 +7515,159 @@ window.driverSuggestNextTrip = async function() {
     } catch (e) {
         console.error(e);
         showToast('تعذر جلب اقتراح رحلة');
+    }
+};
+
+function renderDriverRepositionList() {
+    const statusEl = document.getElementById('driver-reposition-status');
+    const listEl = document.getElementById('driver-reposition-list');
+    if (!listEl) return;
+
+    listEl.innerHTML = '';
+    const rows = Array.isArray(lastRepositionSuggestions) ? lastRepositionSuggestions : [];
+
+    if (!rows.length) {
+        if (statusEl) statusEl.textContent = 'لا توجد توصيات حالياً.';
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = `تم توليد ${rows.length} توصيات.`;
+
+    for (const s of rows) {
+        const eventId = s?.event_id;
+        const reason = s?.reason ? String(s.reason) : '';
+        const waitMin = s?.expected_wait_min !== undefined && s?.expected_wait_min !== null ? Number(s.expected_wait_min) : null;
+
+        const el = document.createElement('div');
+        el.className = 'bg-gray-50 border border-gray-200 rounded-2xl p-4';
+        el.innerHTML = `
+            <div class="flex items-start justify-between gap-3">
+                <div class="flex-1">
+                    <p class="text-sm font-extrabold text-gray-800">📍 توصية تمركز</p>
+                    <p class="text-[11px] text-gray-600 font-bold mt-1">${escapeHtml(reason || '—')}</p>
+                    <p class="text-[11px] text-gray-500 mt-2 font-bold">${Number.isFinite(waitMin) ? `⏱️ متوقع طلب خلال ~${Math.round(waitMin)} د` : ''}</p>
+                </div>
+                <div class="flex flex-col gap-2">
+                    <button type="button" class="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-extrabold hover:bg-emerald-700" data-action="executed">نفّذت</button>
+                    <button type="button" class="px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-xs font-extrabold hover:bg-gray-300" data-action="ignored">تجاهلت</button>
+                </div>
+            </div>
+        `;
+
+        const executedBtn = el.querySelector('button[data-action="executed"]');
+        const ignoredBtn = el.querySelector('button[data-action="ignored"]');
+
+        const send = async (action) => {
+            try {
+                if (!currentDriverProfile?.id) return;
+                if (!eventId) return;
+                if (executedBtn) executedBtn.disabled = true;
+                if (ignoredBtn) ignoredBtn.disabled = true;
+
+                await ApiService.captain.repositionFeedback(currentDriverProfile.id, { event_id: eventId, action });
+                showToast(action === 'executed' ? '✅ تم تسجيل: نفّذت' : '📝 تم تسجيل: تجاهلت');
+
+                el.classList.remove('bg-gray-50', 'border-gray-200');
+                el.classList.add(action === 'executed' ? 'bg-emerald-50' : 'bg-amber-50');
+            } catch (e) {
+                console.error(e);
+                showToast('تعذر تسجيل الـ feedback');
+            } finally {
+                if (executedBtn) executedBtn.disabled = false;
+                if (ignoredBtn) ignoredBtn.disabled = false;
+            }
+        };
+
+        if (executedBtn) executedBtn.addEventListener('click', () => send('executed'));
+        if (ignoredBtn) ignoredBtn.addEventListener('click', () => send('ignored'));
+        listEl.appendChild(el);
+    }
+}
+
+window.driverFetchRepositionSuggestions = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!currentDriverProfile?.id) {
+            showToast('سجّل دخول الكابتن أولاً');
+            return;
+        }
+        if (repositionLoading) return;
+        repositionLoading = true;
+
+        const statusEl = document.getElementById('driver-reposition-status');
+        if (statusEl) statusEl.textContent = 'جاري توليد التوصيات...';
+
+        const resp = await ApiService.captain.getRepositionSuggestions(currentDriverProfile.id, { limit: 5 });
+        lastRepositionSuggestions = Array.isArray(resp?.data) ? resp.data : [];
+        renderDriverRepositionList();
+        if (!lastRepositionSuggestions.length) showToast('لا توجد توصيات تمركز الآن');
+    } catch (e) {
+        console.error(e);
+        const statusEl = document.getElementById('driver-reposition-status');
+        if (statusEl) statusEl.textContent = 'تعذر توليد التوصيات.';
+        showToast('تعذر توليد توصيات التمركز');
+    } finally {
+        repositionLoading = false;
+    }
+};
+
+window.driverTripSwapOffer = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) {
+            showToast('لا توجد رحلة نشطة');
+            return;
+        }
+        if (activeTripSwapOffer) {
+            showToast('يوجد عرض تبديل مفتوح بالفعل');
+            return;
+        }
+
+        const reasonEl = document.getElementById('driver-trip-swap-reason');
+        const reasonCode = reasonEl && reasonEl.value ? String(reasonEl.value) : '';
+        const payload = reasonCode ? { reason_code: reasonCode } : {};
+
+        const resp = await ApiService.captain.tripSwapOffer(String(activeDriverTripId), payload);
+        if (!resp?.success || !resp?.data?.id) {
+            throw new Error(resp?.error || 'swap_offer_failed');
+        }
+
+        activeTripSwapOffer = resp.data;
+        updateDriverTripSwapCard();
+
+        if (tripSwapCountdownTimer) {
+            clearInterval(tripSwapCountdownTimer);
+            tripSwapCountdownTimer = null;
+        }
+
+        tripSwapCountdownTimer = setInterval(() => {
+            updateDriverTripSwapCard();
+            const exp = activeTripSwapOffer?.expires_at ? new Date(activeTripSwapOffer.expires_at).getTime() : NaN;
+            if (Number.isFinite(exp) && exp <= Date.now()) {
+                clearActiveTripSwapState();
+                showToast('⏳ انتهى عرض التبديل');
+            }
+        }, 500);
+
+        showToast('🔁 تم نشر عرض تبديل');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر نشر عرض التبديل');
+        clearActiveTripSwapState();
+    }
+};
+
+window.driverTripSwapCancel = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId || !activeTripSwapOffer?.id) return;
+        await ApiService.captain.tripSwapCancel(String(activeDriverTripId), { offer_id: activeTripSwapOffer.id });
+        showToast('تم إلغاء عرض التبديل');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر إلغاء العرض');
+    } finally {
+        clearActiveTripSwapState();
     }
 };
 

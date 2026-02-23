@@ -1207,6 +1207,77 @@ async function ensureCaptainFeatureTables() {
         `);
         await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_driver_audio_trip ON trip_driver_audio_recordings(trip_id, created_at DESC);');
 
+        // ------------------------------
+        // Reposition Coach (Captain)
+        // ------------------------------
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_reposition_prefs (
+                driver_id INTEGER PRIMARY KEY REFERENCES drivers(id) ON DELETE CASCADE,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                window_days INTEGER NOT NULL DEFAULT 14,
+                grid_deg DECIMAL(8, 5) NOT NULL DEFAULT 0.02000,
+                max_suggestions INTEGER NOT NULL DEFAULT 5,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS driver_reposition_events (
+                id BIGSERIAL PRIMARY KEY,
+                driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+                suggested_lat DECIMAL(10, 8),
+                suggested_lng DECIMAL(11, 8),
+                grid_key TEXT,
+                score DOUBLE PRECISION,
+                expected_wait_min INTEGER,
+                reason TEXT,
+                meta_json JSONB,
+                generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                feedback_action VARCHAR(20),
+                feedback_note TEXT,
+                feedback_at TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_reposition_events_driver_time ON driver_reposition_events(driver_id, generated_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_driver_reposition_events_feedback ON driver_reposition_events(driver_id, feedback_action, feedback_at DESC);');
+
+        // ------------------------------
+        // Trip Swap Market (Captain)
+        // ------------------------------
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_swap_offers (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+                offered_by_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                reason_code VARCHAR(30),
+                reason_text TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                expires_at TIMESTAMP NOT NULL,
+                accepted_by_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                accepted_at TIMESTAMP,
+                cancelled_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_swap_offers_trip_status ON trip_swap_offers(trip_id, status, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_swap_offers_driver_time ON trip_swap_offers(offered_by_driver_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_swap_offers_expires ON trip_swap_offers(status, expires_at);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_swap_decisions (
+                id BIGSERIAL PRIMARY KEY,
+                offer_id BIGINT NOT NULL REFERENCES trip_swap_offers(id) ON DELETE CASCADE,
+                driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+                status VARCHAR(20) NOT NULL DEFAULT 'offered',
+                decided_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (offer_id, driver_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_swap_decisions_driver_status ON trip_swap_decisions(driver_id, status, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_trip_swap_decisions_offer ON trip_swap_decisions(offer_id, created_at DESC);');
+
         console.log('✅ Captain-only tables ensured');
     } catch (err) {
         console.error('❌ Failed to ensure captain-only tables:', err.message);
@@ -11755,6 +11826,331 @@ app.put('/api/drivers/:id/captain/go-home', requireRole('driver', 'admin'), asyn
     }
 });
 
+function gridKeyFromLatLng(lat, lng, gridDeg) {
+    const g = Number.isFinite(Number(gridDeg)) && Number(gridDeg) > 0 ? Number(gridDeg) : 0.02;
+    const a = Math.floor(Number(lat) / g) * g;
+    const b = Math.floor(Number(lng) / g) * g;
+    return {
+        grid: g,
+        key: `${a.toFixed(5)},${b.toFixed(5)}`,
+        minLat: a,
+        minLng: b,
+        centerLat: a + g / 2,
+        centerLng: b + g / 2
+    };
+}
+
+function asInt(v, fallback = null) {
+    const n = Number.parseInt(String(v), 10);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+// Reposition Coach: generate 3-5 personalized reposition suggestions
+app.get('/api/drivers/:id/captain/reposition/suggestions', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const driverRes = await pool.query(
+            'SELECT id, car_type, last_lat, last_lng, last_location_at FROM drivers WHERE id = $1 LIMIT 1',
+            [driverId]
+        );
+        const driver = driverRes.rows[0] || null;
+        if (!driver) return res.status(404).json({ success: false, error: 'Driver not found' });
+
+        const dLat = driver.last_lat !== undefined && driver.last_lat !== null ? Number(driver.last_lat) : null;
+        const dLng = driver.last_lng !== undefined && driver.last_lng !== null ? Number(driver.last_lng) : null;
+        if (!Number.isFinite(dLat) || !Number.isFinite(dLng)) {
+            return res.json({ success: true, count: 0, data: [] });
+        }
+
+        const prefsRes = await pool.query(
+            `SELECT enabled, window_days, grid_deg, max_suggestions
+             FROM driver_reposition_prefs
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        const prefs = prefsRes.rows[0] || null;
+        if (prefs && prefs.enabled === false) {
+            return res.json({ success: true, count: 0, data: [] });
+        }
+
+        const windowDays = Math.max(7, Math.min(30, asInt(req.query?.window_days, asInt(prefs?.window_days, 14)) || 14));
+        const gridDeg = safeNumber(req.query?.grid_deg);
+        const grid = Number.isFinite(gridDeg) && gridDeg > 0.002 ? Math.min(gridDeg, 0.2) : (prefs?.grid_deg !== undefined ? Number(prefs.grid_deg) : 0.02);
+        const maxSuggestionsRaw = asInt(req.query?.limit, asInt(prefs?.max_suggestions, 5));
+        const maxSuggestions = Math.max(3, Math.min(5, Number.isFinite(maxSuggestionsRaw) ? maxSuggestionsRaw : 5));
+
+        // Load captain rules + go-home for filtering
+        const rulesRes = await pool.query(
+            `SELECT min_fare, excluded_zones_json
+             FROM driver_acceptance_rules
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        const rules = rulesRes.rows[0] || null;
+
+        const goHomeRes = await pool.query(
+            `SELECT enabled, home_lat, home_lng, max_detour_km
+             FROM driver_go_home_settings
+             WHERE driver_id = $1
+             LIMIT 1`,
+            [driverId]
+        );
+        const goHome = goHomeRes.rows[0] || null;
+
+        const minFare = rules?.min_fare !== undefined && rules?.min_fare !== null ? Number(rules.min_fare) : null;
+        const excludedZones = rules?.excluded_zones_json && typeof rules.excluded_zones_json === 'object' ? rules.excluded_zones_json : null;
+        const boxes = Array.isArray(excludedZones) ? excludedZones : [];
+
+        const goHomeEnabled = !!goHome?.enabled;
+        const homeLat = goHome?.home_lat !== undefined && goHome?.home_lat !== null ? Number(goHome.home_lat) : null;
+        const homeLng = goHome?.home_lng !== undefined && goHome?.home_lng !== null ? Number(goHome.home_lng) : null;
+        const maxDetour = goHome?.max_detour_km !== undefined && goHome?.max_detour_km !== null ? Number(goHome.max_detour_km) : 2;
+
+        // Infer driver style (short/long) from recent completed trips
+        let driverAvgDist = null;
+        try {
+            const styleRes = await pool.query(
+                `SELECT AVG(NULLIF(distance_km, 0))::float AS avg_km
+                 FROM trips
+                 WHERE driver_id = $1
+                   AND status = 'completed'
+                   AND created_at >= NOW() - INTERVAL '30 days'`,
+                [driverId]
+            );
+            const avg = styleRes.rows[0]?.avg_km !== undefined && styleRes.rows[0]?.avg_km !== null ? Number(styleRes.rows[0].avg_km) : null;
+            driverAvgDist = Number.isFinite(avg) ? avg : null;
+        } catch (e) {
+            driverAvgDist = null;
+        }
+
+        const now = new Date();
+        const targetDow = now.getDay();
+        const targetHour = now.getHours();
+        const hourWindow = 1; // +/- 1 hour
+
+        // Fetch recent trip demand around driver's area (bounding box to keep it light)
+        const latDelta = 0.30;
+        const lngDelta = 0.30;
+        const tripsRes = await pool.query(
+            `SELECT pickup_lat, pickup_lng, cost, distance_km, duration_minutes, created_at
+             FROM trips
+             WHERE created_at >= NOW() - ($1 * INTERVAL '1 day')
+               AND pickup_lat IS NOT NULL AND pickup_lng IS NOT NULL
+               AND pickup_lat BETWEEN $2 AND $3
+               AND pickup_lng BETWEEN $4 AND $5
+               AND COALESCE(source, 'passenger_app') = 'passenger_app'`,
+            [windowDays, dLat - latDelta, dLat + latDelta, dLng - lngDelta, dLng + lngDelta]
+        );
+
+        const cellMap = new Map();
+        for (const t of tripsRes.rows || []) {
+            const pLat = t.pickup_lat !== undefined && t.pickup_lat !== null ? Number(t.pickup_lat) : null;
+            const pLng = t.pickup_lng !== undefined && t.pickup_lng !== null ? Number(t.pickup_lng) : null;
+            if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) continue;
+
+            const createdAt = t.created_at ? new Date(t.created_at) : null;
+            if (!createdAt || !Number.isFinite(createdAt.getTime())) continue;
+            const dow = createdAt.getDay();
+            const hour = createdAt.getHours();
+            if (dow !== targetDow) continue;
+            if (Math.abs(hour - targetHour) > hourWindow) continue;
+
+            const g = gridKeyFromLatLng(pLat, pLng, grid);
+            const key = g.key;
+            const rec = cellMap.get(key) || {
+                key,
+                minLat: g.minLat,
+                minLng: g.minLng,
+                centerLat: g.centerLat,
+                centerLng: g.centerLng,
+                count: 0,
+                sumFare: 0,
+                sumDist: 0,
+                sumDur: 0,
+                distCount: 0,
+                durCount: 0,
+                fareCount: 0
+            };
+            rec.count += 1;
+            const fare = t.cost !== undefined && t.cost !== null ? Number(t.cost) : null;
+            if (Number.isFinite(fare) && fare > 0) {
+                rec.sumFare += fare;
+                rec.fareCount += 1;
+            }
+            const dist = t.distance_km !== undefined && t.distance_km !== null ? Number(t.distance_km) : null;
+            if (Number.isFinite(dist) && dist > 0) {
+                rec.sumDist += dist;
+                rec.distCount += 1;
+            }
+            const dur = t.duration_minutes !== undefined && t.duration_minutes !== null ? Number(t.duration_minutes) : null;
+            if (Number.isFinite(dur) && dur > 0) {
+                rec.sumDur += dur;
+                rec.durCount += 1;
+            }
+            cellMap.set(key, rec);
+        }
+
+        const occurrences = Math.max(1, Math.ceil(windowDays / 7) * (hourWindow * 2 + 1));
+        const candidates = [];
+        for (const rec of cellMap.values()) {
+            if (!rec || rec.count <= 0) continue;
+
+            // excluded zones filter
+            if (boxes.length) {
+                const excluded = boxes.some((b) => withinBox(Number(rec.centerLat), Number(rec.centerLng), b));
+                if (excluded) continue;
+            }
+
+            const avgFare = rec.fareCount > 0 ? (rec.sumFare / rec.fareCount) : null;
+            if (Number.isFinite(minFare) && Number.isFinite(avgFare) && avgFare < minFare) continue;
+
+            // go-home filter (soft): only keep if it doesn't move away too much
+            if (goHomeEnabled && Number.isFinite(homeLat) && Number.isFinite(homeLng)) {
+                const dToHome = haversineKm({ lat: dLat, lng: dLng }, { lat: homeLat, lng: homeLng });
+                const cellToHome = haversineKm({ lat: Number(rec.centerLat), lng: Number(rec.centerLng) }, { lat: homeLat, lng: homeLng });
+                const detour = Number.isFinite(maxDetour) ? maxDetour : 2;
+                if (Number.isFinite(dToHome) && Number.isFinite(cellToHome) && cellToHome > dToHome + detour) {
+                    continue;
+                }
+            }
+
+            const distKm = haversineKm({ lat: dLat, lng: dLng }, { lat: Number(rec.centerLat), lng: Number(rec.centerLng) });
+            const avgDist = rec.distCount > 0 ? (rec.sumDist / rec.distCount) : null;
+
+            const ratePerHour = rec.count / occurrences;
+            const expectedWait = ratePerHour > 0 ? Math.round(Math.max(2, Math.min(60, 60 / ratePerHour))) : 60;
+
+            let score = rec.count * 3;
+            if (Number.isFinite(distKm)) {
+                score += Math.max(0, 10 - distKm) * 0.6;
+            }
+
+            if (Number.isFinite(driverAvgDist) && Number.isFinite(avgDist)) {
+                // Reward cells whose avg trip distance matches driver's style
+                const delta = Math.abs(driverAvgDist - avgDist);
+                score += Math.max(-5, 5 - delta);
+            }
+
+            // Mild preference: slightly higher avg fare
+            if (Number.isFinite(avgFare)) {
+                score += Math.min(10, avgFare / 10);
+            }
+
+            const reasons = [];
+            reasons.push(`طلب أعلى في نفس الساعة (${rec.count})`);
+            if (Number.isFinite(distKm)) reasons.push(`قريبة منك (${Math.round(distKm * 10) / 10} كم)`);
+            if (Number.isFinite(expectedWait)) reasons.push(`متوقع طلب خلال ~${expectedWait} د`);
+            const reason = reasons.slice(0, 3).join(' • ');
+
+            candidates.push({
+                grid_key: rec.key,
+                lat: Number(rec.centerLat),
+                lng: Number(rec.centerLng),
+                score,
+                expected_wait_min: expectedWait,
+                demand_count: rec.count,
+                avg_fare: Number.isFinite(avgFare) ? Math.round(avgFare * 100) / 100 : null,
+                avg_distance_km: Number.isFinite(avgDist) ? Math.round(avgDist * 100) / 100 : null,
+                distance_from_you_km: Number.isFinite(distKm) ? Math.round(distKm * 100) / 100 : null,
+                reason
+            });
+        }
+
+        candidates.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+        const top = candidates.slice(0, maxSuggestions);
+        if (!top.length) {
+            return res.json({ success: true, count: 0, data: [] });
+        }
+
+        const out = [];
+        for (const s of top) {
+            const meta = {
+                window_days: windowDays,
+                dow: targetDow,
+                hour: targetHour,
+                grid_deg: grid,
+                driver_lat: dLat,
+                driver_lng: dLng,
+                demand_count: s.demand_count,
+                avg_fare: s.avg_fare,
+                avg_distance_km: s.avg_distance_km,
+                distance_from_you_km: s.distance_from_you_km,
+                min_fare_rule: Number.isFinite(minFare) ? minFare : null,
+                go_home_enabled: goHomeEnabled
+            };
+
+            const insert = await pool.query(
+                `INSERT INTO driver_reposition_events
+                    (driver_id, suggested_lat, suggested_lng, grid_key, score, expected_wait_min, reason, meta_json)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+                 RETURNING id, generated_at`,
+                [
+                    driverId,
+                    Number.isFinite(s.lat) ? s.lat : null,
+                    Number.isFinite(s.lng) ? s.lng : null,
+                    s.grid_key || null,
+                    Number.isFinite(Number(s.score)) ? Number(s.score) : null,
+                    Number.isFinite(Number(s.expected_wait_min)) ? Number(s.expected_wait_min) : null,
+                    s.reason ? String(s.reason).slice(0, 240) : null,
+                    JSON.stringify(meta)
+                ]
+            );
+            const row = insert.rows[0];
+            out.push({
+                event_id: row?.id,
+                lat: s.lat,
+                lng: s.lng,
+                reason: s.reason,
+                expected_wait_min: s.expected_wait_min,
+                score: Math.round((Number(s.score) || 0) * 100) / 100,
+                meta
+            });
+        }
+
+        res.json({ success: true, count: out.length, data: out });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/drivers/:id/captain/reposition/feedback', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        const access = ensureDriverSelfOrAdmin(req, res, driverId);
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const eventId = req.body?.event_id !== undefined ? Number(req.body.event_id) : null;
+        if (!Number.isFinite(eventId) || eventId <= 0) return res.status(400).json({ success: false, error: 'invalid_event_id' });
+
+        const action = String(req.body?.action || req.body?.feedback_action || '').toLowerCase();
+        const allowed = new Set(['executed', 'ignored']);
+        if (!allowed.has(action)) return res.status(400).json({ success: false, error: 'invalid_action' });
+        const note = req.body?.note ? String(req.body.note).slice(0, 500) : (req.body?.feedback_note ? String(req.body.feedback_note).slice(0, 500) : null);
+
+        const up = await pool.query(
+            `UPDATE driver_reposition_events
+             SET feedback_action = $1,
+                 feedback_note = $2,
+                 feedback_at = CURRENT_TIMESTAMP
+             WHERE id = $3 AND driver_id = $4
+             RETURNING id, driver_id, feedback_action, feedback_note, feedback_at, generated_at`,
+            [action, note, eventId, driverId]
+        );
+        if (up.rows.length === 0) return res.status(404).json({ success: false, error: 'event_not_found' });
+
+        res.json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 app.get('/api/drivers/:id/captain/goals', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const driverId = Number(req.params.id);
@@ -12416,6 +12812,519 @@ app.get('/api/drivers/:id/captain/next-trip-suggestion', requireRole('driver', '
         );
         const row = q.rows[0] || null;
         res.json({ success: true, data: row });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ------------------------------
+// Trip Swap Market (Captain)
+// ------------------------------
+function normalizeSwapReason(payload) {
+    const codeRaw = payload?.reason_code !== undefined ? payload.reason_code : payload?.reason;
+    const textRaw = payload?.reason_text !== undefined ? payload.reason_text : payload?.reason;
+    const code = codeRaw ? String(codeRaw).trim().toLowerCase().slice(0, 30) : null;
+    const text = textRaw ? String(textRaw).trim().slice(0, 200) : null;
+    // Keep a small allowlist for code but don't block free text.
+    const allowed = new Set(['far', 'traffic', 'shift_end', 'not_suitable', 'other']);
+    return {
+        reason_code: code && allowed.has(code) ? code : (code ? 'other' : null),
+        reason_text: text
+    };
+}
+
+async function expireTripSwapOffers(tripId) {
+    try {
+        await pool.query(
+            `UPDATE trip_swap_offers
+             SET status = 'expired', updated_at = CURRENT_TIMESTAMP
+             WHERE trip_id = $1 AND status = 'open' AND expires_at <= NOW()`,
+            [String(tripId)]
+        );
+    } catch (e) {
+        // ignore
+    }
+}
+
+function tripHasStarted(tripRow) {
+    if (!tripRow) return true;
+    const st = String(tripRow.status || '').toLowerCase();
+    if (st === 'ongoing' || st === 'completed') return true;
+    if (tripRow.started_at) return true;
+    const ts = String(tripRow.trip_status || '').toLowerCase();
+    if (ts === 'started' || ts === 'completed') return true;
+    return false;
+}
+
+app.post('/api/trips/:tripId/swap/offer', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.tripId);
+        if (!tripId) return res.status(400).json({ success: false, error: 'invalid_trip_id' });
+
+        await expireTripSwapOffers(tripId);
+
+        const tripRes = await pool.query(
+            `SELECT id, user_id, driver_id, driver_name, status, trip_status, started_at,
+                    pickup_location, dropoff_location,
+                    pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, cost, car_type
+             FROM trips WHERE id = $1 LIMIT 1`,
+            [tripId]
+        );
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+        if (!trip.driver_id) return res.status(400).json({ success: false, error: 'trip_not_assigned' });
+        if (tripHasStarted(trip)) return res.status(400).json({ success: false, error: 'swap_not_allowed_after_start' });
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        let offeredByDriverId = null;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(trip.driver_id) !== String(authDriverId)) return res.status(403).json({ success: false, error: 'Forbidden' });
+            offeredByDriverId = Number(authDriverId);
+        } else {
+            const fromBody = req.body?.offered_by_driver_id !== undefined ? Number(req.body.offered_by_driver_id) : null;
+            offeredByDriverId = Number.isFinite(fromBody) && fromBody > 0 ? fromBody : Number(trip.driver_id);
+        }
+
+        // Rate limit: max 3 offers per driver per hour
+        const rl = await pool.query(
+            `SELECT COUNT(*)::int AS c
+             FROM trip_swap_offers
+             WHERE offered_by_driver_id = $1
+               AND created_at >= NOW() - INTERVAL '1 hour'`,
+            [offeredByDriverId]
+        );
+        const c = Number(rl.rows[0]?.c || 0);
+        if (c >= 3) return res.status(429).json({ success: false, error: 'swap_rate_limited' });
+
+        // Prevent multiple open offers on same trip
+        const existing = await pool.query(
+            `SELECT * FROM trip_swap_offers
+             WHERE trip_id = $1 AND status = 'open' AND expires_at > NOW()
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [tripId]
+        );
+        if (existing.rows.length) {
+            return res.json({ success: true, data: existing.rows[0], existing: true });
+        }
+
+        const ttlSecRaw = req.body?.ttl_seconds !== undefined ? Number(req.body.ttl_seconds) : null;
+        const ttlSeconds = Number.isFinite(ttlSecRaw) ? Math.max(60, Math.min(120, Math.round(ttlSecRaw))) : 90;
+        const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+        const reason = normalizeSwapReason(req.body || {});
+
+        const offerInsert = await pool.query(
+            `INSERT INTO trip_swap_offers (trip_id, offered_by_driver_id, reason_code, reason_text, status, expires_at)
+             VALUES ($1,$2,$3,$4,'open',$5)
+             RETURNING *`,
+            [tripId, offeredByDriverId, reason.reason_code, reason.reason_text, expiresAt]
+        );
+        const offer = offerInsert.rows[0];
+
+        const pLat = trip.pickup_lat !== undefined && trip.pickup_lat !== null ? Number(trip.pickup_lat) : null;
+        const pLng = trip.pickup_lng !== undefined && trip.pickup_lng !== null ? Number(trip.pickup_lng) : null;
+        if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) {
+            return res.status(201).json({ success: true, data: offer, candidates_count: 0 });
+        }
+
+        const radiusKmRaw = req.body?.radius_km !== undefined ? Number(req.body.radius_km) : null;
+        const radiusKm = Number.isFinite(radiusKmRaw) ? Math.max(2, Math.min(25, radiusKmRaw)) : 10;
+
+        const nearbyRes = await pool.query(
+            `SELECT
+                d.id, d.name, d.phone, d.email, d.car_type,
+                d.last_lat, d.last_lng, d.last_location_at,
+                d.approval_status, d.status,
+                ar.min_fare, ar.max_pickup_distance_km, ar.excluded_zones_json,
+                gh.enabled AS go_home_enabled, gh.home_lat, gh.home_lng, gh.max_detour_km,
+                (6371 * acos(
+                    cos(radians($1)) * cos(radians(d.last_lat)) * cos(radians(d.last_lng) - radians($2)) +
+                    sin(radians($1)) * sin(radians(d.last_lat))
+                )) AS distance_km
+             FROM drivers d
+             LEFT JOIN driver_acceptance_rules ar ON ar.driver_id = d.id
+             LEFT JOIN driver_go_home_settings gh ON gh.driver_id = d.id
+             WHERE d.id <> $3
+               AND d.status = 'online'
+               AND COALESCE(d.approval_status, '') = 'approved'
+               AND d.last_lat IS NOT NULL AND d.last_lng IS NOT NULL
+               AND d.last_location_at >= NOW() - ($4 * INTERVAL '1 minute')
+               AND (6371 * acos(
+                    cos(radians($1)) * cos(radians(d.last_lat)) * cos(radians(d.last_lng) - radians($2)) +
+                    sin(radians($1)) * sin(radians(d.last_lat))
+                )) <= $5
+             ORDER BY distance_km ASC
+             LIMIT 30`,
+            [pLat, pLng, offeredByDriverId, DRIVER_LOCATION_TTL_MINUTES, radiusKm]
+        );
+
+        const candidates = [];
+        const tripFare = trip.cost !== undefined && trip.cost !== null ? Number(trip.cost) : null;
+        const dLat = trip.dropoff_lat !== undefined && trip.dropoff_lat !== null ? Number(trip.dropoff_lat) : null;
+        const dLng = trip.dropoff_lng !== undefined && trip.dropoff_lng !== null ? Number(trip.dropoff_lng) : null;
+
+        for (const d of nearbyRes.rows || []) {
+            const distKm = d.distance_km !== undefined && d.distance_km !== null ? Number(d.distance_km) : null;
+            const maxPickup = d.max_pickup_distance_km !== undefined && d.max_pickup_distance_km !== null ? Number(d.max_pickup_distance_km) : null;
+            if (Number.isFinite(maxPickup) && Number.isFinite(distKm) && distKm > maxPickup) continue;
+
+            const minFare = d.min_fare !== undefined && d.min_fare !== null ? Number(d.min_fare) : null;
+            if (Number.isFinite(minFare) && Number.isFinite(tripFare) && tripFare < minFare) continue;
+
+            const excluded = d.excluded_zones_json && typeof d.excluded_zones_json === 'object' ? d.excluded_zones_json : null;
+            const boxes = Array.isArray(excluded) ? excluded : [];
+            if (boxes.length) {
+                const inExcluded = boxes.some((b) => withinBox(pLat, pLng, b));
+                if (inExcluded) continue;
+            }
+
+            const ghEnabled = !!d.go_home_enabled;
+            const homeLat = d.home_lat !== undefined && d.home_lat !== null ? Number(d.home_lat) : null;
+            const homeLng = d.home_lng !== undefined && d.home_lng !== null ? Number(d.home_lng) : null;
+            const maxDetour = d.max_detour_km !== undefined && d.max_detour_km !== null ? Number(d.max_detour_km) : 2;
+            if (ghEnabled && Number.isFinite(homeLat) && Number.isFinite(homeLng) && Number.isFinite(dLat) && Number.isFinite(dLng)) {
+                const dPickup = haversineKm({ lat: pLat, lng: pLng }, { lat: homeLat, lng: homeLng });
+                const dDrop = haversineKm({ lat: dLat, lng: dLng }, { lat: homeLat, lng: homeLng });
+                const det = Number.isFinite(maxDetour) ? maxDetour : 2;
+                const ok = Number.isFinite(dPickup) && Number.isFinite(dDrop) ? (dDrop <= dPickup + det) : false;
+                if (!ok) continue;
+            }
+
+            candidates.push({
+                driver_id: d.id,
+                driver_name: d.name,
+                distance_km: Number.isFinite(distKm) ? Math.round(distKm * 100) / 100 : null
+            });
+            if (candidates.length >= 10) break;
+        }
+
+        // Persist decisions
+        for (const cnd of candidates) {
+            await pool.query(
+                `INSERT INTO trip_swap_decisions (offer_id, driver_id, status)
+                 VALUES ($1,$2,'offered')
+                 ON CONFLICT (offer_id, driver_id) DO NOTHING`,
+                [offer.id, cnd.driver_id]
+            );
+        }
+
+        // Notify candidates via socket (driver user rooms)
+        try {
+            const phones = candidates.map(c => String(c.driver_id)).filter(Boolean);
+            // Map driver_id -> user_id (best effort by matching email/phone)
+            const driverRows = nearbyRes.rows || [];
+            const phoneList = driverRows.map(r => (r.phone ? String(r.phone).trim() : null)).filter(Boolean);
+            const emailList = driverRows.map(r => (r.email ? String(r.email).trim().toLowerCase() : null)).filter(Boolean);
+            const userRes = await pool.query(
+                `SELECT id, phone, LOWER(email) AS email
+                 FROM users
+                 WHERE role = 'driver'
+                   AND ((phone IS NOT NULL AND phone = ANY($1)) OR (email IS NOT NULL AND LOWER(email) = ANY($2)))`,
+                [phoneList.length ? phoneList : [''], emailList.length ? emailList : ['']]
+            );
+            const userByPhone = new Map();
+            const userByEmail = new Map();
+            for (const u of userRes.rows || []) {
+                if (u.phone) userByPhone.set(String(u.phone).trim(), u.id);
+                if (u.email) userByEmail.set(String(u.email).trim().toLowerCase(), u.id);
+            }
+
+            for (const cnd of candidates) {
+                const full = driverRows.find(r => String(r.id) === String(cnd.driver_id)) || null;
+                const uid = full?.phone && userByPhone.has(String(full.phone).trim())
+                    ? userByPhone.get(String(full.phone).trim())
+                    : (full?.email && userByEmail.has(String(full.email).trim().toLowerCase())
+                        ? userByEmail.get(String(full.email).trim().toLowerCase())
+                        : null);
+                if (!uid) continue;
+                io.to(userRoom(uid)).emit('trip_swap_offer', {
+                    offer: {
+                        id: offer.id,
+                        trip_id: offer.trip_id,
+                        expires_at: offer.expires_at,
+                        reason_code: offer.reason_code,
+                        reason_text: offer.reason_text,
+                        offered_by_driver_id: offer.offered_by_driver_id
+                    },
+                    trip: {
+                        id: trip.id,
+                        pickup_location: trip.pickup_location,
+                        dropoff_location: trip.dropoff_location,
+                        pickup_lat: trip.pickup_lat,
+                        pickup_lng: trip.pickup_lng,
+                        dropoff_lat: trip.dropoff_lat,
+                        dropoff_lng: trip.dropoff_lng,
+                        cost: trip.cost,
+                        car_type: trip.car_type
+                    },
+                    meta: { distance_km: cnd.distance_km }
+                });
+            }
+        } catch (e) {
+            // ignore socket issues
+        }
+
+        res.status(201).json({ success: true, data: offer, candidates_count: candidates.length });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/trips/:tripId/swap/accept', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.tripId);
+        if (!tripId) return res.status(400).json({ success: false, error: 'invalid_trip_id' });
+        await expireTripSwapOffers(tripId);
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        let acceptDriverId = null;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            acceptDriverId = Number(authDriverId);
+        } else {
+            const fromBody = req.body?.driver_id !== undefined ? Number(req.body.driver_id) : null;
+            if (!Number.isFinite(fromBody) || fromBody <= 0) return res.status(400).json({ success: false, error: 'missing_driver_id' });
+            acceptDriverId = fromBody;
+        }
+
+        const offerId = req.body?.offer_id !== undefined ? Number(req.body.offer_id) : null;
+        if (!Number.isFinite(offerId) || offerId <= 0) return res.status(400).json({ success: false, error: 'invalid_offer_id' });
+
+        const offerRes = await pool.query(
+            `SELECT * FROM trip_swap_offers
+             WHERE id = $1 AND trip_id = $2
+             LIMIT 1`,
+            [offerId, tripId]
+        );
+        const offer = offerRes.rows[0] || null;
+        if (!offer) return res.status(404).json({ success: false, error: 'offer_not_found' });
+        if (String(offer.status) !== 'open') return res.status(409).json({ success: false, error: 'offer_not_open' });
+        if (offer.expires_at && new Date(offer.expires_at).getTime() <= Date.now()) {
+            await expireTripSwapOffers(tripId);
+            return res.status(410).json({ success: false, error: 'offer_expired' });
+        }
+
+        // Driver must be a candidate (unless admin)
+        if (authRole === 'driver') {
+            const dec = await pool.query(
+                `SELECT status FROM trip_swap_decisions
+                 WHERE offer_id = $1 AND driver_id = $2
+                 LIMIT 1`,
+                [offerId, acceptDriverId]
+            );
+            if (dec.rows.length === 0) return res.status(403).json({ success: false, error: 'not_eligible_for_offer' });
+        }
+
+        const tripRes = await pool.query(
+            `SELECT id, user_id, driver_id, driver_name, status, trip_status, started_at
+             FROM trips WHERE id = $1 LIMIT 1`,
+            [tripId]
+        );
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+        if (tripHasStarted(trip)) return res.status(400).json({ success: false, error: 'swap_not_allowed_after_start' });
+
+        const acceptDriverRes = await pool.query('SELECT id, name, phone, email FROM drivers WHERE id = $1 LIMIT 1', [acceptDriverId]);
+        const acceptDriver = acceptDriverRes.rows[0] || null;
+        if (!acceptDriver) return res.status(404).json({ success: false, error: 'accept_driver_not_found' });
+
+        // Transaction: accept offer + switch trip driver
+        await pool.query('BEGIN');
+        const accepted = await pool.query(
+            `UPDATE trip_swap_offers
+             SET status = 'accepted',
+                 accepted_by_driver_id = $1,
+                 accepted_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2 AND status = 'open' AND expires_at > NOW()
+             RETURNING *`,
+            [acceptDriverId, offerId]
+        );
+        if (accepted.rows.length === 0) {
+            await pool.query('ROLLBACK');
+            return res.status(409).json({ success: false, error: 'offer_already_taken_or_expired' });
+        }
+
+        await pool.query(
+            `UPDATE trip_swap_decisions
+             SET status = 'accepted', decided_at = CURRENT_TIMESTAMP
+             WHERE offer_id = $1 AND driver_id = $2`,
+            [offerId, acceptDriverId]
+        );
+
+        // Mark others as ignored (best effort)
+        await pool.query(
+            `UPDATE trip_swap_decisions
+             SET status = CASE WHEN status = 'offered' THEN 'ignored' ELSE status END
+             WHERE offer_id = $1 AND driver_id <> $2`,
+            [offerId, acceptDriverId]
+        );
+
+        const tripUp = await pool.query(
+            `UPDATE trips
+             SET driver_id = $1,
+                 driver_name = $2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3
+             RETURNING *`,
+            [acceptDriverId, acceptDriver.name || trip.driver_name || null, tripId]
+        );
+
+        await pool.query('COMMIT');
+
+        // Notify passenger + trip room
+        try {
+            if (trip.user_id) {
+                io.to(userRoom(trip.user_id)).emit('trip_swap_accepted', {
+                    trip_id: String(tripId),
+                    old_driver_id: trip.driver_id,
+                    new_driver_id: acceptDriverId,
+                    trip: tripUp.rows[0]
+                });
+            }
+            io.to(tripRoom(tripId)).emit('trip_swap_accepted', {
+                trip_id: String(tripId),
+                old_driver_id: trip.driver_id,
+                new_driver_id: acceptDriverId,
+                trip: tripUp.rows[0]
+            });
+        } catch (e) {
+            // ignore
+        }
+
+        res.json({ success: true, data: { offer: accepted.rows[0], trip: tripUp.rows[0] } });
+    } catch (e) {
+        try { await pool.query('ROLLBACK'); } catch {}
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/trips/:tripId/swap/reject', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.tripId);
+        if (!tripId) return res.status(400).json({ success: false, error: 'invalid_trip_id' });
+        await expireTripSwapOffers(tripId);
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        let driverId = null;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            driverId = Number(authDriverId);
+        } else {
+            const fromBody = req.body?.driver_id !== undefined ? Number(req.body.driver_id) : null;
+            if (!Number.isFinite(fromBody) || fromBody <= 0) return res.status(400).json({ success: false, error: 'missing_driver_id' });
+            driverId = fromBody;
+        }
+
+        const offerId = req.body?.offer_id !== undefined ? Number(req.body.offer_id) : null;
+        if (!Number.isFinite(offerId) || offerId <= 0) return res.status(400).json({ success: false, error: 'invalid_offer_id' });
+
+        const offerRes = await pool.query('SELECT id, status, expires_at FROM trip_swap_offers WHERE id = $1 AND trip_id = $2 LIMIT 1', [offerId, tripId]);
+        const offer = offerRes.rows[0] || null;
+        if (!offer) return res.status(404).json({ success: false, error: 'offer_not_found' });
+        if (String(offer.status) !== 'open') return res.status(409).json({ success: false, error: 'offer_not_open' });
+        if (offer.expires_at && new Date(offer.expires_at).getTime() <= Date.now()) {
+            await expireTripSwapOffers(tripId);
+            return res.status(410).json({ success: false, error: 'offer_expired' });
+        }
+
+        const up = await pool.query(
+            `UPDATE trip_swap_decisions
+             SET status = 'rejected', decided_at = CURRENT_TIMESTAMP
+             WHERE offer_id = $1 AND driver_id = $2
+             RETURNING *`,
+            [offerId, driverId]
+        );
+        if (up.rows.length === 0) return res.status(404).json({ success: false, error: 'decision_not_found' });
+
+        res.json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/trips/:tripId/swap/cancel', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.tripId);
+        if (!tripId) return res.status(400).json({ success: false, error: 'invalid_trip_id' });
+        await expireTripSwapOffers(tripId);
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+
+        const offerId = req.body?.offer_id !== undefined ? Number(req.body.offer_id) : null;
+        if (!Number.isFinite(offerId) || offerId <= 0) return res.status(400).json({ success: false, error: 'invalid_offer_id' });
+
+        const offerRes = await pool.query('SELECT * FROM trip_swap_offers WHERE id = $1 AND trip_id = $2 LIMIT 1', [offerId, tripId]);
+        const offer = offerRes.rows[0] || null;
+        if (!offer) return res.status(404).json({ success: false, error: 'offer_not_found' });
+        if (String(offer.status) !== 'open') return res.status(409).json({ success: false, error: 'offer_not_open' });
+
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(offer.offered_by_driver_id || '') !== String(authDriverId)) return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+
+        const up = await pool.query(
+            `UPDATE trip_swap_offers
+             SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status = 'open'
+             RETURNING *`,
+            [offerId]
+        );
+        if (up.rows.length === 0) return res.status(409).json({ success: false, error: 'offer_not_open' });
+
+        await pool.query(
+            `UPDATE trip_swap_decisions
+             SET status = CASE WHEN status = 'offered' THEN 'cancelled' ELSE status END,
+                 decided_at = COALESCE(decided_at, CURRENT_TIMESTAMP)
+             WHERE offer_id = $1`,
+            [offerId]
+        );
+
+        // Notify candidates
+        try {
+            const dec = await pool.query(
+                `SELECT d.driver_id, dr.phone, dr.email
+                 FROM trip_swap_decisions d
+                 JOIN drivers dr ON dr.id = d.driver_id
+                 WHERE d.offer_id = $1`,
+                [offerId]
+            );
+            const phoneList = (dec.rows || []).map(r => (r.phone ? String(r.phone).trim() : null)).filter(Boolean);
+            const emailList = (dec.rows || []).map(r => (r.email ? String(r.email).trim().toLowerCase() : null)).filter(Boolean);
+            const userRes = await pool.query(
+                `SELECT id, phone, LOWER(email) AS email
+                 FROM users
+                 WHERE role = 'driver'
+                   AND ((phone IS NOT NULL AND phone = ANY($1)) OR (email IS NOT NULL AND LOWER(email) = ANY($2)))`,
+                [phoneList.length ? phoneList : [''], emailList.length ? emailList : ['']]
+            );
+            const userByPhone = new Map();
+            const userByEmail = new Map();
+            for (const u of userRes.rows || []) {
+                if (u.phone) userByPhone.set(String(u.phone).trim(), u.id);
+                if (u.email) userByEmail.set(String(u.email).trim().toLowerCase(), u.id);
+            }
+            for (const r of dec.rows || []) {
+                const uid = r.phone && userByPhone.has(String(r.phone).trim())
+                    ? userByPhone.get(String(r.phone).trim())
+                    : (r.email && userByEmail.has(String(r.email).trim().toLowerCase())
+                        ? userByEmail.get(String(r.email).trim().toLowerCase())
+                        : null);
+                if (!uid) continue;
+                io.to(userRoom(uid)).emit('trip_swap_cancelled', { offer_id: offerId, trip_id: String(tripId) });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        res.json({ success: true, data: up.rows[0] });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }

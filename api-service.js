@@ -821,6 +821,48 @@ const ApiService = {
             return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/next-trip-suggestion${q ? `?${q}` : ''}`);
         },
 
+        // Reposition Coach (Captain)
+        async getRepositionSuggestions(driverId, options = {}) {
+            const params = new URLSearchParams();
+            if (Number.isFinite(options.windowDays)) params.set('window_days', options.windowDays);
+            if (Number.isFinite(options.gridDeg)) params.set('grid_deg', options.gridDeg);
+            if (Number.isFinite(options.limit)) params.set('limit', options.limit);
+            const q = params.toString();
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/reposition/suggestions${q ? `?${q}` : ''}`);
+        },
+        async repositionFeedback(driverId, payload = {}) {
+            return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/captain/reposition/feedback`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // Trip Swap Market (Captain)
+        async tripSwapOffer(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/swap/offer`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+        async tripSwapAccept(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/swap/accept`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+        async tripSwapReject(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/swap/reject`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+        async tripSwapCancel(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/swap/cancel`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
         async uploadTripAudio(tripId, blob, mimeType = null) {
             const fd = new FormData();
             const type = mimeType || (blob && blob.type ? blob.type : 'audio/webm');
