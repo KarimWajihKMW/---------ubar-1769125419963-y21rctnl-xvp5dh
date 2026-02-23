@@ -873,6 +873,50 @@ async function ensureCoreSchema() {
             );
         `);
 
+        // Driving Coach (privacy-first): store only aggregated counts/score (no raw sensor data)
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS trip_driving_summaries (
+                id SERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) UNIQUE REFERENCES trips(id) ON DELETE CASCADE,
+                driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                hard_brake_count INTEGER DEFAULT 0,
+                hard_accel_count INTEGER DEFAULT 0,
+                hard_turn_count INTEGER DEFAULT 0,
+                score INTEGER DEFAULT 100,
+                sample_seconds INTEGER,
+                client_platform VARCHAR(40),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trip_driving_summaries_trip ON trip_driving_summaries(trip_id);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trip_driving_summaries_driver ON trip_driving_summaries(driver_id, created_at DESC);');
+
+        // Incident / Dispute evidence package (single snapshot JSON)
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS trip_incident_packages (
+                id SERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) REFERENCES trips(id) ON DELETE CASCADE,
+                kind VARCHAR(20) NOT NULL DEFAULT 'incident',
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                title VARCHAR(120),
+                description TEXT,
+                created_by_role VARCHAR(20),
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by_driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                package_json JSONB,
+                resolved_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                resolved_at TIMESTAMP,
+                resolution_note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trip_incident_packages_trip ON trip_incident_packages(trip_id, created_at DESC);');
+        await client.query('CREATE INDEX IF NOT EXISTS idx_trip_incident_packages_status ON trip_incident_packages(status, created_at DESC);');
+
         await client.query(`
             CREATE TABLE IF NOT EXISTS pending_ride_requests (
                 id SERIAL PRIMARY KEY,
@@ -6848,9 +6892,334 @@ app.patch('/api/trips/:id/pickup', requireRole('passenger', 'admin'), async (req
             console.warn('⚠️ Failed to propagate pickup update to pending_ride_requests:', err.message);
         }
 
+        // Realtime broadcast to trip room (driver + passenger)
+        try {
+            io.to(tripRoom(id)).emit('trip_pickup_live_update', {
+                trip_id: String(id),
+                pickup_lat: pickupLat,
+                pickup_lng: pickupLng,
+                pickup_accuracy: pickupAccuracy,
+                pickup_timestamp: pickupTimestamp,
+                source: source || null,
+                updated_at: new Date().toISOString()
+            });
+        } catch (e) {
+            // ignore
+        }
+
         res.json({ success: true, data: tripResult.rows[0] });
     } catch (err) {
         console.error('Error updating trip pickup location:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Driving Coach (privacy-first summary only) ---
+
+app.post('/api/trips/:id/driving-summary', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        if (!tripRow) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(tripRow.driver_id || '') !== String(authDriverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        const hardBrake = req.body?.hard_brake_count !== undefined ? Number(req.body.hard_brake_count) : 0;
+        const hardAccel = req.body?.hard_accel_count !== undefined ? Number(req.body.hard_accel_count) : 0;
+        const hardTurn = req.body?.hard_turn_count !== undefined ? Number(req.body.hard_turn_count) : 0;
+        const score = req.body?.score !== undefined ? Number(req.body.score) : 100;
+        const sampleSeconds = req.body?.sample_seconds !== undefined && req.body.sample_seconds !== null
+            ? Number(req.body.sample_seconds)
+            : null;
+        const clientPlatform = req.body?.client_platform !== undefined && req.body.client_platform !== null
+            ? String(req.body.client_platform).slice(0, 40)
+            : null;
+
+        const sanitizeCount = (v) => {
+            if (!Number.isFinite(v)) return 0;
+            const n = Math.round(v);
+            return Math.max(0, Math.min(n, 5000));
+        };
+        const hb = sanitizeCount(hardBrake);
+        const ha = sanitizeCount(hardAccel);
+        const ht = sanitizeCount(hardTurn);
+
+        let s = Number.isFinite(score) ? Math.round(score) : 100;
+        s = Math.max(0, Math.min(s, 100));
+
+        const ss = sampleSeconds !== null && Number.isFinite(sampleSeconds)
+            ? Math.max(0, Math.min(Math.round(sampleSeconds), 24 * 3600))
+            : null;
+
+        const effectiveDriverId = authRole === 'driver'
+            ? authDriverId
+            : (req.body?.driver_id !== undefined && req.body.driver_id !== null ? Number(req.body.driver_id) : (tripRow.driver_id ? Number(tripRow.driver_id) : null));
+
+        const upsert = await pool.query(
+            `INSERT INTO trip_driving_summaries (
+                trip_id, driver_id, hard_brake_count, hard_accel_count, hard_turn_count, score, sample_seconds, client_platform, created_at, updated_at
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7, NULLIF($8,''), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT (trip_id) DO UPDATE SET
+                driver_id = COALESCE(EXCLUDED.driver_id, trip_driving_summaries.driver_id),
+                hard_brake_count = EXCLUDED.hard_brake_count,
+                hard_accel_count = EXCLUDED.hard_accel_count,
+                hard_turn_count = EXCLUDED.hard_turn_count,
+                score = EXCLUDED.score,
+                sample_seconds = EXCLUDED.sample_seconds,
+                client_platform = EXCLUDED.client_platform,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING id, trip_id, driver_id, hard_brake_count, hard_accel_count, hard_turn_count, score, sample_seconds, client_platform, created_at, updated_at`,
+            [tripId, effectiveDriverId || null, hb, ha, ht, s, ss, clientPlatform || '']
+        );
+
+        res.status(201).json({ success: true, data: upsert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/trips/:id/driving-summary', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const result = await pool.query(
+            `SELECT id, trip_id, driver_id, hard_brake_count, hard_accel_count, hard_turn_count, score, sample_seconds, client_platform, created_at, updated_at
+             FROM trip_driving_summaries
+             WHERE trip_id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+        res.json({ success: true, data: result.rows[0] || null });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// --- Incident / Dispute Package (evidence snapshot) ---
+
+async function buildTripIncidentPackage(tripId) {
+    const tripRes = await pool.query(
+        `SELECT id, user_id, driver_id, status, trip_status,
+                pickup_location, dropoff_location,
+                pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp,
+                dropoff_lat, dropoff_lng,
+                started_at, completed_at, cancelled_at,
+                distance, duration, cost, payment_method,
+                created_at, updated_at
+         FROM trips
+         WHERE id = $1
+         LIMIT 1`,
+        [tripId]
+    );
+    const trip = tripRes.rows[0] || null;
+
+    const waitRes = await pool.query(
+        `SELECT trip_id, driver_id, arrived_at, arrived_lat, arrived_lng, wait_end_at, wait_seconds, created_at, updated_at
+         FROM trip_wait_proofs
+         WHERE trip_id = $1
+         LIMIT 1`,
+        [tripId]
+    );
+    const wait_proof = waitRes.rows[0] || null;
+
+    const safetyRes = await pool.query(
+        `SELECT id, event_type, message, created_by_role, created_at
+         FROM trip_safety_events
+         WHERE trip_id = $1
+         ORDER BY created_at ASC
+         LIMIT 200`,
+        [tripId]
+    );
+
+    const msgRes = await pool.query(
+        `SELECT id, sender_role, template_key, message, created_at
+         FROM trip_messages
+         WHERE trip_id = $1
+         ORDER BY created_at ASC
+         LIMIT 100`,
+        [tripId]
+    );
+
+    const audioRes = await pool.query(
+        `SELECT id, trip_id, driver_id, file_mime, file_size_bytes, algo, created_at
+         FROM trip_driver_audio_recordings
+         WHERE trip_id = $1
+         ORDER BY created_at DESC
+         LIMIT 20`,
+        [tripId]
+    );
+
+    const coachRes = await pool.query(
+        `SELECT trip_id, driver_id, hard_brake_count, hard_accel_count, hard_turn_count, score, sample_seconds, client_platform, updated_at
+         FROM trip_driving_summaries
+         WHERE trip_id = $1
+         LIMIT 1`,
+        [tripId]
+    );
+
+    return {
+        generated_at: new Date().toISOString(),
+        trip,
+        wait_proof,
+        safety_events: safetyRes.rows || [],
+        messages: msgRes.rows || [],
+        driver_audio_recordings: audioRes.rows || [],
+        driving_summary: coachRes.rows[0] || null
+    };
+}
+
+app.post('/api/trips/:id/incidents', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const kindRaw = req.body?.kind !== undefined && req.body.kind !== null ? String(req.body.kind) : 'incident';
+        const kind = ['incident', 'dispute'].includes(kindRaw.toLowerCase()) ? kindRaw.toLowerCase() : 'incident';
+
+        const titleRaw = req.body?.title !== undefined && req.body.title !== null ? String(req.body.title) : '';
+        const descriptionRaw = req.body?.description !== undefined && req.body.description !== null ? String(req.body.description) : '';
+        const title = titleRaw.trim().slice(0, 120) || null;
+        const description = descriptionRaw.trim().slice(0, 2000) || null;
+
+        const pkg = await buildTripIncidentPackage(tripId);
+
+        const insert = await pool.query(
+            `INSERT INTO trip_incident_packages (
+                trip_id, kind, status, title, description,
+                created_by_role, created_by_user_id, created_by_driver_id,
+                package_json, created_at, updated_at
+             ) VALUES ($1,$2,'open', NULLIF($3,''), NULLIF($4,''), $5,$6,$7,$8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             RETURNING id, trip_id, kind, status, title, description, created_by_role, created_at`,
+            [
+                tripId,
+                kind,
+                title || '',
+                description || '',
+                String(req.auth?.role || ''),
+                authUserId || null,
+                authDriverId || null,
+                pkg
+            ]
+        );
+
+        res.status(201).json({ success: true, data: insert.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/trips/:id/incidents', requireAuth, async (req, res) => {
+    try {
+        const tripId = String(req.params.id);
+        const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRow = tripRes.rows[0] || null;
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+        const authDriverId = req.auth?.driver_id;
+        const access = requireTripAccess({ tripRow, authRole, authUserId, authDriverId });
+        if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
+
+        const rows = await pool.query(
+            `SELECT id, trip_id, kind, status, title, description, created_by_role, created_at, updated_at, resolved_at
+             FROM trip_incident_packages
+             WHERE trip_id = $1
+             ORDER BY created_at DESC
+             LIMIT 50`,
+            [tripId]
+        );
+        res.json({ success: true, data: rows.rows || [] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/admin/incidents', requireRole('admin'), async (req, res) => {
+    try {
+        const statusRaw = req.query?.status !== undefined && req.query.status !== null ? String(req.query.status) : 'open';
+        const status = ['open', 'resolved', 'rejected'].includes(statusRaw.toLowerCase()) ? statusRaw.toLowerCase() : 'open';
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 200) : 50;
+
+        const rows = await pool.query(
+            `SELECT id, trip_id, kind, status, title, created_by_role, created_at, updated_at, resolved_at
+             FROM trip_incident_packages
+             WHERE status = $1
+             ORDER BY created_at DESC
+             LIMIT $2`,
+            [status, limit]
+        );
+        res.json({ success: true, data: rows.rows || [] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/admin/incidents/:id', requireRole('admin'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'invalid_id' });
+
+        const row = await pool.query(
+            `SELECT *
+             FROM trip_incident_packages
+             WHERE id = $1
+             LIMIT 1`,
+            [id]
+        );
+        if (row.rows.length === 0) return res.status(404).json({ success: false, error: 'not_found' });
+        res.json({ success: true, data: row.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.patch('/api/admin/incidents/:id/resolve', requireRole('admin'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'invalid_id' });
+
+        const statusRaw = req.body?.status !== undefined && req.body.status !== null ? String(req.body.status) : 'resolved';
+        const status = ['resolved', 'rejected'].includes(statusRaw.toLowerCase()) ? statusRaw.toLowerCase() : 'resolved';
+        const noteRaw = req.body?.resolution_note !== undefined && req.body.resolution_note !== null ? String(req.body.resolution_note) : '';
+        const note = noteRaw.trim().slice(0, 2000) || null;
+
+        const updated = await pool.query(
+            `UPDATE trip_incident_packages
+             SET status = $1,
+                 resolution_note = NULLIF($2,''),
+                 resolved_at = CURRENT_TIMESTAMP,
+                 resolved_by_admin_id = $3,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $4
+             RETURNING id, trip_id, kind, status, resolved_at, resolution_note, updated_at`,
+            [status, note || '', req.auth?.uid || null, id]
+        );
+
+        if (updated.rows.length === 0) return res.status(404).json({ success: false, error: 'not_found' });
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
 });

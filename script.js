@@ -267,6 +267,17 @@ let driverTripStartedAt = null;
 let lastDriverLocationUpdateAt = 0;
 let nearestDriverPreview = null;
 
+// Driving Coach (Driver, privacy-first)
+let drivingCoachRunning = false;
+let drivingCoachTripId = null;
+let drivingCoachStartedAtMs = null;
+let drivingCoachSampleCount = 0;
+let drivingCoachHardBrakeCount = 0;
+let drivingCoachHardAccelCount = 0;
+let drivingCoachHardTurnCount = 0;
+let drivingCoachLastUiAt = 0;
+let drivingCoachMotionHandler = null;
+
 // Captain-only: encrypted audio recording (client-side)
 let driverAudioRecorder = null;
 let driverAudioStream = null;
@@ -1155,6 +1166,43 @@ function initRealtimeSocket() {
             const lng = payload?.driver_lng !== undefined && payload?.driver_lng !== null ? Number(payload.driver_lng) : null;
             if (!tripId || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
             handleDriverLiveLocationRealtime(String(tripId), { lat, lng });
+        });
+
+        // Passenger pickup live share (GPS -> driver)
+        realtimeSocket.on('trip_pickup_live_update', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+
+            const lat = payload?.pickup_lat !== undefined && payload?.pickup_lat !== null ? Number(payload.pickup_lat) : null;
+            const lng = payload?.pickup_lng !== undefined && payload?.pickup_lng !== null ? Number(payload.pickup_lng) : null;
+            const accuracy = payload?.pickup_accuracy !== undefined && payload?.pickup_accuracy !== null ? Number(payload.pickup_accuracy) : null;
+            const ts = payload?.pickup_timestamp !== undefined && payload?.pickup_timestamp !== null ? Number(payload.pickup_timestamp) : null;
+
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+            // Driver: update passenger pickup marker + route
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                try {
+                    const label = currentIncomingTrip?.pickup_location || passengerPickup?.label || 'موقع الراكب';
+                    setPassengerPickup({
+                        lat,
+                        lng,
+                        phone: passengerPickup?.phone || currentIncomingTrip?.passenger_phone
+                    }, label);
+
+                    // Update route immediately (target depends on driverTripStarted)
+                    updateDriverActiveRouteFromGps(driverLocation || getDriverBaseLocation());
+                    updateDriverPassengerLiveShareBadge({ accuracy, timestamp: ts });
+                } catch (e) {
+                    // ignore
+                }
+            }
+
+            // Passenger: keep last known accuracy/timestamp (optional UI hooks later)
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                lastGeoAccuracy = Number.isFinite(accuracy) ? accuracy : lastGeoAccuracy;
+                lastGeoTimestamp = Number.isFinite(ts) ? ts : lastGeoTimestamp;
+            }
         });
 
         realtimeSocket.on('trip_eta_update', (payload) => {
@@ -3018,7 +3066,8 @@ function startPassengerPickupLiveUpdates(tripId) {
     if (!tripId) return;
 
     let lastSent = null;
-    passengerPickupUpdateInterval = setInterval(async () => {
+
+    const sendOnce = async () => {
         if (!activePassengerTripId || String(activePassengerTripId) !== String(tripId)) return;
         if (!lastGeoCoords || !Number.isFinite(Number(lastGeoCoords.lat)) || !Number.isFinite(Number(lastGeoCoords.lng))) return;
 
@@ -3043,7 +3092,45 @@ function startPassengerPickupLiveUpdates(tripId) {
         } catch (error) {
             console.warn('⚠️ Failed to send pickup live update:', error?.message || error);
         }
-    }, 5000);
+    };
+
+    // Send immediately (no waiting for the first interval tick)
+    sendOnce();
+
+    passengerPickupUpdateInterval = setInterval(sendOnce, 5000);
+}
+
+// --- Driver: Passenger live share badge ---
+let driverPassengerLiveShareMeta = {
+    last_update_at: null,
+    accuracy: null
+};
+
+function updateDriverPassengerLiveShareBadge(meta = {}) {
+    driverPassengerLiveShareMeta.last_update_at = Date.now();
+    driverPassengerLiveShareMeta.accuracy = Number.isFinite(Number(meta.accuracy)) ? Number(meta.accuracy) : null;
+
+    const badge = document.getElementById('driver-passenger-live-share');
+    const text = document.getElementById('driver-passenger-live-share-text');
+    if (!badge || !text) return;
+
+    const acc = driverPassengerLiveShareMeta.accuracy;
+    const ts = meta.timestamp !== undefined && meta.timestamp !== null ? Number(meta.timestamp) : null;
+    const when = Number.isFinite(ts) ? new Date(ts) : new Date();
+
+    const accText = Number.isFinite(acc) ? `دقة ~${Math.round(acc)}م` : 'دقة غير متاحة';
+    const timeText = Number.isFinite(when.getTime())
+        ? when.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+        : '--:--';
+
+    text.textContent = `📍 الراكب يشارك موقعه الآن • ${accText} • آخر تحديث ${timeText}`;
+    badge.classList.remove('hidden');
+}
+
+function resetDriverPassengerLiveShareBadge() {
+    driverPassengerLiveShareMeta = { last_update_at: null, accuracy: null };
+    const badge = document.getElementById('driver-passenger-live-share');
+    if (badge) badge.classList.add('hidden');
 }
 
 function getDriverActiveTargetCoords() {
@@ -5249,6 +5336,7 @@ window.driverRejectRequest = async function() {
     }
 
     stopDriverIncomingTripLiveUpdates();
+    resetDriverPassengerLiveShareBadge();
     currentIncomingTrip = null;
     const incoming = document.getElementById('driver-incoming-request');
     if (incoming) incoming.classList.add('hidden');
@@ -5266,6 +5354,7 @@ window.driverAcceptRequest = async function() {
     const acceptBtn = document.getElementById('driver-accept-btn');
     if (acceptBtn) acceptBtn.disabled = true;
     try {
+        resetDriverPassengerLiveShareBadge();
         if (!currentIncomingTrip || !currentDriverProfile) {
             showToast('لا يوجد طلب صالح حالياً');
             return;
@@ -5422,6 +5511,184 @@ function updateDriverActiveStatusBadge() {
     statusEl.className = 'text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full';
 }
 
+function getDrivingCoachClientPlatform() {
+    try {
+        const ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+        if (!ua) return 'web';
+        if (/iphone|ipad|ipod/i.test(ua)) return 'ios-web';
+        if (/android/i.test(ua)) return 'android-web';
+        return 'web';
+    } catch (e) {
+        return 'web';
+    }
+}
+
+function computeDrivingCoachScore() {
+    // Simple heuristic score; 100 is best.
+    const raw = 100
+        - (drivingCoachHardBrakeCount * 6)
+        - (drivingCoachHardAccelCount * 4)
+        - (drivingCoachHardTurnCount * 4);
+    return Math.max(0, Math.min(100, Math.round(raw)));
+}
+
+function computeDrivingCoachTip() {
+    const hb = drivingCoachHardBrakeCount;
+    const ha = drivingCoachHardAccelCount;
+    const ht = drivingCoachHardTurnCount;
+    if (hb === 0 && ha === 0 && ht === 0) return '✅ ممتاز! قيادة سلسة حتى الآن.';
+    const max = Math.max(hb, ha, ht);
+    if (max === hb) return '💡 حاول تهدي الفرملة شوية وخلي مسافة أمان أكبر.';
+    if (max === ha) return '💡 حاول تسارع تدريجي علشان الركاب يحسوا بالراحة.';
+    return '💡 خفف الانعطافات الحادة وقلل السرعة قبل المنعطف.';
+}
+
+function renderDrivingCoachCard() {
+    const card = document.getElementById('driver-coach-card');
+    if (!card) return;
+
+    if (currentUserRole !== 'driver' || !drivingCoachRunning) {
+        card.classList.add('hidden');
+        return;
+    }
+
+    const scoreEl = document.getElementById('driver-coach-score');
+    const brakeEl = document.getElementById('driver-coach-hard-brake');
+    const accelEl = document.getElementById('driver-coach-hard-accel');
+    const turnEl = document.getElementById('driver-coach-hard-turn');
+    const tipEl = document.getElementById('driver-coach-tip');
+
+    const score = computeDrivingCoachScore();
+    if (scoreEl) scoreEl.textContent = `Score ${score}/100`;
+    if (brakeEl) brakeEl.textContent = String(drivingCoachHardBrakeCount);
+    if (accelEl) accelEl.textContent = String(drivingCoachHardAccelCount);
+    if (turnEl) turnEl.textContent = String(drivingCoachHardTurnCount);
+    if (tipEl) tipEl.textContent = computeDrivingCoachTip();
+
+    card.classList.remove('hidden');
+}
+
+async function startDrivingCoachForTrip(tripId) {
+    if (currentUserRole !== 'driver') return;
+    if (!tripId) return;
+    if (drivingCoachRunning && String(drivingCoachTripId) === String(tripId)) return;
+
+    // Reset
+    drivingCoachRunning = false;
+    drivingCoachTripId = String(tripId);
+    drivingCoachStartedAtMs = Date.now();
+    drivingCoachSampleCount = 0;
+    drivingCoachHardBrakeCount = 0;
+    drivingCoachHardAccelCount = 0;
+    drivingCoachHardTurnCount = 0;
+    drivingCoachLastUiAt = 0;
+
+    // Permission (iOS)
+    try {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            const ok = window.confirm('🧠 Driving Coach يحتاج إذن حساسات الحركة لتحسين سلاسة القيادة. السماح؟');
+            if (!ok) {
+                showToast('تم إلغاء تفعيل Driving Coach');
+                return;
+            }
+            const state = await DeviceMotionEvent.requestPermission();
+            if (state !== 'granted') {
+                showToast('❌ تم رفض إذن حساسات الحركة');
+                return;
+            }
+        }
+    } catch (e) {
+        showToast('⚠️ تعذر تفعيل حساسات الحركة');
+        return;
+    }
+
+    const lastEventAt = { brake: 0, accel: 0, turn: 0 };
+    const minGapMs = 800;
+
+    drivingCoachMotionHandler = (ev) => {
+        try {
+            if (!drivingCoachRunning) return;
+            if (!ev) return;
+
+            const acc = ev.acceleration || ev.accelerationIncludingGravity || null;
+            if (!acc) return;
+
+            const ax = acc.x !== undefined && acc.x !== null ? Number(acc.x) : 0;
+            const ay = acc.y !== undefined && acc.y !== null ? Number(acc.y) : 0;
+            const az = acc.z !== undefined && acc.z !== null ? Number(acc.z) : 0;
+            if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(az)) return;
+
+            drivingCoachSampleCount++;
+
+            const now = Date.now();
+
+            // Heuristic thresholds (m/s^2). Not perfect, but works as a lightweight coach.
+            if (ay <= -4.5 && now - lastEventAt.brake > minGapMs) {
+                drivingCoachHardBrakeCount++;
+                lastEventAt.brake = now;
+            }
+            if (ay >= 4.5 && now - lastEventAt.accel > minGapMs) {
+                drivingCoachHardAccelCount++;
+                lastEventAt.accel = now;
+            }
+            if (Math.abs(ax) >= 4.5 && now - lastEventAt.turn > minGapMs) {
+                drivingCoachHardTurnCount++;
+                lastEventAt.turn = now;
+            }
+
+            if (now - drivingCoachLastUiAt > 1000) {
+                drivingCoachLastUiAt = now;
+                renderDrivingCoachCard();
+            }
+        } catch (e) {
+            // ignore
+        }
+    };
+
+    try {
+        window.addEventListener('devicemotion', drivingCoachMotionHandler, { passive: true });
+        drivingCoachRunning = true;
+        renderDrivingCoachCard();
+    } catch (e) {
+        drivingCoachRunning = false;
+        drivingCoachMotionHandler = null;
+        showToast('⚠️ جهازك لا يدعم Driving Coach');
+    }
+}
+
+function stopDrivingCoach() {
+    try {
+        if (drivingCoachMotionHandler) {
+            window.removeEventListener('devicemotion', drivingCoachMotionHandler);
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    const sampleSeconds = drivingCoachStartedAtMs ? Math.max(0, Math.round((Date.now() - drivingCoachStartedAtMs) / 1000)) : null;
+    const summary = {
+        hard_brake_count: drivingCoachHardBrakeCount,
+        hard_accel_count: drivingCoachHardAccelCount,
+        hard_turn_count: drivingCoachHardTurnCount,
+        score: computeDrivingCoachScore(),
+        sample_seconds: sampleSeconds,
+        client_platform: getDrivingCoachClientPlatform()
+    };
+
+    drivingCoachRunning = false;
+    drivingCoachMotionHandler = null;
+    drivingCoachTripId = null;
+    drivingCoachStartedAtMs = null;
+
+    // Hide UI
+    try {
+        const card = document.getElementById('driver-coach-card');
+        if (card) card.classList.add('hidden');
+    } catch (e) {}
+
+    return summary;
+}
+
 window.driverStartTrip = async function() {
     if (driverTripStarted) return;
     if (!driverStartReady) {
@@ -5465,6 +5732,7 @@ window.driverStartTrip = async function() {
     setDriverTripStarted(true);
     startDriverTripSocketLocationUpdates();
     startDriverToDestinationRoute();
+    startDrivingCoachForTrip(activeDriverTripId);
     showToast('🚗 تم بدء الرحلة');
 };
 
@@ -5626,6 +5894,16 @@ window.closeDriverTripSummary = closeDriverTripSummary;
 
 window.driverEndTrip = async function() {
     stopDriverTripSocketLocationUpdates();
+    resetDriverPassengerLiveShareBadge();
+
+    // Stop Driving Coach and persist summary (non-blocking)
+    const coachTripId = activeDriverTripId;
+    const coachSummary = stopDrivingCoach();
+    if (coachTripId && coachSummary && window.ApiService?.trips?.saveDrivingSummary) {
+        ApiService.trips.saveDrivingSummary(coachTripId, coachSummary).catch(() => {
+            // non-blocking
+        });
+    }
 
     document.getElementById('driver-active-trip').classList.add('hidden');
     document.getElementById('driver-status-waiting').classList.remove('hidden');
@@ -6827,6 +7105,52 @@ window.driverWaitingEnd = async function() {
     } catch (e) {
         console.error(e);
         showToast('تعذر إنهاء توثيق الانتظار');
+    }
+};
+
+window.driverOpenIncidentPackage = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) {
+            showToast('لا توجد رحلة نشطة');
+            return;
+        }
+
+        const kindRaw = window.prompt(
+            `⚠️ نوع البلاغ:
+1) حادث (Incident)
+2) نزاع (Dispute)
+
+اكتب رقم 1 أو 2`,
+            '2'
+        );
+        if (kindRaw === null) return;
+        const kindN = Number(String(kindRaw).trim());
+        const kind = kindN === 1 ? 'incident' : 'dispute';
+
+        const title = window.prompt('عنوان مختصر (اختياري)', kind === 'dispute' ? 'فتح نزاع' : 'تسجيل حادث') || '';
+        const description = window.prompt('اكتب وصف مختصر (اختياري)', '') || '';
+
+        const resp = await ApiService.trips.createIncidentPackage(activeDriverTripId, {
+            kind,
+            title: title.trim() ? title.trim() : null,
+            description: description.trim() ? description.trim() : null
+        });
+
+        const id = resp?.data?.id;
+        if (id) {
+            try {
+                await navigator.clipboard.writeText(String(id));
+                showToast(`✅ تم إنشاء باكدج (#${id}) وتم نسخ الرقم`);
+            } catch (e) {
+                showToast(`✅ تم إنشاء باكدج (#${id})`);
+            }
+        } else {
+            showToast('✅ تم إنشاء باكدج');
+        }
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر إنشاء باكدج النزاع/الحادث');
     }
 };
 

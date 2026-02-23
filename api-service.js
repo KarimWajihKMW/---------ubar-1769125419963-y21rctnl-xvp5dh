@@ -228,6 +228,30 @@ const ApiService = {
             });
         },
 
+        // Driving Coach (privacy-first): save aggregated summary counts/score
+        async saveDrivingSummary(tripId, summary = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/driving-summary`, {
+                method: 'POST',
+                body: JSON.stringify(summary)
+            });
+        },
+
+        async getDrivingSummary(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/driving-summary`);
+        },
+
+        // Incident / Dispute Package
+        async createIncidentPackage(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/incidents`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async listIncidentPackages(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/incidents`);
+        },
+
         async getEta(tripId) {
             return ApiService.request(`/trips/${encodeURIComponent(tripId)}/eta`);
         },
@@ -930,6 +954,23 @@ const ApiService = {
         async createWalletTransaction(payload) {
             return ApiService.request('/admin/wallet/transaction', {
                 method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // Incident / Dispute review
+        async listIncidents(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/incidents${qs ? `?${qs}` : ''}`);
+        },
+
+        async getIncident(id) {
+            return ApiService.request(`/admin/incidents/${encodeURIComponent(id)}`);
+        },
+
+        async resolveIncident(id, payload = {}) {
+            return ApiService.request(`/admin/incidents/${encodeURIComponent(id)}/resolve`, {
+                method: 'PATCH',
                 body: JSON.stringify(payload)
             });
         }

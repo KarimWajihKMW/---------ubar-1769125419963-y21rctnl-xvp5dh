@@ -6,6 +6,28 @@ const { io } = require('socket.io-client');
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000/api';
 const SOCKET_URL = process.env.SOCKET_URL || 'http://localhost:3000';
 
+async function loginPassenger() {
+    const email = `rt_passenger_${Date.now()}@ubar.sa`;
+    const password = 'rt_test_12345678';
+
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            email,
+            password,
+            role: 'passenger',
+            name: 'Realtime Passenger',
+            phone: `9${Date.now().toString().slice(-9)}`
+        })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success || !data.token || !data.data?.id) {
+        throw new Error(data.error || `Login failed ${res.status}`);
+    }
+    return { token: data.token, user: data.data };
+}
+
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
@@ -56,13 +78,18 @@ async function api(endpoint, options = {}) {
 async function main() {
     console.log('🧪 Realtime Trip Sync Test (Socket.io)');
 
+    const session = await loginPassenger();
+    const authHeaders = { Authorization: `Bearer ${session.token}` };
+    console.log('✅ Passenger login ok:', session.user.id);
+
     // Create trip
     const tripId = `TR-RT-${Date.now()}`;
     const created = await api('/trips', {
         method: 'POST',
+        headers: authHeaders,
         body: JSON.stringify({
             id: tripId,
-            user_id: 1,
+            user_id: session.user.id,
             pickup_location: 'Realtime Pickup',
             dropoff_location: 'Realtime Dropoff',
             pickup_lat: 24.7136,
@@ -99,6 +126,33 @@ async function main() {
     // Subscribe
     socket.emit('subscribe_trip', { trip_id: tripId });
 
+    // Pickup live update -> expect trip_pickup_live_update
+    const pickupLivePromise = waitForEvent(
+        socket,
+        'trip_pickup_live_update',
+        (p) => String(p?.trip_id) === String(tripId) && Number.isFinite(Number(p?.pickup_lat)) && Number.isFinite(Number(p?.pickup_lng)),
+        5000
+    );
+
+    await api(`/trips/${encodeURIComponent(tripId)}/pickup`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({
+            pickup_lat: 24.71361,
+            pickup_lng: 46.67531,
+            pickup_accuracy: 6.2,
+            pickup_timestamp: Date.now(),
+            source: 'test-realtime-trip-sync'
+        })
+    });
+
+    const pickupLive = await pickupLivePromise;
+    console.log('✅ trip_pickup_live_update received:', {
+        trip_id: pickupLive.trip_id,
+        pickup_lat: pickupLive.pickup_lat,
+        pickup_lng: pickupLive.pickup_lng
+    });
+
     // Start trip -> expect trip_started
     const tripStartedPromise = waitForEvent(
         socket,
@@ -109,6 +163,7 @@ async function main() {
 
     await api(`/trips/${encodeURIComponent(tripId)}/status`, {
         method: 'PATCH',
+        headers: authHeaders,
         body: JSON.stringify({ status: 'ongoing', trip_status: 'started' })
     });
 
@@ -143,6 +198,7 @@ async function main() {
 
     await api(`/trips/${encodeURIComponent(tripId)}/status`, {
         method: 'PATCH',
+        headers: authHeaders,
         body: JSON.stringify({ status: 'completed', trip_status: 'completed', cost: 12.5, distance: 3.2, duration: 8 })
     });
 
@@ -159,6 +215,7 @@ async function main() {
 
     await api(`/trips/${encodeURIComponent(tripId)}/status`, {
         method: 'PATCH',
+        headers: authHeaders,
         body: JSON.stringify({ status: 'completed', trip_status: 'rated', passenger_rating: 5 })
     });
 

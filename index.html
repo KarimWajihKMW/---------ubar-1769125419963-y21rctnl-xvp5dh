@@ -2400,6 +2400,12 @@
                      <h3 class="text-xl font-bold">رحلة جارية</h3>
                      <span id="driver-active-status" class="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">في انتظار بدء الرحلة</span>
                  </div>
+
+                 <!-- Passenger live pickup share badge (v2) -->
+                 <div id="driver-passenger-live-share" class="hidden mb-4 bg-amber-50 border border-amber-200 rounded-2xl p-3">
+                     <p id="driver-passenger-live-share-text" class="text-[11px] font-extrabold text-amber-800">📍 الراكب يشارك موقعه الآن</p>
+                 </div>
+
                  <div class="flex gap-4 mb-6">
                      <button onclick="driverOpenNavigation()" class="flex-1 py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold">الملاحة</button>
                      <button onclick="driverCallPassenger()" class="flex-1 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold">اتصال</button>
@@ -2470,6 +2476,29 @@
                      <p class="text-[11px] text-gray-500 mt-2" id="driver-eta-current"></p>
                  </div>
 
+                 <!-- Driving Coach (v2) -->
+                 <div id="driver-coach-card" class="hidden mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                     <div class="flex items-center justify-between mb-3">
+                         <p class="text-sm font-extrabold text-gray-800">🧠 Driving Coach</p>
+                         <span id="driver-coach-score" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-gray-200 text-gray-600 bg-white">—</span>
+                     </div>
+                     <div class="grid grid-cols-3 gap-2 text-center">
+                         <div class="bg-white border border-gray-200 rounded-xl p-2">
+                             <p class="text-[11px] font-bold text-gray-500">فرملة قوية</p>
+                             <p id="driver-coach-hard-brake" class="text-lg font-extrabold text-gray-800">0</p>
+                         </div>
+                         <div class="bg-white border border-gray-200 rounded-xl p-2">
+                             <p class="text-[11px] font-bold text-gray-500">تسارع قوي</p>
+                             <p id="driver-coach-hard-accel" class="text-lg font-extrabold text-gray-800">0</p>
+                         </div>
+                         <div class="bg-white border border-gray-200 rounded-xl p-2">
+                             <p class="text-[11px] font-bold text-gray-500">انعطاف حاد</p>
+                             <p id="driver-coach-hard-turn" class="text-lg font-extrabold text-gray-800">0</p>
+                         </div>
+                     </div>
+                     <p id="driver-coach-tip" class="text-[11px] text-gray-500 mt-3 font-bold">—</p>
+                 </div>
+
                  <!-- Captain-only tools (in-trip) -->
                  <div class="mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
                      <div class="flex items-center justify-between mb-3">
@@ -2494,6 +2523,9 @@
                          </button>
                          <button type="button" onclick="driverReportMapError()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
                              🗺️ خطأ خرائط
+                         </button>
+                         <button type="button" onclick="driverOpenIncidentPackage()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             ⚠️ تسجيل حادث/نزاع
                          </button>
                      </div>
                      <button type="button" onclick="driverSOS()" class="mt-3 w-full py-3 rounded-xl bg-red-600 text-white font-extrabold hover:bg-red-700 transition-colors">
