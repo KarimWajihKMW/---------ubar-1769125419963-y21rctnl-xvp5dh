@@ -1251,6 +1251,58 @@ function initRealtimeSocket() {
             appendTripMessageToChat(msg, { scroll: true, animate: true });
         });
 
+        realtimeSocket.on('trip_message_ack', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            const isPassengerTrip = currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId);
+            const isDriverTrip = currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId);
+            if (!isPassengerTrip && !isDriverTrip) return;
+            // easiest: reload chat messages to refresh ACK UI
+            try { loadTripMessagesIntoChat(String(tripId)); } catch (e) {}
+        });
+
+        realtimeSocket.on('meet_code_verified', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            if (currentUserRole === 'passenger' && isActivePassengerTrip(tripId)) {
+                try { renderPassengerMeetCodeCard({ meet_verified_at: payload?.meet_verified_at || null }); } catch (e) {}
+            }
+        });
+
+        realtimeSocket.on('trip_expectations', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            const isPassengerTrip = currentUserRole === 'passenger' && isActivePassengerTrip(tripId);
+            const isDriverTrip = currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId);
+            if (!isPassengerTrip && !isDriverTrip) return;
+            try {
+                if (isPassengerTrip) refreshPassengerExpectations();
+                if (isDriverTrip) refreshDriverExpectations();
+            } catch (e) {}
+        });
+
+        realtimeSocket.on('trip_arrival_step1', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            if (currentUserRole === 'passenger' && isActivePassengerTrip(tripId)) {
+                try { refreshPassengerArrival(); } catch (e) {}
+            }
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                try { renderDriverArrivalStatus(payload); } catch (e) {}
+            }
+        });
+
+        realtimeSocket.on('trip_arrival_step2', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            if (currentUserRole === 'passenger' && isActivePassengerTrip(tripId)) {
+                try { refreshPassengerArrival(); } catch (e) {}
+            }
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                try { renderDriverArrivalStatus(payload); } catch (e) {}
+            }
+        });
+
         realtimeSocket.on('trip_accessibility_ack', (payload) => {
             const tripId = payload?.trip_id;
             const ack = payload?.ack;
@@ -2679,11 +2731,32 @@ function appendTripMessageToChat(m, { scroll = true, animate = true } = {}) {
     const tpl = m.template_key ? String(m.template_key) : null;
     const tag = tpl ? `<div class="text-[10px] font-extrabold ${isMine ? 'text-indigo-100' : 'text-gray-400'} mb-1">${escapeHtml(tpl)}</div>` : '';
 
+    const requiresAck = m.requires_ack === true;
+    const ackStatus = m.ack_status ? String(m.ack_status).toLowerCase() : 'none';
+    const showAck = currentUserRole === 'passenger' && !isMine && requiresAck;
+
+    let ackHtml = '';
+    if (showAck) {
+        if (ackStatus === 'pending') {
+            ackHtml = `
+                <div class="mt-2 grid grid-cols-2 gap-2">
+                    <button type="button" class="py-2 rounded-xl bg-emerald-600 text-white font-extrabold text-xs hover:bg-emerald-700" onclick="passengerAckJustifiedMessage(${Number(m.id)}, 'accepted')">موافق ✅</button>
+                    <button type="button" class="py-2 rounded-xl bg-white text-red-700 font-extrabold text-xs border border-red-200 hover:bg-red-50" onclick="passengerAckJustifiedMessage(${Number(m.id)}, 'rejected')">مش موافق ❌</button>
+                </div>
+            `;
+        } else if (ackStatus === 'accepted') {
+            ackHtml = `<div class="mt-2 text-[11px] font-extrabold text-emerald-700">✅ تم التأكيد: موافق</div>`;
+        } else if (ackStatus === 'rejected') {
+            ackHtml = `<div class="mt-2 text-[11px] font-extrabold text-red-700">❌ تم التأكيد: غير موافق</div>`;
+        }
+    }
+
     const msgHtml = `
     <div class="flex items-start ${wrapClass} ${animate ? 'msg-enter' : ''}">
         <div class="${bubbleClass} px-4 py-2.5 shadow-sm text-sm max-w-[85%]">
             ${tag}
             ${escapeHtml(text)}
+            ${ackHtml}
             <div class="text-[10px] ${isMine ? 'text-indigo-200' : 'text-gray-400'} mt-1 text-left flex items-center justify-end gap-1">${escapeHtml(timeText)}</div>
         </div>
     </div>`;
@@ -2691,6 +2764,501 @@ function appendTripMessageToChat(m, { scroll = true, animate = true } = {}) {
     box.insertAdjacentHTML('beforeend', msgHtml);
     if (scroll) box.scrollTop = box.scrollHeight;
 }
+
+window.passengerAckJustifiedMessage = async function(messageId, decision) {
+    try {
+        if (currentUserRole !== 'passenger') return;
+        const tripId = activePassengerTripId;
+        if (!tripId) return;
+        await ApiService.trips.ackMessage(tripId, messageId, decision);
+        showToast(decision === 'accepted' ? '✅ تم التأكيد' : 'تم الرفض');
+        await loadTripMessagesIntoChat(tripId);
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تأكيد الرسالة');
+    }
+};
+
+function setText(el, t) {
+    if (!el) return;
+    el.textContent = t;
+}
+
+function formatTimeHm(iso) {
+    if (!iso) return '--:--';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '--:--';
+    return d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderPassengerMeetCodeCard({ meet_verified_at } = {}) {
+    const card = document.getElementById('passenger-meet-code-card');
+    const status = document.getElementById('passenger-meet-code-status');
+    const hint = document.getElementById('passenger-meet-code-hint');
+    if (!card || !status || !hint) return;
+
+    if (currentUserRole !== 'passenger' || !activePassengerTripId) {
+        card.classList.add('hidden');
+        return;
+    }
+
+    card.classList.remove('hidden');
+    const verified = !!meet_verified_at;
+    status.textContent = verified ? '✅ مؤكد' : 'غير مؤكد';
+    status.classList.toggle('border-emerald-200', verified);
+    status.classList.toggle('text-emerald-700', verified);
+    hint.textContent = verified ? 'تم تأكيد مقابلة الكابتن.' : '';
+}
+
+window.passengerVerifyMeetCode = async function() {
+    try {
+        if (currentUserRole !== 'passenger') return;
+        const tripId = activePassengerTripId;
+        if (!tripId) return;
+
+        const raw = window.prompt('🔐 ادخل كود الكابتن (3-4 أرقام)');
+        if (raw === null) return;
+        const code = String(raw || '').trim();
+        if (!code) return;
+
+        const resp = await ApiService.trips.verifyMeetCode(tripId, code);
+        const data = resp?.data || null;
+        renderPassengerMeetCodeCard({ meet_verified_at: data?.meet_verified_at || null });
+        showToast('✅ تم تأكيد الكود');
+    } catch (e) {
+        console.error(e);
+        showToast('❌ الكود غير صحيح');
+    }
+};
+
+function renderPassengerBoundariesCard(trip) {
+    const card = document.getElementById('passenger-boundaries-card');
+    const summary = document.getElementById('passenger-boundaries-summary');
+    const status = document.getElementById('passenger-boundaries-ack-status');
+    const btn = document.getElementById('passenger-boundaries-ack-btn');
+    const hint = document.getElementById('passenger-boundaries-hint');
+    if (!card || !summary || !status || !btn || !hint) return;
+
+    const b = trip?.boundaries_snapshot_json || null;
+    if (!b || typeof b !== 'object') {
+        card.classList.add('hidden');
+        return;
+    }
+
+    card.classList.remove('hidden');
+    const lines = [];
+    if (b.destination_change_requires_approval === true) lines.push('تغيير الوجهة بعد التحرك يتطلب موافقة');
+    if (b.extra_stops_policy) lines.push(`توقفات إضافية: ${b.extra_stops_policy}`);
+    if (b.large_bags_policy) lines.push(`شنط كبيرة: ${b.large_bags_policy}`);
+    if (b.max_passengers_policy) lines.push(`عدد ركاب: ${b.max_passengers_policy}`);
+    summary.innerHTML = lines.map((t) => `<div>• ${escapeHtml(String(t))}</div>`).join('');
+
+    const ackAt = trip?.boundaries_ack_at || null;
+    const acked = !!ackAt;
+    status.textContent = acked ? '✅ موافق' : 'غير مؤكد';
+    btn.disabled = acked;
+    btn.classList.toggle('opacity-60', acked);
+    btn.classList.toggle('cursor-not-allowed', acked);
+    hint.textContent = acked ? 'تم تسجيل موافقتك.' : '';
+}
+
+window.passengerAckBoundaries = async function() {
+    try {
+        if (currentUserRole !== 'passenger') return;
+        const tripId = activePassengerTripId;
+        if (!tripId) return;
+        await ApiService.trips.ackBoundaries(tripId);
+        showToast('✅ تم تسجيل الموافقة');
+        const res = await ApiService.trips.getById(tripId);
+        if (res?.data) renderPassengerBoundariesCard(res.data);
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تسجيل الموافقة');
+    }
+};
+
+async function refreshPassengerExpectations() {
+    try {
+        if (currentUserRole !== 'passenger') return;
+        if (!activePassengerTripId) return;
+        const resp = await ApiService.trips.getExpectations(activePassengerTripId);
+        renderPassengerExpectationsCard(resp?.data || null);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function renderPassengerExpectationsCard(data) {
+    const card = document.getElementById('passenger-expectations-card');
+    const status = document.getElementById('passenger-expectations-status');
+    const hint = document.getElementById('passenger-expectations-hint');
+    if (!card || !status || !hint) return;
+
+    if (currentUserRole !== 'passenger' || !activePassengerTripId) {
+        card.classList.add('hidden');
+        return;
+    }
+    card.classList.remove('hidden');
+
+    const setAt = data?.set_at || null;
+    status.textContent = setAt ? '✅ محفوظ' : '—';
+    hint.textContent = setAt ? `آخر تحديث: ${formatTripDateTime(setAt)}` : '';
+
+    const exp = data?.expectations && typeof data.expectations === 'object' ? data.expectations : {};
+    const q = document.getElementById('passenger-exp-quiet');
+    const m = document.getElementById('passenger-exp-music');
+    const a = document.getElementById('passenger-exp-ac');
+    const r = document.getElementById('passenger-exp-route');
+    if (q && exp.quiet !== undefined) q.value = String(exp.quiet);
+    if (m && exp.music !== undefined) m.value = String(exp.music);
+    if (a && exp.ac !== undefined) a.value = String(exp.ac);
+    if (r && exp.route !== undefined) r.value = String(exp.route);
+}
+
+window.passengerSubmitExpectations = async function() {
+    try {
+        if (currentUserRole !== 'passenger') return;
+        if (!activePassengerTripId) return;
+        const expectations = {
+            quiet: document.getElementById('passenger-exp-quiet')?.value || undefined,
+            music: document.getElementById('passenger-exp-music')?.value || undefined,
+            ac: document.getElementById('passenger-exp-ac')?.value || undefined,
+            route: document.getElementById('passenger-exp-route')?.value || undefined
+        };
+        await ApiService.trips.setExpectations(activePassengerTripId, expectations);
+        showToast('✅ تم حفظ الاتفاق');
+        await refreshPassengerExpectations();
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر حفظ الاتفاق');
+    }
+};
+
+async function refreshPassengerArrival() {
+    try {
+        if (currentUserRole !== 'passenger') return;
+        if (!activePassengerTripId) return;
+        const resp = await ApiService.trips.getArrival(activePassengerTripId);
+        const data = resp?.data || null;
+        const card = document.getElementById('passenger-arrival-card');
+        const textEl = document.getElementById('passenger-arrival-text');
+        const altEl = document.getElementById('passenger-arrival-alt');
+        if (!card || !textEl || !altEl) return;
+
+        const step1 = data?.step1_at || null;
+        const step2 = data?.step2_at || null;
+        const seen = data?.step2_seen;
+        const alt = Array.isArray(data?.alt_points) ? data.alt_points : [];
+
+        if (!step1 && !step2) {
+            card.classList.add('hidden');
+            return;
+        }
+
+        card.classList.remove('hidden');
+        if (step2) {
+            textEl.textContent = seen === true ? 'الكابتن وصل وشايفك ✅' : seen === false ? 'الكابتن وصل بس مش شايفك 🙈' : 'الكابتن حدث حالة الوصول.';
+        } else {
+            textEl.textContent = 'الكابتن أكد الوصول لنقطة الالتقاء.';
+        }
+
+        if (seen === false && alt.length) {
+            altEl.innerHTML = alt.map((p) => `<div>• ${escapeHtml(p.title || 'نقطة بديلة')} ${p.lat && p.lng ? `(${escapeHtml(String(p.lat))}, ${escapeHtml(String(p.lng))})` : ''}</div>`).join('');
+        } else {
+            altEl.innerHTML = '';
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
+window.refreshPassengerArrival = refreshPassengerArrival;
+
+function renderDriverMeetCodeCard(data) {
+    const card = document.getElementById('driver-meet-code-card');
+    const codeEl = document.getElementById('driver-meet-code');
+    const expEl = document.getElementById('driver-meet-code-expires');
+    const qrEl = document.getElementById('driver-meet-code-qr');
+    if (!card || !codeEl || !expEl || !qrEl) return;
+
+    if (currentUserRole !== 'driver' || !activeDriverTripId) {
+        card.classList.add('hidden');
+        return;
+    }
+
+    card.classList.remove('hidden');
+    codeEl.textContent = data?.code ? String(data.code) : '----';
+    expEl.textContent = data?.expires_at ? formatTimeHm(data.expires_at) : '--:--';
+    if (data?.qr_data_url) {
+        qrEl.src = String(data.qr_data_url);
+        qrEl.classList.remove('hidden');
+    } else {
+        qrEl.classList.add('hidden');
+    }
+}
+
+window.driverRefreshMeetCode = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) return;
+        const resp = await ApiService.trips.getMeetCode(activeDriverTripId);
+        renderDriverMeetCodeCard(resp?.data || null);
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر جلب كود المقابلة');
+    }
+};
+
+async function refreshDriverExpectations() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) return;
+        const resp = await ApiService.trips.getExpectations(activeDriverTripId);
+        renderDriverExpectationsCard(resp?.data || null);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function renderDriverExpectationsCard(data) {
+    const card = document.getElementById('driver-expectations-card');
+    const status = document.getElementById('driver-expectations-status');
+    const hint = document.getElementById('driver-expectations-hint');
+    if (!card || !status || !hint) return;
+
+    if (currentUserRole !== 'driver' || !activeDriverTripId) {
+        card.classList.add('hidden');
+        return;
+    }
+    card.classList.remove('hidden');
+    const setAt = data?.set_at || null;
+    status.textContent = setAt ? '✅ محفوظ' : '—';
+    hint.textContent = setAt ? `آخر تحديث: ${formatTripDateTime(setAt)}` : '';
+
+    const exp = data?.expectations && typeof data.expectations === 'object' ? data.expectations : {};
+    const q = document.getElementById('driver-exp-quiet');
+    const m = document.getElementById('driver-exp-music');
+    const a = document.getElementById('driver-exp-ac');
+    const r = document.getElementById('driver-exp-route');
+    if (q && exp.quiet !== undefined) q.value = String(exp.quiet);
+    if (m && exp.music !== undefined) m.value = String(exp.music);
+    if (a && exp.ac !== undefined) a.value = String(exp.ac);
+    if (r && exp.route !== undefined) r.value = String(exp.route);
+}
+
+window.driverSubmitExpectations = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) return;
+        const expectations = {
+            quiet: document.getElementById('driver-exp-quiet')?.value || undefined,
+            music: document.getElementById('driver-exp-music')?.value || undefined,
+            ac: document.getElementById('driver-exp-ac')?.value || undefined,
+            route: document.getElementById('driver-exp-route')?.value || undefined
+        };
+        await ApiService.trips.setExpectations(activeDriverTripId, expectations);
+        showToast('✅ تم حفظ الاتفاق');
+        await refreshDriverExpectations();
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر حفظ الاتفاق');
+    }
+};
+
+function renderDriverArrivalStatus(payload = null) {
+    const card = document.getElementById('driver-arrival-card');
+    const status = document.getElementById('driver-arrival-status');
+    const hint = document.getElementById('driver-arrival-hint');
+    if (!card || !status || !hint) return;
+
+    if (currentUserRole !== 'driver' || !activeDriverTripId) {
+        card.classList.add('hidden');
+        return;
+    }
+    card.classList.remove('hidden');
+
+    const s1 = payload?.arrival_step1_at || null;
+    const s2 = payload?.arrival_step2_at || null;
+    const seen = payload?.arrival_step2_seen_passenger;
+    if (s2) {
+        status.textContent = seen === true ? '✅ شايفه' : seen === false ? '🙈 مش شايفه' : '✅ خطوة 2';
+    } else if (s1) {
+        status.textContent = '✅ وصلت';
+    } else {
+        status.textContent = '—';
+    }
+    hint.textContent = 'استخدم الخطوتين لتوثيق الوصول وتقليل مشاكل الالتقاء.';
+}
+
+window.driverArrivalStep1 = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) return;
+        const loc = driverLocation || getDriverBaseLocation();
+        const payload = (loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng)))
+            ? { lat: Number(loc.lat), lng: Number(loc.lng) }
+            : {};
+        const resp = await ApiService.trips.arrivalStep1(activeDriverTripId, payload);
+        renderDriverArrivalStatus(resp?.data || null);
+        showToast('✅ تم تسجيل الوصول');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تسجيل الوصول');
+    }
+};
+
+window.driverArrivalSeen = async function(seen) {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) return;
+        const resp = await ApiService.trips.arrivalStep2(activeDriverTripId, !!seen);
+        renderDriverArrivalStatus(resp?.data || null);
+        showToast(seen ? '✅ تم: شايفه' : '🙈 تم: مش شايفه');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تحديث خطوة الوصول');
+    }
+};
+
+window.driverSendJustifiedMessage = async function(reasonKey) {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) return;
+
+        const key = String(reasonKey || '').trim().toLowerCase();
+        const templates = {
+            traffic: '🚦 في زحمة، ممكن أتأخر شوية. موافق؟',
+            detour: '↩️ في تحويلة/طريق مقفول، هأغير المسار للطريق الآمن. موافق؟',
+            meetpoint: '📍 ممكن نغيّر نقطة الالتقاء لمدخل/بوابة أقرب. موافق؟'
+        };
+        const message = templates[key] || 'ℹ️ تحديث: في تغيير بسيط بسبب الظروف. موافق؟';
+
+        const resp = await ApiService.trips.sendMessage(activeDriverTripId, {
+            template_key: 'arrival',
+            reason_key: key,
+            requires_ack: true,
+            message
+        });
+
+        const hint = document.getElementById('driver-justified-messages-hint');
+        if (hint) hint.textContent = resp?.data?.id ? `✅ تم إرسال رسالة (#${resp.data.id})` : '✅ تم إرسال الرسالة';
+        showToast('✅ تم إرسال رسالة للراكب');
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر إرسال الرسالة');
+    }
+};
+
+window.driverRefreshTimeline = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) return;
+        const card = document.getElementById('driver-timeline-card');
+        const list = document.getElementById('driver-timeline-items');
+        const verifyEl = document.getElementById('driver-timeline-verify');
+        if (!card || !list || !verifyEl) return;
+        card.classList.remove('hidden');
+
+        const resp = await ApiService.trips.getTimeline(activeDriverTripId, { limit: 50 });
+        const rows = Array.isArray(resp?.data) ? resp.data : [];
+        list.innerHTML = rows.slice(-20).map((r) => {
+            const t = r.created_at ? formatTripDateTime(r.created_at) : '--';
+            return `<div class="bg-white border border-gray-200 rounded-xl p-2"><div class="text-[11px] text-gray-500 font-bold">${escapeHtml(String(t))}</div><div class="font-extrabold">${escapeHtml(String(r.event_type || 'event'))}</div></div>`;
+        }).join('');
+
+        const v = await ApiService.trips.verifyTimeline(activeDriverTripId);
+        verifyEl.textContent = v?.data?.ok ? `✅ Verified (${v.data.count})` : `⚠️ Verify failed${v?.data?.bad_seq ? ` عند seq ${v.data.bad_seq}` : ''}`;
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تحديث الـTimeline');
+    }
+};
+
+window.driverUploadCarCheck = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        const stageRaw = window.prompt("📸 نوع الفحص:\n1) قبل الشيفت (pre_shift)\n2) بعد الرحلة (post_trip)\n\nاكتب 1 أو 2", '1');
+        if (stageRaw === null) return;
+        const stage = String(stageRaw).trim() === '2' ? 'post_trip' : 'pre_shift';
+
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.onchange = async () => {
+            try {
+                const files = Array.from(input.files || []).slice(0, 3);
+                if (!files.length) return;
+
+                const fd = new FormData();
+                fd.append('stage', stage);
+                if (stage === 'post_trip' && activeDriverTripId) fd.append('trip_id', String(activeDriverTripId));
+                const loc = driverLocation || getDriverBaseLocation();
+                if (loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng))) {
+                    fd.append('lat', String(Number(loc.lat)));
+                    fd.append('lng', String(Number(loc.lng)));
+                }
+                files.forEach((f) => fd.append('photos', f, f.name));
+
+                showToast('⏳ جاري رفع الصور...');
+                await ApiService.captain.uploadCarCheck(fd);
+                showToast('✅ تم حفظ فحص السيارة');
+            } catch (e) {
+                console.error(e);
+                showToast('تعذر رفع الصور');
+            }
+        };
+        input.click();
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر فتح رفع الصور');
+    }
+};
+
+window.driverRecordWitnessNote = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        if (!activeDriverTripId) {
+            showToast('شاهد الرحلة متاح داخل الرحلة فقط');
+            return;
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showToast('المتصفح لا يدعم التسجيل');
+            return;
+        }
+
+        const ok = window.confirm('🧾 شاهد الرحلة: سيتم تسجيل 8-10 ثواني فقط وحفظها مشفّرة. متابعة؟');
+        if (!ok) return;
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const chunks = [];
+        const rec = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = async () => {
+            try {
+                stream.getTracks().forEach(t => t.stop());
+            } catch (e) {}
+            try {
+                const blob = new Blob(chunks, { type: 'audio/webm' });
+                showToast('⏳ جاري رفع شاهد الرحلة...');
+                await ApiService.captain.uploadWitnessNote(activeDriverTripId, blob, 8);
+                showToast('✅ تم حفظ شاهد الرحلة');
+            } catch (e) {
+                console.error(e);
+                showToast('تعذر رفع شاهد الرحلة');
+            }
+        };
+        rec.start();
+        showToast('🎙️ جاري التسجيل...');
+        setTimeout(() => {
+            try { rec.stop(); } catch (e) {}
+        }, 8000);
+    } catch (e) {
+        console.error(e);
+        showToast('تعذر تسجيل شاهد الرحلة');
+    }
+};
 
 window.togglePickupBeacon = function(force = null) {
     const next = force === null ? !pickupBeaconActive : !!force;
@@ -5650,6 +6218,24 @@ window.driverAcceptRequest = async function() {
                 const tripRes = await ApiService.trips.getById(activeDriverTripId);
                 if (tripRes?.data) {
                     renderDriverAccessibilityCard({ trip: tripRes.data });
+
+                    // v4: boundaries snapshot is passenger-side; driver-side init cards
+                    try { window.driverRefreshMeetCode && window.driverRefreshMeetCode(); } catch (e) {}
+                    try { refreshDriverExpectations(); } catch (e) {}
+                    try { renderDriverArrivalStatus(null); } catch (e) {}
+                    try {
+                        const jm = document.getElementById('driver-justified-messages-card');
+                        if (jm) jm.classList.remove('hidden');
+                        const tl = document.getElementById('driver-timeline-card');
+                        if (tl) tl.classList.remove('hidden');
+                        const mc = document.getElementById('driver-meet-code-card');
+                        if (mc) mc.classList.remove('hidden');
+                        const ec = document.getElementById('driver-expectations-card');
+                        if (ec) ec.classList.remove('hidden');
+                        const ac = document.getElementById('driver-arrival-card');
+                        if (ac) ac.classList.remove('hidden');
+                    } catch (e) {}
+                    try { window.driverRefreshTimeline && window.driverRefreshTimeline(); } catch (e) {}
                 }
             } catch (e) {
                 // ignore
@@ -6408,6 +6994,25 @@ async function handlePassengerAssignedTrip(trip) {
     switchSection('driver');
     preparePassengerDriverMapView();
     startPassengerLiveTripTracking(activePassengerTripId, trip.driver_id);
+
+    // v4 cards
+    try {
+        renderPassengerMeetCodeCard({ meet_verified_at: trip?.meet_verified_at || null });
+        renderPassengerBoundariesCard(trip);
+        refreshPassengerExpectations();
+        refreshPassengerArrival();
+    } catch (e) {
+        // ignore
+    }
+
+    // Show/hide v4 cards based on role/state
+    try {
+        const card = document.getElementById('passenger-meet-code-card');
+        if (card) card.classList.remove('hidden');
+        const exp = document.getElementById('passenger-expectations-card');
+        if (exp) exp.classList.remove('hidden');
+    } catch (e) {}
+
     showToast('✅ تم قبول الرحلة بواسطة كابتن حقيقي', 4000);
 }
 
@@ -7332,6 +7937,40 @@ window.driverStopReceiving = async function() {
     } catch (e) {
         console.error(e);
         showToast('تعذر إيقاف الاستقبال');
+    }
+};
+
+window.driverEditBoundaries = async function() {
+    try {
+        if (currentUserRole !== 'driver') return;
+        const statusEl = document.getElementById('driver-boundaries-status');
+        if (statusEl) statusEl.textContent = '⏳ جاري التحميل...';
+
+        const current = await ApiService.captain.getBoundaries();
+        const b = current?.data?.boundaries || {};
+
+        const destChange = window.confirm('هل تغيير الوجهة بعد التحرك يتطلب موافقة؟');
+        const extraStops = window.prompt('سياسة التوقفات الإضافية (اختياري)', b.extra_stops_policy || '') || '';
+        const bags = window.prompt('سياسة الشنط الكبيرة (اختياري)', b.large_bags_policy || '') || '';
+        const pax = window.prompt('سياسة عدد الركاب (اختياري)', b.max_passengers_policy || '') || '';
+
+        const payload = {
+            boundaries: {
+                destination_change_requires_approval: !!destChange,
+                extra_stops_policy: String(extraStops).trim(),
+                large_bags_policy: String(bags).trim(),
+                max_passengers_policy: String(pax).trim()
+            }
+        };
+
+        await ApiService.captain.setBoundaries(payload);
+        if (statusEl) statusEl.textContent = '✅ تم حفظ حدود التعامل.';
+        showToast('✅ تم حفظ حدود التعامل');
+    } catch (e) {
+        console.error(e);
+        const statusEl = document.getElementById('driver-boundaries-status');
+        if (statusEl) statusEl.textContent = '❌ تعذر حفظ الإعدادات.';
+        showToast('تعذر حفظ حدود التعامل');
     }
 };
 
@@ -9558,6 +10197,20 @@ window.submitTripCompletionDone = async function() {
     const commentInput = document.getElementById('payment-success-rating-comment');
     const comment = commentInput ? commentInput.value.trim() : '';
 
+    const causeEl = document.getElementById('payment-success-rating-cause');
+    const causeNoteEl = document.getElementById('payment-success-rating-cause-note');
+    const causeHintEl = document.getElementById('payment-success-rating-cause-hint');
+    const causeKeyRaw = causeEl ? String(causeEl.value || '').trim() : '';
+    const causeKey = causeKeyRaw ? causeKeyRaw : '';
+    const causeNote = causeNoteEl ? String(causeNoteEl.value || '').trim() : '';
+    try {
+        if (causeHintEl) {
+            causeHintEl.textContent = passengerRatingValue <= 3 && (causeKey || causeNote)
+                ? 'سيتم تسجيل سبب المشكلة للمراجعة.'
+                : '';
+        }
+    } catch (e) {}
+
     const btn = document.querySelector('#state-payment-success button[onclick="submitTripCompletionDone()"]');
     if (btn) btn.disabled = true;
 
@@ -9568,7 +10221,9 @@ window.submitTripCompletionDone = async function() {
             body: JSON.stringify({
                 trip_id: String(tripId),
                 rating: Number(passengerRatingValue),
-                comment: comment || ''
+                comment: comment || '',
+                cause_key: passengerRatingValue <= 3 ? (causeKey || '') : (causeKey || ''),
+                cause_note: passengerRatingValue <= 3 ? (causeNote || '') : (causeNote || '')
             })
         });
 
@@ -9603,6 +10258,11 @@ window.submitTripCompletionDone = async function() {
     } finally {
         passengerRatingValue = 0;
         if (commentInput) commentInput.value = '';
+        try {
+            if (causeEl) causeEl.value = '';
+            if (causeNoteEl) causeNoteEl.value = '';
+            if (causeHintEl) causeHintEl.textContent = '';
+        } catch (e) {}
 
         try {
             document.querySelectorAll('[data-rating-scope="passenger"] .star-btn').forEach(b => {

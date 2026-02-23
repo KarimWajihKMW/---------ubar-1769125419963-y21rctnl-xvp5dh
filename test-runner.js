@@ -79,9 +79,15 @@ async function main() {
   }
 
   const passenger = await runNodeScript('test-passenger-features.js');
+  if (passenger.code !== 0) {
+    if (startedServer && serverProcess) serverProcess.kill('SIGTERM');
+    process.exit(passenger.code);
+  }
+
+  const captainV4 = await runNodeScript('test-captain-v4.js');
   if (startedServer && serverProcess) serverProcess.kill('SIGTERM');
 
-  process.exit(passenger.code);
+  process.exit(captainV4.code);
 }
 
 process.on('SIGINT', () => process.exit(130));

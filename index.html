@@ -1399,6 +1399,88 @@
                         <p class="text-[11px] text-gray-500 mt-3">* الكود يتغير تلقائيًا كل عدة دقائق</p>
                     </div>
 
+                    <!-- Meet Code (Captain shows code to passenger - v4) -->
+                    <div id="passenger-meet-code-card" class="hidden mb-6 bg-indigo-50 border border-indigo-200 rounded-2xl p-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="text-xs text-indigo-700 font-extrabold">🔐 كود مقابلة الكابتن</p>
+                                <p class="text-[11px] text-gray-600 mt-1">ادخل الكود اللي بيعرضه الكابتن لتأكيد إنك مع نفس العربية</p>
+                            </div>
+                            <span id="passenger-meet-code-status" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-indigo-200 text-indigo-700 bg-white">غير مؤكد</span>
+                        </div>
+                        <button type="button" onclick="passengerVerifyMeetCode()" class="mt-4 w-full py-3 rounded-xl bg-indigo-600 text-white font-extrabold hover:bg-indigo-700 transition-colors">
+                            إدخال الكود
+                        </button>
+                        <p id="passenger-meet-code-hint" class="text-[11px] text-gray-500 mt-2"></p>
+                    </div>
+
+                    <!-- Expectation Handshake (v4) -->
+                    <div id="passenger-expectations-card" class="hidden mb-6 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="text-xs text-gray-700 font-extrabold">🤝 اتفاق سريع على توقعات الرحلة</p>
+                                <p class="text-[11px] text-gray-500 mt-1">اختيارات بسيطة قبل التحرك لتجنب سوء الفهم</p>
+                            </div>
+                            <span id="passenger-expectations-status" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-gray-200 text-gray-600 bg-white">—</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 mt-4">
+                            <select id="passenger-exp-quiet" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                                <option value="">الهدوء/الكلام</option>
+                                <option value="quiet">هدوء</option>
+                                <option value="talk">كلام</option>
+                            </select>
+                            <select id="passenger-exp-music" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                                <option value="">موسيقى</option>
+                                <option value="music">موسيقى</option>
+                                <option value="no_music">بدون</option>
+                            </select>
+                            <select id="passenger-exp-ac" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                                <option value="">تكييف</option>
+                                <option value="ac">تكييف</option>
+                                <option value="no_ac">بدون</option>
+                            </select>
+                            <select id="passenger-exp-route" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                                <option value="">الطريق</option>
+                                <option value="fast">سريع</option>
+                                <option value="short">أقصر</option>
+                            </select>
+                        </div>
+                        <button type="button" onclick="passengerSubmitExpectations()" class="mt-4 w-full py-3 rounded-xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-700 transition-colors">
+                            حفظ الاتفاق
+                        </button>
+                        <p id="passenger-expectations-hint" class="text-[11px] text-gray-500 mt-2"></p>
+                    </div>
+
+                    <!-- Captain Boundaries (v4) -->
+                    <div id="passenger-boundaries-card" class="hidden mb-6 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="text-xs text-gray-700 font-extrabold">🧑‍✈️ حدود التعامل (الكابتن)</p>
+                                <p class="text-[11px] text-gray-500 mt-1">قواعد واضحة قبل بدء الرحلة</p>
+                            </div>
+                            <span id="passenger-boundaries-ack-status" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-gray-200 text-gray-600 bg-white">غير مؤكد</span>
+                        </div>
+                        <div id="passenger-boundaries-summary" class="mt-3 text-sm text-gray-700 space-y-1"></div>
+                        <button id="passenger-boundaries-ack-btn" type="button" onclick="passengerAckBoundaries()" class="mt-4 w-full py-3 rounded-xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-700 transition-colors">
+                            ✅ موافق
+                        </button>
+                        <p id="passenger-boundaries-hint" class="text-[11px] text-gray-500 mt-2"></p>
+                    </div>
+
+                    <!-- Arrival Status (v4) -->
+                    <div id="passenger-arrival-card" class="hidden mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1">
+                                <p class="text-xs text-amber-700 font-extrabold">📍 تأكيد الوصول على مرحلتين</p>
+                                <p id="passenger-arrival-text" class="text-[11px] text-gray-700 mt-1">—</p>
+                            </div>
+                            <button type="button" class="text-amber-700/70 hover:text-amber-800" onclick="refreshPassengerArrival()">
+                                <i class="fas fa-rotate"></i>
+                            </button>
+                        </div>
+                        <div id="passenger-arrival-alt" class="mt-3 text-sm text-gray-700 space-y-1"></div>
+                    </div>
+
                     <!-- Accessibility Snapshot (Passenger preview) -->
                     <div id="passenger-accessibility-card" class="hidden mb-6 bg-gray-50 border border-gray-200 rounded-2xl p-4">
                         <div class="flex items-start justify-between gap-3">
@@ -1791,6 +1873,22 @@
                         </div>
 
                         <textarea id="payment-success-rating-comment" rows="3" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300" placeholder="اكتب تعليقك (اختياري)"></textarea>
+
+                        <!-- Cause-based feedback (v4) -->
+                        <div class="mt-4">
+                            <label class="block text-[11px] font-bold text-gray-500 mb-1">سبب المشكلة (لو التقييم منخفض)</label>
+                            <select id="payment-success-rating-cause" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                                <option value="">بدون</option>
+                                <option value="meetpoint">نقطة التقاء غير مناسبة</option>
+                                <option value="route_change">تغيير مسار بدون توضيح</option>
+                                <option value="stop">توقفات بدون توضيح</option>
+                                <option value="payment">مشكلة دفع/كاش</option>
+                                <option value="behavior">سلوك غير لائق</option>
+                                <option value="other">أخرى</option>
+                            </select>
+                            <textarea id="payment-success-rating-cause-note" rows="2" class="mt-2 w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300" placeholder="تفاصيل مختصرة (اختياري)"></textarea>
+                            <p id="payment-success-rating-cause-hint" class="text-[11px] text-gray-500 mt-2"></p>
+                        </div>
                     </div>
                 </div>
 
@@ -2383,6 +2481,11 @@
                 </button>
                 <p id="driver-earnings-assistant-status" class="text-[11px] text-gray-500 mt-2"></p>
 
+                <button type="button" onclick="driverEditBoundaries()" class="mt-3 w-full py-3 bg-gray-50 text-gray-700 font-bold rounded-xl hover:bg-gray-100 transition-colors">
+                    🧾 حدود التعامل (Settings)
+                </button>
+                <p id="driver-boundaries-status" class="text-[11px] text-gray-500 mt-2"></p>
+
                 <button type="button" onclick="driverShowRoadReportsNearby()" class="mt-3 w-full py-3 bg-gray-50 text-gray-700 font-bold rounded-xl hover:bg-gray-100 transition-colors">
                     📣 بلاغات الطريق القريبة
                 </button>
@@ -2450,6 +2553,105 @@
                  <div class="flex gap-4 mb-6">
                      <button onclick="driverOpenNavigation()" class="flex-1 py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold">الملاحة</button>
                      <button onclick="driverCallPassenger()" class="flex-1 py-3 bg-gray-50 text-gray-700 rounded-xl font-bold">اتصال</button>
+                 </div>
+
+                 <!-- Meet Code (Captain shows code to passenger - v4) -->
+                 <div id="driver-meet-code-card" class="hidden mb-5 bg-indigo-50 border border-indigo-200 rounded-2xl p-4">
+                     <div class="flex items-start justify-between gap-3">
+                         <div class="flex-1">
+                             <p class="text-sm font-extrabold text-indigo-800">🔐 كود مقابلة</p>
+                             <p class="text-[11px] text-gray-600 mt-1">اعرضه للراكب ليؤكد إن ده نفس الكابتن</p>
+                         </div>
+                         <button type="button" class="text-indigo-700/70 hover:text-indigo-800" onclick="driverRefreshMeetCode()">
+                             <i class="fas fa-rotate"></i>
+                         </button>
+                     </div>
+                     <div class="mt-4 flex items-center justify-between bg-white border border-indigo-100 rounded-2xl px-4 py-3">
+                         <div>
+                             <p class="text-[10px] text-gray-500 font-bold">الكود</p>
+                             <p id="driver-meet-code" class="text-2xl font-extrabold text-indigo-700 tracking-widest">----</p>
+                         </div>
+                         <div class="text-left">
+                             <p class="text-[10px] text-gray-500 font-bold">ينتهي</p>
+                             <p id="driver-meet-code-expires" class="text-xs font-bold text-gray-700">--:--</p>
+                         </div>
+                     </div>
+                     <div class="mt-3 flex items-center justify-center">
+                         <img id="driver-meet-code-qr" class="hidden w-32 h-32 rounded-2xl border border-indigo-100 bg-white p-2" alt="Meet Code QR" />
+                     </div>
+                 </div>
+
+                 <!-- Expectation Handshake (v4) -->
+                 <div id="driver-expectations-card" class="hidden mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                     <div class="flex items-start justify-between gap-3">
+                         <div class="flex-1">
+                             <p class="text-sm font-extrabold text-gray-800">🤝 اتفاق توقعات الرحلة</p>
+                             <p class="text-[11px] text-gray-500 mt-1">راجع أو عدّل سريعًا (هيسجل على الرحلة)</p>
+                         </div>
+                         <span id="driver-expectations-status" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-gray-200 text-gray-600 bg-white">—</span>
+                     </div>
+                     <div class="grid grid-cols-2 gap-3 mt-4">
+                         <select id="driver-exp-quiet" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                             <option value="">الهدوء/الكلام</option>
+                             <option value="quiet">هدوء</option>
+                             <option value="talk">كلام</option>
+                         </select>
+                         <select id="driver-exp-music" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                             <option value="">موسيقى</option>
+                             <option value="music">موسيقى</option>
+                             <option value="no_music">بدون</option>
+                         </select>
+                         <select id="driver-exp-ac" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                             <option value="">تكييف</option>
+                             <option value="ac">تكييف</option>
+                             <option value="no_ac">بدون</option>
+                         </select>
+                         <select id="driver-exp-route" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-bold text-gray-800 outline-none">
+                             <option value="">الطريق</option>
+                             <option value="fast">سريع</option>
+                             <option value="short">أقصر</option>
+                         </select>
+                     </div>
+                     <button type="button" onclick="driverSubmitExpectations()" class="mt-4 w-full py-3 rounded-xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-700 transition-colors">
+                         حفظ
+                     </button>
+                     <p id="driver-expectations-hint" class="text-[11px] text-gray-500 mt-2"></p>
+                 </div>
+
+                 <!-- 2-Step Arrival Confirmation (v4) -->
+                 <div id="driver-arrival-card" class="hidden mb-5 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                     <div class="flex items-center justify-between mb-3">
+                         <p class="text-sm font-extrabold text-amber-800">📍 الوصول على مرحلتين</p>
+                         <span id="driver-arrival-status" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-amber-200 text-amber-800 bg-white">—</span>
+                     </div>
+                     <div class="grid grid-cols-2 gap-3">
+                         <button type="button" onclick="driverArrivalStep1()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">1) وصلت</button>
+                         <button type="button" onclick="driverArrivalSeen(true)" class="py-3 rounded-xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-700 transition-colors">2) شايفه</button>
+                         <button type="button" onclick="driverArrivalSeen(false)" class="col-span-2 py-3 rounded-xl bg-white text-red-700 font-extrabold border border-red-200 hover:bg-red-50 transition-colors">2) مش شايفه</button>
+                     </div>
+                     <p id="driver-arrival-hint" class="text-[11px] text-gray-600 mt-2"></p>
+                 </div>
+
+                 <!-- Justified Auto-Messages (v4) -->
+                 <div id="driver-justified-messages-card" class="hidden mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                     <p class="text-sm font-extrabold text-gray-800 mb-2">✉️ رسائل مبرّرة سريعة</p>
+                     <p class="text-[11px] text-gray-500 mb-3">بيروح للراكب ومعاه طلب تأكيد (موافق؟)</p>
+                     <div class="grid grid-cols-3 gap-2">
+                         <button type="button" onclick="driverSendJustifiedMessage('traffic')" class="py-2.5 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">زحمة</button>
+                         <button type="button" onclick="driverSendJustifiedMessage('detour')" class="py-2.5 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">تحويلة</button>
+                         <button type="button" onclick="driverSendJustifiedMessage('meetpoint')" class="py-2.5 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">نقطة التقاء</button>
+                     </div>
+                     <p id="driver-justified-messages-hint" class="text-[11px] text-gray-500 mt-2"></p>
+                 </div>
+
+                 <!-- Trip Timeline (v4) -->
+                 <div id="driver-timeline-card" class="hidden mb-5 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                     <div class="flex items-center justify-between mb-2">
+                         <p class="text-sm font-extrabold text-gray-800">📜 Trip Timeline</p>
+                         <button type="button" onclick="driverRefreshTimeline()" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-700">تحديث</button>
+                     </div>
+                     <div id="driver-timeline-items" class="space-y-2 text-sm text-gray-700"></div>
+                     <p id="driver-timeline-verify" class="text-[11px] text-gray-500 mt-2"></p>
                  </div>
 
                  <!-- Accessibility Snapshot + Acknowledgement (v2) -->
@@ -2556,8 +2758,14 @@
                          <button id="driver-audio-record-btn" type="button" onclick="driverToggleAudioRecording()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
                              🎙️ تسجيل صوتي
                          </button>
+                         <button type="button" onclick="driverRecordWitnessNote()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             🧾 شاهد الرحلة (10ث)
+                         </button>
                          <button type="button" onclick="driverSuggestNextTrip()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
                              ➕ رحلة بعدها
+                         </button>
+                         <button type="button" onclick="driverUploadCarCheck()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
+                             📸 فحص سيارة
                          </button>
                          <button type="button" onclick="driverShowRoadReportsNearby()" class="py-3 rounded-xl bg-white text-gray-800 font-extrabold border border-gray-200 hover:bg-gray-100 transition-colors">
                              📣 بلاغات طريق

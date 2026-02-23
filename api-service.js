@@ -392,6 +392,74 @@ const ApiService = {
             });
         },
 
+        // --- Meet Code (Captain -> Passenger, v4) ---
+        async getMeetCode(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/meet-code`);
+        },
+
+        async verifyMeetCode(tripId, code) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/meet-code/verify`, {
+                method: 'POST',
+                body: JSON.stringify({ code })
+            });
+        },
+
+        // --- Expectation Handshake (v4) ---
+        async getExpectations(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/expectations`);
+        },
+
+        async setExpectations(tripId, expectations = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/expectations`, {
+                method: 'PATCH',
+                body: JSON.stringify({ expectations })
+            });
+        },
+
+        // --- Justified auto-messages ACK (v4) ---
+        async ackMessage(tripId, messageId, decision) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/messages/${encodeURIComponent(String(messageId))}/ack`, {
+                method: 'POST',
+                body: JSON.stringify({ decision })
+            });
+        },
+
+        // --- 2-step arrival (v4) ---
+        async arrivalStep1(tripId, payload = {}) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/arrival/step1`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async arrivalStep2(tripId, seen) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/arrival/step2`, {
+                method: 'POST',
+                body: JSON.stringify({ seen: !!seen })
+            });
+        },
+
+        async getArrival(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/arrival`);
+        },
+
+        // --- Tamper-evident Trip Timeline (v4) ---
+        async getTimeline(tripId, params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/timeline${queryString ? `?${queryString}` : ''}`);
+        },
+
+        async verifyTimeline(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/timeline/verify`);
+        },
+
+        // --- Captain Boundaries ACK (v4) ---
+        async ackBoundaries(tripId) {
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/boundaries/ack`, {
+                method: 'POST'
+            });
+        },
+
         async scheduleGuardianCheckin(tripId, payload = {}) {
             return ApiService.request(`/trips/${encodeURIComponent(tripId)}/guardian/checkin`, {
                 method: 'POST',
@@ -871,6 +939,37 @@ const ApiService = {
                 method: 'POST',
                 headers: type ? { } : {}
             });
+        },
+
+        // --- Captain Boundaries (v4) ---
+        async getBoundaries(params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/drivers/me/boundaries${queryString ? `?${queryString}` : ''}`);
+        },
+
+        async setBoundaries(payload = {}) {
+            return ApiService.request('/drivers/me/boundaries', {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // --- Quick Car Check (v4) ---
+        async uploadCarCheck(formData) {
+            return ApiService.requestForm('/drivers/me/car-checks', formData, { method: 'POST' });
+        },
+
+        async listCarChecks(params = {}) {
+            const queryString = new URLSearchParams(params).toString();
+            return ApiService.request(`/drivers/me/car-checks${queryString ? `?${queryString}` : ''}`);
+        },
+
+        // --- Trip Witness Note (v4) ---
+        async uploadWitnessNote(tripId, blob, durationSeconds = null) {
+            const fd = new FormData();
+            fd.append('audio', blob, `witness-${Date.now()}.webm`);
+            if (Number.isFinite(durationSeconds)) fd.append('duration_seconds', String(durationSeconds));
+            return ApiService.requestForm(`/trips/${encodeURIComponent(tripId)}/witness-notes`, fd, { method: 'POST' });
         }
     },
     
