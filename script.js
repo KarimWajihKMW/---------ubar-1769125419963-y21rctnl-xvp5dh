@@ -113,6 +113,72 @@ window.Auth = {
     }
 };
 
+// --- Driver preferences (shared with settings.html) ---
+const DRIVER_PREFS_KEY = 'akwadra_driver_prefs';
+const DRIVER_PREFS_DEFAULTS = {
+    trips: true,
+    marketing: false,
+    location: true,
+    language: 'ar',
+    autoAccept: false,
+    soundAlerts: true,
+    shareLocation: true,
+    breakReminder: true
+};
+
+function getDriverPrefs() {
+    try {
+        const raw = SafeStorage.getItem(DRIVER_PREFS_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return { ...DRIVER_PREFS_DEFAULTS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+    } catch (e) {
+        return { ...DRIVER_PREFS_DEFAULTS };
+    }
+}
+
+let driverAutoAcceptTimer = null;
+let driverLastAutoAcceptedRequestId = null;
+
+function clearDriverAutoAcceptTimer() {
+    if (driverAutoAcceptTimer) {
+        clearTimeout(driverAutoAcceptTimer);
+        driverAutoAcceptTimer = null;
+    }
+}
+
+function maybeAutoAcceptIncomingTrip(trip) {
+    try {
+        if (currentUserRole !== 'driver') return;
+        const prefs = getDriverPrefs();
+        if (!prefs.autoAccept) return;
+
+        const requestId = trip?.request_id ? String(trip.request_id) : null;
+        if (!requestId) return;
+        if (driverLastAutoAcceptedRequestId === requestId) return;
+
+        clearDriverAutoAcceptTimer();
+        driverAutoAcceptTimer = setTimeout(async () => {
+            try {
+                if (currentUserRole !== 'driver') return;
+                if (!currentIncomingTrip?.request_id) return;
+                if (String(currentIncomingTrip.request_id) !== requestId) return;
+
+                const incomingPanel = document.getElementById('driver-incoming-request');
+                const activePanel = document.getElementById('driver-active-trip');
+                if (activePanel && !activePanel.classList.contains('hidden')) return;
+                if (!incomingPanel || incomingPanel.classList.contains('hidden')) return;
+
+                driverLastAutoAcceptedRequestId = requestId;
+                await window.driverAcceptRequest();
+            } catch (e) {
+                // ignore
+            }
+        }, 650);
+    } catch (e) {
+        // ignore
+    }
+}
+
 // --- Dark Mode ---
 const DARK_MODE_KEY = 'akwadra_dark_mode';
 
@@ -5166,6 +5232,7 @@ window.sendChatMessage = function() {
 };
 
 window.driverRejectRequest = async function() {
+    clearDriverAutoAcceptTimer();
     try {
         const requestId = currentIncomingTrip?.request_id;
         if (requestId && currentDriverProfile?.id) {
@@ -6480,6 +6547,7 @@ async function triggerDriverRequestPolling() {
 }
 
 function showDriverWaitingState() {
+    clearDriverAutoAcceptTimer();
     stopDriverIncomingTripLiveUpdates();
     const waiting = document.getElementById('driver-status-waiting');
     const incoming = document.getElementById('driver-incoming-request');
@@ -6553,6 +6621,9 @@ function renderDriverIncomingTrip(trip, nearbyCount = 0) {
         startDriverIncomingTripLiveUpdates(trip.request_id);
     }
     setDriverPanelVisible(true);
+
+    // Captain-only: flexible acceptance rules (auto-accept)
+    maybeAutoAcceptIncomingTrip(trip);
 }
 
 function setBadge(el, { text, className, hidden }) {
