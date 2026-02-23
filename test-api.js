@@ -185,6 +185,15 @@ async function testAPI() {
         const driverId = data.data.id;
         console.log('✅ Driver ready:', driverId);
 
+        // Test 9️⃣c: Driving Coach trend endpoint (should succeed even if empty)
+        console.log('\n9️⃣c Testing Driving Coach trend (last 7 days)...');
+        response = await fetch(`${baseURL}/drivers/${encodeURIComponent(driverId)}/driving-coach/trend?days=7`, { headers: adminHeaders });
+        data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(`Driving coach trend failed: ${data.error || response.status}`);
+        }
+        console.log('✅ Driving Coach trend OK:', { days: data.data?.days, trips_count: data.data?.overall?.trips_count });
+
         // Test 9: Get next pending trip (nearest by driver location)
         console.log('\n9️⃣ Testing get next pending trip...');
         response = await fetch(`${baseURL}/trips/pending/next?car_type=economy&lat=24.7136&lng=46.6753`, { headers: adminHeaders });

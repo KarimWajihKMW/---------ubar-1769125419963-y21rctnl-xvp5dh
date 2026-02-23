@@ -7011,6 +7011,96 @@ app.get('/api/trips/:id/driving-summary', requireAuth, async (req, res) => {
     }
 });
 
+// Driver dashboard helper: Driving Coach trend (last N days)
+app.get('/api/drivers/:id/driving-coach/trend', requireRole('driver', 'admin'), async (req, res) => {
+    try {
+        const driverId = Number(req.params.id);
+        if (!Number.isFinite(driverId) || driverId <= 0) {
+            return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        }
+
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authDriverId = req.auth?.driver_id;
+        if (authRole === 'driver') {
+            if (!authDriverId) return res.status(403).json({ success: false, error: 'Driver profile not linked to this account' });
+            if (String(authDriverId) !== String(driverId)) {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        }
+
+        const daysRaw = req.query?.days !== undefined && req.query.days !== null ? Number(req.query.days) : 7;
+        const days = Number.isFinite(daysRaw) ? Math.min(Math.max(Math.round(daysRaw), 1), 30) : 7;
+
+        const rows = await pool.query(
+            `SELECT
+                DATE_TRUNC('day', s.updated_at) AS day,
+                COUNT(*)::int AS trips_count,
+                AVG(s.score)::float AS avg_score,
+                SUM(s.hard_brake_count)::int AS hard_brake_count,
+                SUM(s.hard_accel_count)::int AS hard_accel_count,
+                SUM(s.hard_turn_count)::int AS hard_turn_count,
+                SUM(COALESCE(s.sample_seconds, 0))::int AS sample_seconds
+             FROM trip_driving_summaries s
+             JOIN trips t ON t.id = s.trip_id
+             WHERE COALESCE(s.driver_id, t.driver_id) = $1
+               AND s.updated_at >= (NOW() - ($2 * INTERVAL '1 day'))
+             GROUP BY 1
+             ORDER BY day ASC`,
+            [driverId, days]
+        );
+
+        const perDay = (rows.rows || []).map((r) => {
+            const avg = r.avg_score !== undefined && r.avg_score !== null ? Number(r.avg_score) : null;
+            return {
+                day: r.day,
+                trips_count: Number(r.trips_count || 0),
+                avg_score: Number.isFinite(avg) ? Math.round(avg) : null,
+                hard_brake_count: Number(r.hard_brake_count || 0),
+                hard_accel_count: Number(r.hard_accel_count || 0),
+                hard_turn_count: Number(r.hard_turn_count || 0),
+                sample_seconds: Number(r.sample_seconds || 0)
+            };
+        });
+
+        const total = perDay.reduce(
+            (acc, d) => {
+                acc.trips_count += Number(d.trips_count || 0);
+                acc.hard_brake_count += Number(d.hard_brake_count || 0);
+                acc.hard_accel_count += Number(d.hard_accel_count || 0);
+                acc.hard_turn_count += Number(d.hard_turn_count || 0);
+                acc.sample_seconds += Number(d.sample_seconds || 0);
+                if (Number.isFinite(Number(d.avg_score))) {
+                    acc._score_sum += Number(d.avg_score) * Math.max(1, Number(d.trips_count || 1));
+                    acc._score_weight += Math.max(1, Number(d.trips_count || 1));
+                }
+                return acc;
+            },
+            { trips_count: 0, hard_brake_count: 0, hard_accel_count: 0, hard_turn_count: 0, sample_seconds: 0, _score_sum: 0, _score_weight: 0 }
+        );
+
+        const overallAvg = total._score_weight > 0 ? Math.round(total._score_sum / total._score_weight) : null;
+
+        res.json({
+            success: true,
+            data: {
+                driver_id: driverId,
+                days,
+                overall: {
+                    trips_count: total.trips_count,
+                    avg_score: overallAvg,
+                    hard_brake_count: total.hard_brake_count,
+                    hard_accel_count: total.hard_accel_count,
+                    hard_turn_count: total.hard_turn_count,
+                    sample_seconds: total.sample_seconds
+                },
+                per_day: perDay
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // --- Incident / Dispute Package (evidence snapshot) ---
 
 async function buildTripIncidentPackage(tripId) {

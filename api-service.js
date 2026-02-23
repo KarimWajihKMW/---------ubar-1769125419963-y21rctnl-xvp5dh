@@ -874,6 +874,14 @@ const ApiService = {
             params.set('lng', lng);
             if (carType) params.set('car_type', carType);
             return ApiService.request(`/drivers/nearest?${params.toString()}`);
+            },
+
+            // Driving Coach trend (last N days)
+            async getDrivingCoachTrend(driverId, days = 7) {
+                const params = new URLSearchParams();
+                if (Number.isFinite(Number(days))) params.set('days', String(days));
+                const qs = params.toString();
+                return ApiService.request(`/drivers/${encodeURIComponent(driverId)}/driving-coach/trend${qs ? `?${qs}` : ''}`);
         }
     },
     

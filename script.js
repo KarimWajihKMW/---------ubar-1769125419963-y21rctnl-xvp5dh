@@ -6595,6 +6595,52 @@ window.openDriverTrips = async function() {
     screen.classList.remove('hidden');
     container.innerHTML = '<p class="text-gray-500 text-center py-8">جاري تحميل الرحلات...</p>';
 
+    // Driving Coach trend (last 7 days) - non-blocking
+    try {
+        const card = document.getElementById('driver-coach-trend-card');
+        if (card) card.classList.add('hidden');
+
+        if (window.ApiService?.drivers?.getDrivingCoachTrend) {
+            ApiService.drivers.getDrivingCoachTrend(driverId, 7)
+                .then((resp) => {
+                    const d = resp?.data || null;
+                    const overall = d?.overall || null;
+                    if (!card || !overall) return;
+
+                    const avg = overall.avg_score !== undefined && overall.avg_score !== null ? Number(overall.avg_score) : null;
+                    const hb = Number(overall.hard_brake_count || 0);
+                    const ha = Number(overall.hard_accel_count || 0);
+                    const ht = Number(overall.hard_turn_count || 0);
+
+                    const scoreEl = document.getElementById('driver-coach-trend-score');
+                    const brakeEl = document.getElementById('driver-coach-trend-hard-brake');
+                    const accelEl = document.getElementById('driver-coach-trend-hard-accel');
+                    const turnEl = document.getElementById('driver-coach-trend-hard-turn');
+                    const tipEl = document.getElementById('driver-coach-trend-tip');
+
+                    if (scoreEl) scoreEl.textContent = Number.isFinite(avg) ? `متوسط ${Math.round(avg)}/100` : '—';
+                    if (brakeEl) brakeEl.textContent = String(hb);
+                    if (accelEl) accelEl.textContent = String(ha);
+                    if (turnEl) turnEl.textContent = String(ht);
+
+                    let tip = '💡 حافظ على سلاسة القيادة لتحسين التقييم والراحة.';
+                    const max = Math.max(hb, ha, ht);
+                    if (max === 0) tip = '✅ ممتاز! آخر 7 أيام قيادة سلسة جدًا.';
+                    else if (max === hb) tip = '💡 ركّز على الفرملة تدريجيًا وخلي مسافة أمان أكبر.';
+                    else if (max === ha) tip = '💡 خلي التسارع تدريجي وتجنب الضغط المفاجئ.';
+                    else tip = '💡 خفف الانعطافات الحادة وقلل السرعة قبل المنعطف.';
+                    if (tipEl) tipEl.textContent = tip;
+
+                    card.classList.remove('hidden');
+                })
+                .catch(() => {
+                    // ignore
+                });
+        }
+    } catch (e) {
+        // ignore
+    }
+
     try {
         const resp = await fetch(`/api/driver/trips?driver_id=${encodeURIComponent(String(driverId))}`);
         const data = await resp.json();

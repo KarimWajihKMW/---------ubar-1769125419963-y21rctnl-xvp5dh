@@ -2550,6 +2550,29 @@
             <div class="w-10"></div>
         </div>
         <div class="p-6 max-w-2xl mx-auto">
+            <!-- Driving Coach trend (last 7 days) -->
+            <div id="driver-coach-trend-card" class="hidden mb-4 bg-white border border-gray-200 rounded-2xl p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="font-extrabold text-gray-800">🧠 Driving Coach (7 أيام)</p>
+                    <span id="driver-coach-trend-score" class="text-[11px] font-extrabold px-2 py-1 rounded-full border border-gray-200 text-gray-600 bg-gray-50">—</span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-2">
+                        <p class="text-[11px] font-bold text-gray-500">فرملة قوية</p>
+                        <p id="driver-coach-trend-hard-brake" class="text-lg font-extrabold text-gray-800">0</p>
+                    </div>
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-2">
+                        <p class="text-[11px] font-bold text-gray-500">تسارع قوي</p>
+                        <p id="driver-coach-trend-hard-accel" class="text-lg font-extrabold text-gray-800">0</p>
+                    </div>
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-2">
+                        <p class="text-[11px] font-bold text-gray-500">انعطاف حاد</p>
+                        <p id="driver-coach-trend-hard-turn" class="text-lg font-extrabold text-gray-800">0</p>
+                    </div>
+                </div>
+                <p id="driver-coach-trend-tip" class="text-[11px] text-gray-500 mt-3 font-bold">—</p>
+            </div>
+
             <div id="driver-trips-container" class="space-y-3">
                 <!-- Driver trips injected here -->
             </div>
