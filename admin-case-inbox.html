@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>صندوق القضايا الموحد - Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { font-family: 'Cairo', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div class="min-h-screen p-6">
+    <div class="max-w-7xl mx-auto">
+      <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-6 mb-6 text-white">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 class="text-2xl md:text-3xl font-extrabold">
+              <i class="fas fa-inbox ml-2"></i>
+              صندوق القضايا الموحّد
+            </h1>
+            <p class="text-indigo-100 text-sm mt-1">Support / Refund / Lost / Incidents — بحث وإجراءات من مكان واحد</p>
+          </div>
+          <button onclick="refreshAll()" class="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow">
+            <i class="fas fa-sync-alt ml-2"></i>
+            تحديث
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Left: Filters + List -->
+        <div class="lg:col-span-1 bg-white rounded-2xl shadow p-5 border border-gray-100">
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Admin Token (Bearer)</label>
+              <input id="token-input" type="password" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="الصق التوكن هنا" />
+              <p class="text-[11px] text-gray-500 mt-1">يتحفظ في localStorage تحت akwadra_token</p>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="saveToken()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">حفظ</button>
+              <button onclick="clearToken()" class="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-extrabold hover:bg-gray-200">مسح</button>
+            </div>
+
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">بحث موحّد</label>
+              <input id="q-input" type="text" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="trip_id / user_id / driver_id / رقم الهاتف" onkeydown="if(event.key==='Enter'){refreshAll();}" />
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">النوع</label>
+                <select id="type-select" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" onchange="refreshAll()">
+                  <option value="all" selected>الكل</option>
+                  <option value="support_ticket">Support</option>
+                  <option value="refund_request">Refund</option>
+                  <option value="lost_item">Lost</option>
+                  <option value="incident">Incidents</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">الحالة</label>
+                <select id="status-select" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" onchange="refreshAll()">
+                  <option value="all" selected>الكل</option>
+                  <option value="open">open</option>
+                  <option value="pending">pending</option>
+                  <option value="approved">approved</option>
+                  <option value="rejected">rejected</option>
+                  <option value="resolved">resolved</option>
+                  <option value="closed">closed</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">الحد</label>
+              <input id="limit-input" type="number" min="1" max="300" value="200" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" onchange="refreshAll()" />
+            </div>
+          </div>
+
+          <div class="mt-5">
+            <h2 class="text-sm font-extrabold text-gray-800 mb-3">القضايا</h2>
+            <div id="list" class="space-y-2">
+              <div class="text-center py-10 text-gray-500">
+                <i class="fas fa-inbox text-3xl mb-3"></i>
+                <p class="font-bold">اضغط تحديث لعرض البيانات</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Details -->
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow p-5 border border-gray-100">
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 class="text-lg font-extrabold text-gray-800">التفاصيل</h2>
+              <p id="details-sub" class="text-xs text-gray-500 font-bold">اختر قضية من القائمة</p>
+            </div>
+            <div class="flex gap-2">
+              <button id="evidence-btn" onclick="loadEvidence()" class="hidden bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">Evidence Bundle</button>
+            </div>
+          </div>
+
+          <div id="details" class="mt-4">
+            <div class="text-center py-16 text-gray-500">
+              <i class="fas fa-file-lines text-3xl mb-3"></i>
+              <p class="font-bold">لا توجد تفاصيل</p>
+            </div>
+          </div>
+
+          <div id="actions" class="hidden mt-5 border-t pt-4">
+            <h3 class="text-sm font-extrabold text-gray-800 mb-2">إجراءات سريعة</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">Status</label>
+                <select id="action-status" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold"></select>
+              </div>
+              <div id="amount-wrap" class="hidden">
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">Amount Approved (Refund)</label>
+                <input id="action-amount" type="number" step="0.01" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري" />
+              </div>
+              <div class="flex items-end">
+                <button onclick="applyAction()" class="w-full bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-emerald-700">تطبيق</button>
+              </div>
+            </div>
+            <div id="note-wrap" class="mt-3">
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Note (اختياري)</label>
+              <textarea id="action-note" rows="3" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="ملاحظة/سبب القرار"></textarea>
+            </div>
+          </div>
+
+          <div id="evidence" class="hidden mt-5 border-t pt-4">
+            <h3 class="text-sm font-extrabold text-gray-800 mb-2">Evidence Bundle</h3>
+            <div id="evidence-body" class="text-sm text-gray-700"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="api-service.js"></script>
+  <script>
+    const TOKEN_KEY = 'akwadra_token';
+    let selected = null; // { case_type, case_id, trip_id }
+
+    function getToken() {
+      try { return window.localStorage.getItem(TOKEN_KEY); } catch(e) { return null; }
+    }
+    function setToken(t) {
+      try { window.localStorage.setItem(TOKEN_KEY, String(t || '').trim()); } catch(e) {}
+    }
+
+    function saveToken() {
+      const v = document.getElementById('token-input').value;
+      if (!v || !v.trim()) return alert('أدخل التوكن');
+      setToken(v);
+      alert('تم حفظ التوكن');
+    }
+
+    function clearToken() {
+      try { window.localStorage.removeItem(TOKEN_KEY); } catch(e) {}
+      document.getElementById('token-input').value = '';
+      alert('تم مسح التوكن');
+    }
+
+    function badge(type) {
+      const map = {
+        support_ticket: { t: 'Support', cls: 'bg-blue-50 text-blue-700' },
+        refund_request: { t: 'Refund', cls: 'bg-emerald-50 text-emerald-700' },
+        lost_item: { t: 'Lost', cls: 'bg-amber-50 text-amber-700' },
+        incident: { t: 'Incident', cls: 'bg-red-50 text-red-700' }
+      };
+      return map[type] || { t: type, cls: 'bg-gray-50 text-gray-700' };
+    }
+
+    function fmtDate(v) {
+      if (!v) return '--';
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return '--';
+      return d.toLocaleString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function short(v, n=120) {
+      const s = (v === null || v === undefined) ? '' : String(v);
+      return s.length > n ? (s.slice(0, n) + '…') : s;
+    }
+
+    async function refreshAll() {
+      const list = document.getElementById('list');
+      list.innerHTML = `<div class="text-center py-10 text-gray-500"><i class="fas fa-spinner fa-spin text-3xl mb-3"></i><p class="font-bold">جاري التحميل...</p></div>`;
+
+      try {
+        const q = document.getElementById('q-input').value || '';
+        const type = document.getElementById('type-select').value || 'all';
+        const status = document.getElementById('status-select').value || 'all';
+        const limit = Number(document.getElementById('limit-input').value || 200);
+
+        const params = new URLSearchParams();
+        if (q && q.trim()) params.set('q', q.trim());
+        if (type && type !== 'all') params.set('type', type);
+        if (status && status !== 'all') params.set('status', status);
+        if (Number.isFinite(limit)) params.set('limit', String(limit));
+
+        const data = await ApiService.request(`/admin/cases?${params.toString()}`);
+        const items = Array.isArray(data.data) ? data.data : [];
+        renderList(items);
+      } catch (e) {
+        console.error(e);
+        list.innerHTML = `<div class="text-center py-10 text-red-600"><i class="fas fa-triangle-exclamation text-3xl mb-3"></i><p class="font-extrabold">تعذر تحميل القضايا</p><p class="text-sm font-bold">${e.message}</p></div>`;
+      }
+    }
+
+    function renderList(items) {
+      const el = document.getElementById('list');
+      if (!items.length) {
+        el.innerHTML = `<div class="text-center py-10 text-gray-500"><i class="fas fa-circle-check text-3xl mb-3"></i><p class="font-bold">لا توجد عناصر</p></div>`;
+        return;
+      }
+
+      el.innerHTML = items.map((x) => {
+        const b = badge(x.case_type);
+        const title = x.title ? String(x.title) : b.t;
+        const sub = [
+          x.trip_id ? `Trip: ${x.trip_id}` : null,
+          x.user_phone ? `User: ${x.user_phone}` : null,
+          x.driver_phone ? `Driver: ${x.driver_phone}` : null,
+          x.status ? String(x.status) : null,
+          x.created_at ? fmtDate(x.created_at) : null
+        ].filter(Boolean).join(' • ');
+
+        return `
+          <button onclick="selectCase('${x.case_type}', ${Number(x.case_id)}, '${x.trip_id ? String(x.trip_id).replace(/'/g, "\\'") : ''}')" class="w-full text-right p-3 rounded-2xl border border-gray-200 hover:bg-gray-50 transition">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-extrabold px-2 py-1 rounded-full ${b.cls}">${b.t}</span>
+                  <p class="font-extrabold text-gray-800 truncate">#${x.case_id} • ${short(title, 60)}</p>
+                </div>
+                <p class="text-[11px] text-gray-500 font-bold truncate mt-1">${short(sub, 120)}</p>
+              </div>
+              <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${x.status || '--'}</span>
+            </div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function setStatusOptions(type) {
+      const el = document.getElementById('action-status');
+      const amountWrap = document.getElementById('amount-wrap');
+      amountWrap.classList.add('hidden');
+
+      let options = [];
+      if (type === 'support_ticket') options = ['open', 'closed'];
+      else if (type === 'lost_item') options = ['open', 'resolved', 'closed'];
+      else if (type === 'refund_request') { options = ['pending', 'approved', 'rejected']; amountWrap.classList.remove('hidden'); }
+      else if (type === 'incident') options = ['resolved', 'rejected'];
+
+      el.innerHTML = options.map(s => `<option value="${s}">${s}</option>`).join('');
+    }
+
+    async function selectCase(caseType, caseId, tripId) {
+      selected = { case_type: caseType, case_id: caseId, trip_id: tripId && String(tripId).trim() ? String(tripId).trim() : null };
+      document.getElementById('details-sub').textContent = `${caseType} #${caseId}`;
+      document.getElementById('details').innerHTML = `<div class="text-center py-10 text-gray-500"><i class="fas fa-spinner fa-spin text-3xl mb-3"></i><p class="font-bold">جاري التحميل...</p></div>`;
+
+      document.getElementById('actions').classList.add('hidden');
+      document.getElementById('evidence').classList.add('hidden');
+      document.getElementById('evidence-btn').classList.toggle('hidden', !selected.trip_id);
+
+      try {
+        let details = null;
+        if (caseType === 'incident') {
+          const data = await ApiService.request(`/admin/incidents/${encodeURIComponent(caseId)}`);
+          details = data.data;
+        } else if (caseType === 'support_ticket') {
+          const data = await ApiService.request(`/admin/support/tickets?status=all`);
+          details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
+        } else if (caseType === 'lost_item') {
+          const data = await ApiService.request(`/admin/lost-items?status=all`);
+          details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
+        } else if (caseType === 'refund_request') {
+          const data = await ApiService.request(`/admin/refund-requests?status=all`);
+          details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
+        }
+
+        if (!details) {
+          document.getElementById('details').innerHTML = `<div class="text-center py-10 text-gray-500"><i class="fas fa-circle-info text-3xl mb-3"></i><p class="font-bold">لا توجد تفاصيل</p></div>`;
+          return;
+        }
+
+        renderDetails(caseType, details);
+
+        setStatusOptions(caseType);
+        document.getElementById('action-note').value = '';
+        document.getElementById('action-amount').value = '';
+        document.getElementById('actions').classList.remove('hidden');
+      } catch (e) {
+        console.error(e);
+        document.getElementById('details').innerHTML = `<div class="text-center py-10 text-red-600"><i class="fas fa-triangle-exclamation text-3xl mb-3"></i><p class="font-extrabold">تعذر تحميل التفاصيل</p><p class="text-sm font-bold">${e.message}</p></div>`;
+      }
+    }
+
+    function renderDetails(caseType, row) {
+      const tripId = row.trip_id || selected.trip_id || null;
+      const pieces = [];
+      pieces.push(`<div class="grid grid-cols-1 md:grid-cols-3 gap-3">`
+        + `<div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Trip</p><p class="font-extrabold text-gray-800 break-all">${tripId || '--'}</p></div>`
+        + `<div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Status</p><p class="font-extrabold text-gray-800">${row.status || '--'}</p></div>`
+        + `<div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Created</p><p class="font-extrabold text-gray-800">${fmtDate(row.created_at)}</p></div>`
+        + `</div>`);
+
+      const title = row.title || row.category || (caseType === 'refund_request' ? 'Refund Request' : caseType);
+      pieces.push(`<div class="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Title</p><p class="font-extrabold text-gray-800">${title || '--'}</p></div>`);
+
+      const desc = row.description || row.reason || '--';
+      pieces.push(`<div class="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Description</p><p class="text-sm font-bold text-gray-700 whitespace-pre-wrap">${desc || '--'}</p></div>`);
+
+      if (caseType === 'refund_request') {
+        pieces.push(`<div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">`
+          + `<div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Amount Requested</p><p class="font-extrabold text-gray-800" dir="ltr">${row.amount_requested ?? '--'} SAR</p></div>`
+          + `<div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Passenger</p><p class="font-extrabold text-gray-800">${row.user_phone || '--'}</p></div>`
+          + `<div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Trip Status</p><p class="font-extrabold text-gray-800">${row.trip_status || '--'}</p></div>`
+          + `</div>`);
+      }
+
+      if (caseType === 'incident') {
+        const pkg = row.package_json ? JSON.stringify(row.package_json, null, 2) : '';
+        pieces.push(`<div class="mt-3"><p class="text-xs text-gray-500 font-extrabold mb-2">Package JSON</p><textarea class="w-full h-72 px-3 py-2.5 rounded-2xl border border-gray-200 font-mono text-xs" readonly>${pkg}</textarea></div>`);
+      }
+
+      document.getElementById('details').innerHTML = pieces.join('');
+    }
+
+    async function applyAction() {
+      if (!selected) return;
+      const status = document.getElementById('action-status').value;
+      const note = (document.getElementById('action-note').value || '').trim();
+      const amount = document.getElementById('action-amount').value;
+
+      try {
+        if (selected.case_type === 'support_ticket') {
+          await ApiService.request(`/admin/support/tickets/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        } else if (selected.case_type === 'lost_item') {
+          await ApiService.request(`/admin/lost-items/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        } else if (selected.case_type === 'refund_request') {
+          const payload = { status, resolution_note: note || null };
+          if (amount && String(amount).trim()) payload.amount_approved = Number(amount);
+          await ApiService.request(`/admin/refund-requests/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
+        } else if (selected.case_type === 'incident') {
+          await ApiService.request(`/admin/incidents/${encodeURIComponent(selected.case_id)}/resolve`, { method: 'PATCH', body: JSON.stringify({ status, resolution_note: note || null }) });
+        }
+
+        alert('تم تنفيذ الإجراء');
+        await refreshAll();
+        await selectCase(selected.case_type, selected.case_id, selected.trip_id || '');
+      } catch (e) {
+        console.error(e);
+        alert(`تعذر تنفيذ الإجراء: ${e.message}`);
+      }
+    }
+
+    async function downloadDriverAudio(tripId, recId) {
+      const token = ApiService.getToken ? ApiService.getToken() : getToken();
+      if (!token) return alert('لا يوجد توكن');
+
+      const url = `/api/admin/trips/${encodeURIComponent(tripId)}/driver-audio/${encodeURIComponent(recId)}/download`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) {
+        const t = await res.text().catch(()=> '');
+        throw new Error(t || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = `driver-audio-${tripId}-${recId}.bin`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+    }
+
+    async function loadEvidence() {
+      if (!selected || !selected.trip_id) return;
+      document.getElementById('evidence').classList.remove('hidden');
+      document.getElementById('evidence-body').innerHTML = `<div class="text-center py-6 text-gray-500"><i class="fas fa-spinner fa-spin text-2xl mb-2"></i><p class="font-bold">جاري تحميل الأدلة...</p></div>`;
+
+      try {
+        const data = await ApiService.request(`/admin/trips/${encodeURIComponent(selected.trip_id)}/evidence-bundle`);
+        const b = data.data;
+
+        const audio = Array.isArray(b.driver_audio) ? b.driver_audio : [];
+        const audioHtml = audio.length
+          ? `<div class="mt-2 space-y-2">${audio.map(r => `
+                <div class="flex items-center justify-between gap-2 p-3 bg-gray-50 border border-gray-200 rounded-2xl">
+                  <div class="min-w-0">
+                    <p class="font-extrabold text-gray-800">Audio #${r.id}</p>
+                    <p class="text-xs font-bold text-gray-500 truncate">${r.file_mime || '--'} • ${(r.file_size_bytes || '--')} bytes • ${fmtDate(r.created_at)}</p>
+                  </div>
+                  <button class="bg-indigo-600 text-white px-3 py-2 rounded-xl font-extrabold hover:bg-indigo-700" onclick="(async()=>{try{await downloadDriverAudio('${selected.trip_id}', ${Number(r.id)});}catch(e){alert(e.message);}})()">Download</button>
+                </div>
+              `).join('')}</div>`
+          : `<p class="text-xs font-bold text-gray-500">لا يوجد تسجيلات صوت</p>`;
+
+        const jsonPreview = JSON.stringify(b, null, 2);
+
+        document.getElementById('evidence-body').innerHTML = `
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Timeline</p><p class="font-extrabold text-gray-800">${(b.timeline || []).length}</p></div>
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Messages</p><p class="font-extrabold text-gray-800">${(b.messages || []).length}</p></div>
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Safety Events</p><p class="font-extrabold text-gray-800">${(b.safety_events || []).length}</p></div>
+          </div>
+          <div class="mt-3">
+            <p class="text-xs text-gray-500 font-extrabold mb-2">Driver Audio</p>
+            ${audioHtml}
+          </div>
+          <div class="mt-3">
+            <p class="text-xs text-gray-500 font-extrabold mb-2">Raw JSON</p>
+            <textarea class="w-full h-80 px-3 py-2.5 rounded-2xl border border-gray-200 font-mono text-xs" readonly>${jsonPreview}</textarea>
+          </div>
+        `;
+      } catch (e) {
+        console.error(e);
+        document.getElementById('evidence-body').innerHTML = `<div class="text-center py-6 text-red-600"><i class="fas fa-triangle-exclamation text-2xl mb-2"></i><p class="font-extrabold">تعذر تحميل الأدلة</p><p class="text-sm font-bold">${e.message}</p></div>`;
+      }
+    }
+
+    (function init(){
+      const t = getToken();
+      if (t) document.getElementById('token-input').value = t;
+    })();
+  </script>
+</body>
+</html>

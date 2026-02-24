@@ -95,12 +95,17 @@ function requireAuth(req, res, next) {
 function requireRole(...roles) {
     const allowed = new Set((roles || []).flat().map(r => String(r).toLowerCase()));
 
+    // Backward compatible: treat 'admin' as a group (RBAC roles)
+    const adminGroup = new Set(['admin', 'super_admin', 'support_agent', 'safety_ops', 'finance_ops', 'ops_manager']);
+    const allowAnyAdmin = allowed.has('admin');
+
     return (req, res, next) => {
         if (!req.auth) {
             return res.status(401).json({ success: false, error: 'Unauthorized' });
         }
         const role = String(req.auth.role || '').toLowerCase();
-        if (!allowed.has(role)) {
+        const ok = allowed.has(role) || (allowAnyAdmin && adminGroup.has(role));
+        if (!ok) {
             return res.status(403).json({ success: false, error: 'Forbidden' });
         }
         return next();

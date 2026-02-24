@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ops Radar - Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <style>
+    body { font-family: 'Cairo', sans-serif; }
+    #map { height: 72vh; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div class="min-h-screen p-6">
+    <div class="max-w-7xl mx-auto">
+      <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-6 mb-6 text-white">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 class="text-2xl md:text-3xl font-extrabold">
+              <i class="fas fa-radar ml-2"></i>
+              Ops Radar
+            </h1>
+            <p class="text-indigo-100 text-sm mt-1">خريطة تشغيل: السائقين الحيين + Pending Rides + Incidents المفتوحة</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="refreshSnapshot()" class="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow">
+              <i class="fas fa-sync-alt ml-2"></i>
+              تحديث
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow border border-gray-100 overflow-hidden">
+          <div class="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-extrabold text-gray-800">الخريطة</span>
+              <span id="last-updated" class="text-xs font-bold text-gray-500">--</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs font-extrabold">
+              <span class="px-2 py-1 rounded-full bg-blue-50 text-blue-700">Drivers</span>
+              <span class="px-2 py-1 rounded-full bg-amber-50 text-amber-700">Pending</span>
+              <span class="px-2 py-1 rounded-full bg-red-50 text-red-700">Incidents</span>
+            </div>
+          </div>
+          <div id="map"></div>
+        </div>
+
+        <div class="lg:col-span-1 space-y-4">
+          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">Admin Token (Bearer)</label>
+                <input id="token-input" type="password" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="الصق التوكن هنا" />
+                <p class="text-[11px] text-gray-500 mt-1">يتحفظ في localStorage تحت akwadra_token</p>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="saveToken()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">حفظ</button>
+                <button onclick="clearToken()" class="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-extrabold hover:bg-gray-200">مسح</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+            <h2 class="text-sm font-extrabold text-gray-800 mb-3">ملخص</h2>
+            <div class="grid grid-cols-3 gap-2">
+              <div class="bg-blue-50 rounded-2xl p-3 border border-blue-100">
+                <p class="text-[11px] font-extrabold text-blue-700">Drivers</p>
+                <p id="count-drivers" class="text-xl font-extrabold text-blue-800">0</p>
+              </div>
+              <div class="bg-amber-50 rounded-2xl p-3 border border-amber-100">
+                <p class="text-[11px] font-extrabold text-amber-700">Pending</p>
+                <p id="count-pending" class="text-xl font-extrabold text-amber-800">0</p>
+              </div>
+              <div class="bg-red-50 rounded-2xl p-3 border border-red-100">
+                <p class="text-[11px] font-extrabold text-red-700">Incidents</p>
+                <p id="count-incidents" class="text-xl font-extrabold text-red-800">0</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+            <h2 class="text-sm font-extrabold text-gray-800 mb-3">آخر Incidents</h2>
+            <div id="incidents-list" class="space-y-2 text-sm"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="api-service.js"></script>
+  <script>
+    const TOKEN_KEY = 'akwadra_token';
+    let map = null;
+    let layerDrivers = null;
+    let layerPending = null;
+    let layerIncidents = null;
+
+    function getToken() { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } }
+    function setToken(t) { try { localStorage.setItem(TOKEN_KEY, String(t||'').trim()); } catch(e) {} }
+
+    function saveToken() {
+      const v = document.getElementById('token-input').value;
+      if (!v || !v.trim()) return alert('أدخل التوكن');
+      setToken(v);
+      alert('تم حفظ التوكن');
+    }
+    function clearToken() {
+      try { localStorage.removeItem(TOKEN_KEY); } catch(e) {}
+      document.getElementById('token-input').value = '';
+      alert('تم مسح التوكن');
+    }
+
+    function initMap() {
+      if (map) return;
+      map = L.map('map', { zoomControl: true }).setView([30.0444, 31.2357], 11);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+      layerDrivers = L.layerGroup().addTo(map);
+      layerPending = L.layerGroup().addTo(map);
+      layerIncidents = L.layerGroup().addTo(map);
+    }
+
+    function icon(color) {
+      return L.divIcon({
+        className: '',
+        html: `<div style="width:14px;height:14px;border-radius:9999px;background:${color};border:2px solid white;box-shadow:0 1px 6px rgba(0,0,0,0.25)"></div>`,
+        iconSize: [14,14],
+        iconAnchor: [7,7]
+      });
+    }
+
+    function safeNum(v) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function renderSnapshot(s) {
+      layerDrivers.clearLayers();
+      layerPending.clearLayers();
+      layerIncidents.clearLayers();
+
+      const drivers = Array.isArray(s.drivers_live) ? s.drivers_live : [];
+      const pending = Array.isArray(s.pending_rides) ? s.pending_rides : [];
+      const incidents = Array.isArray(s.open_incidents) ? s.open_incidents : [];
+
+      document.getElementById('count-drivers').textContent = drivers.length;
+      document.getElementById('count-pending').textContent = pending.length;
+      document.getElementById('count-incidents').textContent = incidents.length;
+      document.getElementById('last-updated').textContent = `آخر تحديث: ${new Date().toLocaleTimeString('ar-EG')}`;
+
+      for (const d of drivers) {
+        const lat = safeNum(d.last_lat);
+        const lng = safeNum(d.last_lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const risk = d.risk_level ? String(d.risk_level).toLowerCase() : '';
+        const color = risk === 'high' ? '#ef4444' : (risk === 'medium' ? '#7c3aed' : '#2563eb');
+        const title = `Driver #${d.id} • ${d.name || '--'} • ${d.status || '--'}${risk ? `<br/>Risk: ${risk} • ${d.risk_note || ''}` : ''}`;
+        L.marker([lat, lng], { icon: icon(color) }).addTo(layerDrivers).bindPopup(title);
+      }
+
+      for (const r of pending) {
+        const lat = safeNum(r.pickup_lat);
+        const lng = safeNum(r.pickup_lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const title = `Pending ${r.request_id || r.id} • ${r.status || '--'}<br/>${r.pickup_location || ''}`;
+        L.marker([lat, lng], { icon: icon('#f59e0b') }).addTo(layerPending).bindPopup(title);
+      }
+
+      for (const i of incidents) {
+        const lat = safeNum(i.pickup_lat);
+        const lng = safeNum(i.pickup_lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const t = i.title ? String(i.title) : (i.kind || 'incident');
+        const title = `Incident #${i.id} • ${t}<br/>Trip: ${i.trip_id || '--'}<br/>${i.pickup_location || ''}`;
+        L.marker([lat, lng], { icon: icon('#ef4444') }).addTo(layerIncidents).bindPopup(title);
+      }
+
+      const list = document.getElementById('incidents-list');
+      if (!incidents.length) {
+        list.innerHTML = `<div class="text-center py-6 text-gray-500"><i class="fas fa-circle-check text-2xl mb-2"></i><p class="font-bold">لا توجد Incidents مفتوحة</p></div>`;
+      } else {
+        list.innerHTML = incidents.slice(0, 12).map(i => {
+          const t = i.title ? String(i.title) : (i.kind || 'incident');
+          return `
+            <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50">
+              <p class="font-extrabold text-gray-800">#${i.id} • ${t}</p>
+              <p class="text-xs font-bold text-gray-500 truncate">Trip: ${i.trip_id || '--'} • ${new Date(i.created_at).toLocaleString('ar-EG')}</p>
+            </div>
+          `;
+        }).join('');
+      }
+
+      if (drivers.length || pending.length) {
+        try {
+          const bounds = [];
+          for (const d of drivers) {
+            const lat = safeNum(d.last_lat);
+            const lng = safeNum(d.last_lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) bounds.push([lat,lng]);
+          }
+          for (const r of pending) {
+            const lat = safeNum(r.pickup_lat);
+            const lng = safeNum(r.pickup_lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) bounds.push([lat,lng]);
+          }
+          if (bounds.length) map.fitBounds(bounds, { padding: [24,24] });
+        } catch(e) {}
+      }
+    }
+
+    async function refreshSnapshot() {
+      initMap();
+      try {
+        const data = await ApiService.request('/admin/ops/snapshot');
+        renderSnapshot(data.data || {});
+      } catch (e) {
+        console.error(e);
+        alert(`تعذر تحميل Ops Snapshot: ${e.message}`);
+      }
+    }
+
+    (function init(){
+      const t = getToken();
+      if (t) document.getElementById('token-input').value = t;
+      initMap();
+      refreshSnapshot();
+      setInterval(refreshSnapshot, 10000);
+    })();
+  </script>
+</body>
+</html>

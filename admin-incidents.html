@@ -100,6 +100,7 @@
     </div>
   </div>
 
+  <script src="api-service.js"></script>
   <script>
     const TOKEN_KEY = 'akwadra_token';
     let selectedIncidentId = null;
@@ -128,20 +129,7 @@
     }
 
     async function api(path, options = {}) {
-      const token = getToken();
-      const res = await fetch(`/api${path}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-          ...(options.headers || {})
-        },
-        ...options
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      return data;
+      return ApiService.request(path, options);
     }
 
     function fmtDate(v) {
@@ -267,5 +255,6 @@
       if (t) document.getElementById('token-input').value = t;
     })();
   </script>
+
 </body>
 </html>

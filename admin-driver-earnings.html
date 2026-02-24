@@ -41,6 +41,12 @@
                         تحديث يدوي
                     </button>
                 </div>
+
+                <div class="mt-4 flex flex-wrap gap-2 items-center">
+                    <input id="token-input" type="password" class="flex-1 min-w-[260px] px-4 py-3 rounded-xl text-gray-800 font-bold" placeholder="Admin Token (Bearer)" />
+                    <button onclick="saveToken()" class="bg-indigo-900/30 hover:bg-indigo-900/40 text-white px-5 py-3 rounded-xl font-extrabold">حفظ التوكن</button>
+                    <button onclick="clearToken()" class="bg-white/20 hover:bg-white/25 text-white px-5 py-3 rounded-xl font-extrabold">مسح</button>
+                </div>
             </div>
 
             <!-- Stats Cards -->
@@ -201,22 +207,29 @@
         </div>
     </div>
 
+    <script src="api-service.js"></script>
     <script>
         let driversData = [];
+
+        const TOKEN_KEY = 'akwadra_token';
+        function saveToken() {
+            const v = document.getElementById('token-input').value;
+            if (!v || !v.trim()) return alert('أدخل التوكن');
+            try { localStorage.setItem(TOKEN_KEY, String(v).trim()); } catch (e) {}
+            alert('تم حفظ التوكن');
+        }
+        function clearToken() {
+            try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+            document.getElementById('token-input').value = '';
+            alert('تم مسح التوكن');
+        }
 
         // Load all drivers
         async function loadDrivers() {
             try {
                 // Add timestamp to prevent caching
                 const timestamp = new Date().getTime();
-                const response = await fetch(`/api/drivers?t=${timestamp}`, {
-                    headers: {
-                        'Cache-Control': 'no-cache, no-store, must-revalidate',
-                        'Pragma': 'no-cache',
-                        'Expires': '0'
-                    }
-                });
-                const data = await response.json();
+                const data = await ApiService.request(`/drivers?t=${timestamp}`);
                 
                 if (!data.success) {
                     throw new Error('Failed to load drivers');
@@ -371,15 +384,10 @@
             };
 
             try {
-                const response = await fetch(`/api/drivers/${driverId}/earnings/update`, {
+                const result = await ApiService.request(`/drivers/${driverId}/earnings/update`, {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
                     body: JSON.stringify(data)
                 });
-
-                const result = await response.json();
 
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to update');
@@ -447,6 +455,10 @@
 
         // Load on page load
         document.addEventListener('DOMContentLoaded', () => {
+            try {
+                const t = localStorage.getItem(TOKEN_KEY);
+                if (t) document.getElementById('token-input').value = t;
+            } catch (e) {}
             loadDrivers();
             startAutoRefresh();
             console.log('✅ Auto-refresh enabled: البيانات تتحدث كل 5 ثواني');

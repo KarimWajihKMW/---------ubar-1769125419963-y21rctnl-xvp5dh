@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audit Log - Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { font-family: 'Cairo', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div class="min-h-screen p-6">
+    <div class="max-w-6xl mx-auto">
+      <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-6 mb-6 text-white">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 class="text-2xl md:text-3xl font-extrabold"><i class="fas fa-clipboard-list ml-2"></i>Audit Log</h1>
+            <p class="text-indigo-100 text-sm mt-1">سجل أفعال الأدمن (RBAC/Audit)</p>
+          </div>
+          <button onclick="refresh()" class="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow">
+            <i class="fas fa-sync-alt ml-2"></i>تحديث
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5 border border-gray-100 mb-4">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label class="block text-xs font-extrabold text-gray-600 mb-1">Admin Token</label>
+            <input id="token" type="password" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="Bearer token" />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold text-gray-600 mb-1">Actor User ID</label>
+            <input id="actor" type="number" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري" />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold text-gray-600 mb-1">Entity Type</label>
+            <input id="etype" type="text" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="support_ticket / refund_request ..." />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold text-gray-600 mb-1">Entity ID</label>
+            <input id="eid" type="text" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري" />
+          </div>
+        </div>
+        <div class="mt-3 flex gap-2">
+          <button onclick="saveToken()" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">حفظ التوكن</button>
+          <button onclick="clearToken()" class="bg-gray-100 text-gray-700 px-4 py-2.5 rounded-xl font-extrabold hover:bg-gray-200">مسح</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+        <div id="rows" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="api-service.js"></script>
+  <script>
+    const TOKEN_KEY = 'akwadra_token';
+    function saveToken(){ const v=document.getElementById('token').value; if(!v||!v.trim()) return alert('أدخل التوكن'); try{localStorage.setItem(TOKEN_KEY, v.trim());}catch(e){} alert('تم'); }
+    function clearToken(){ try{localStorage.removeItem(TOKEN_KEY);}catch(e){} document.getElementById('token').value=''; }
+
+    function fmt(v){ const d=new Date(v); if(Number.isNaN(d.getTime())) return '--'; return d.toLocaleString('ar-EG'); }
+
+    async function refresh(){
+      const el=document.getElementById('rows');
+      el.innerHTML = '<div class="text-center py-10 text-gray-500"><i class="fas fa-spinner fa-spin text-3xl mb-3"></i><p class="font-bold">جاري التحميل...</p></div>';
+      try{
+        const params = new URLSearchParams();
+        const actor=document.getElementById('actor').value;
+        const etype=document.getElementById('etype').value;
+        const eid=document.getElementById('eid').value;
+        if(actor) params.set('actor_user_id', actor);
+        if(etype && etype.trim()) params.set('entity_type', etype.trim());
+        if(eid && eid.trim()) params.set('entity_id', eid.trim());
+        params.set('limit','100');
+        const data = await ApiService.request(`/admin/audit?${params.toString()}`);
+        const rows = Array.isArray(data.data) ? data.data : [];
+        if(!rows.length){
+          el.innerHTML = '<div class="text-center py-10 text-gray-500"><i class="fas fa-circle-check text-3xl mb-3"></i><p class="font-bold">لا توجد سجلات</p></div>';
+          return;
+        }
+        el.innerHTML = rows.map(r => {
+          const meta = r.meta_json ? JSON.stringify(r.meta_json) : '';
+          return `
+            <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <p class="font-extrabold text-gray-800">${r.action}</p>
+                <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${fmt(r.created_at)}</span>
+              </div>
+              <p class="text-xs font-bold text-gray-500">actor: ${r.actor_user_id || '--'} (${r.actor_role || '--'}) • entity: ${r.entity_type || '--'}:${r.entity_id || '--'}</p>
+              ${meta ? `<textarea class="mt-2 w-full h-20 px-3 py-2.5 rounded-2xl border border-gray-200 font-mono text-xs" readonly>${meta}</textarea>` : ''}
+            </div>
+          `;
+        }).join('');
+      }catch(e){
+        console.error(e);
+        el.innerHTML = `<div class="text-center py-10 text-red-600"><i class="fas fa-triangle-exclamation text-3xl mb-3"></i><p class="font-extrabold">تعذر التحميل</p><p class="text-sm font-bold">${e.message}</p></div>`;
+      }
+    }
+
+    (function init(){
+      try{ const t=localStorage.getItem(TOKEN_KEY); if(t) document.getElementById('token').value=t; }catch(e){}
+      refresh();
+    })();
+  </script>
+</body>
+</html>

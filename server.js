@@ -64,6 +64,126 @@ const {
     requireRole
 } = require('./auth');
 
+// ------------------------------
+// Admin RBAC (roles + permissions)
+// ------------------------------
+
+const ADMIN_ROLES = new Set(['admin', 'super_admin', 'support_agent', 'safety_ops', 'finance_ops', 'ops_manager']);
+
+const ADMIN_ROLE_PERMISSIONS = Object.freeze({
+    // Legacy: keep full access for existing deployments
+    admin: [
+        'admin.*'
+    ],
+    super_admin: [
+        'admin.*'
+    ],
+    support_agent: [
+        'admin.cases.read',
+        'admin.support.read',
+        'admin.support.write',
+        'admin.lost.read',
+        'admin.lost.write',
+        'admin.incidents.read'
+    ],
+    safety_ops: [
+        'admin.cases.read',
+        'admin.incidents.read',
+        'admin.incidents.write',
+        'admin.evidence.read',
+        'admin.audio.download',
+        'admin.ops.read'
+    ],
+    finance_ops: [
+        'admin.cases.read',
+        'admin.refunds.read',
+        'admin.refunds.write',
+        'admin.refunds.approve',
+        'admin.wallet.write'
+    ],
+    ops_manager: [
+        'admin.ops.read',
+        'admin.ops.write',
+        'admin.pending_rides.read',
+        'admin.pending_rides.write',
+        'admin.pickuphubs.read',
+        'admin.pickuphubs.write',
+        'admin.incidents.read'
+    ]
+});
+
+function isAdminRole(role) {
+    const r = role !== undefined && role !== null ? String(role).toLowerCase() : '';
+    return ADMIN_ROLES.has(r);
+}
+
+function permissionsForRole(role) {
+    const r = role !== undefined && role !== null ? String(role).toLowerCase() : '';
+    const perms = ADMIN_ROLE_PERMISSIONS[r] || [];
+    // Expand wildcard for internal checks
+    if (perms.includes('admin.*')) return ['admin.*'];
+    return perms.slice();
+}
+
+function getAuthPermissions(req) {
+    const role = String(req.auth?.role || '').toLowerCase();
+    const perms = req.auth?.perms;
+    if (Array.isArray(perms) && perms.length) {
+        return perms.map(p => String(p)).filter(Boolean);
+    }
+    // Backward-compat: compute from role
+    if (isAdminRole(role)) return permissionsForRole(role);
+    return [];
+}
+
+function hasPermission(req, permission) {
+    const want = String(permission || '').trim();
+    if (!want) return false;
+    const perms = getAuthPermissions(req);
+    if (!perms.length) return false;
+    if (perms.includes('admin.*')) return want.toLowerCase().startsWith('admin.');
+    return perms.includes(want);
+}
+
+function requirePermission(...permissions) {
+    const wanted = (permissions || []).flat().map(p => String(p)).filter(Boolean);
+    return (req, res, next) => {
+        if (!req.auth) return res.status(401).json({ success: false, error: 'Unauthorized' });
+        const role = String(req.auth?.role || '').toLowerCase();
+        if (!isAdminRole(role)) return res.status(403).json({ success: false, error: 'Forbidden' });
+        // If no permissions specified, just require admin role.
+        if (!wanted.length) return next();
+        for (const p of wanted) {
+            if (hasPermission(req, p)) return next();
+        }
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+    };
+}
+
+async function writeAdminAudit(req, { action, entity_type = null, entity_id = null, meta = null } = {}) {
+    try {
+        const actorUserId = req?.auth?.uid ? Number(req.auth.uid) : null;
+        const actorRole = String(req?.auth?.role || '').toLowerCase();
+        if (!actorUserId || !isAdminRole(actorRole)) return;
+        const safeAction = String(action || '').slice(0, 120);
+        if (!safeAction) return;
+        await pool.query(
+            `INSERT INTO admin_audit_logs (actor_user_id, actor_role, action, entity_type, entity_id, meta_json)
+             VALUES ($1,$2,$3, NULLIF($4,''), NULLIF($5,''), $6::jsonb)`,
+            [
+                actorUserId,
+                actorRole,
+                safeAction,
+                entity_type ? String(entity_type).slice(0, 60) : '',
+                entity_id !== null && entity_id !== undefined ? String(entity_id).slice(0, 80) : '',
+                meta ? JSON.stringify(meta) : null
+            ]
+        );
+    } catch (e) {
+        // non-blocking
+    }
+}
+
 // Import driver sync system
 const driverSync = require('./driver-sync-system');
 
@@ -711,7 +831,27 @@ function normalizePhoneForStore(input) {
 }
 
 // Middleware
-app.use(cors());
+const corsOriginsRaw = process.env.CORS_ORIGINS ? String(process.env.CORS_ORIGINS) : '';
+const corsOrigins = corsOriginsRaw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+app.use(cors({
+    origin: (origin, cb) => {
+        // Allow non-browser / same-origin (no Origin header)
+        if (!origin) return cb(null, true);
+
+        // Default dev behavior: allow all if not configured
+        if (!corsOrigins.length) return cb(null, true);
+
+        if (corsOrigins.includes(origin)) return cb(null, true);
+        return cb(new Error('CORS not allowed'));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 // Needed for Apple OAuth when using response_mode=form_post
 app.use(express.urlencoded({ extended: true }));
@@ -738,11 +878,32 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(express.static('.'));
-app.use('/uploads', express.static(uploadsDir));
-
-// Attach decoded JWT (if present) to req.auth for all routes (including non-/api aliases)
+// Attach decoded JWT (if present) to req.auth for all routes (including static file guards)
 app.use(authMiddleware);
+
+app.use(express.static('.'));
+
+// Protect /uploads from public access to sensitive files
+app.use('/uploads', (req, res, next) => {
+    try {
+        if (String(req.method || '').toUpperCase() !== 'GET') {
+            return res.status(405).end();
+        }
+
+        const p = String(req.path || '');
+        const ext = path.extname(p).toLowerCase();
+        const allowPublic = ext === '.jpg' || ext === '.jpeg' || ext === '.png' || ext === '.webp' || ext === '.gif';
+        if (allowPublic) return next();
+
+        // Require auth for PDFs and any other types (documents)
+        if (!req.auth) {
+            return res.status(401).json({ success: false, error: 'Unauthorized' });
+        }
+        return next();
+    } catch (e) {
+        return res.status(500).json({ success: false, error: 'upload_guard_failed' });
+    }
+}, express.static(uploadsDir));
 
 const DEFAULT_ADMIN_USERS = [
     {
@@ -750,14 +911,14 @@ const DEFAULT_ADMIN_USERS = [
         name: 'عبدالرحمن إبراهيم',
         email: 'admin@ubar.sa',
         password: '12345678',
-        role: 'admin'
+        role: 'super_admin'
     },
     {
         phone: '0556789012',
         name: 'هند خالد',
         email: 'admin2@ubar.sa',
         password: '12345678',
-        role: 'admin'
+        role: 'support_agent'
     }
 ];
 
@@ -1043,6 +1204,427 @@ async function ensureWalletTables() {
         console.error('❌ Failed to ensure wallet tables:', err.message);
     }
 }
+
+async function ensureAdminAuditTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_audit_logs (
+                id BIGSERIAL PRIMARY KEY,
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                actor_role VARCHAR(40),
+                action VARCHAR(120) NOT NULL,
+                entity_type VARCHAR(60),
+                entity_id VARCHAR(80),
+                meta_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_logs(created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_audit_actor ON admin_audit_logs(actor_user_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_audit_entity ON admin_audit_logs(entity_type, entity_id, created_at DESC);');
+        console.log('✅ Admin audit logs table ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure admin audit logs:', err.message);
+    }
+}
+
+async function ensureAdminPlaybooksTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_playbooks (
+                key TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                config_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_playbook_runs (
+                id BIGSERIAL PRIMARY KEY,
+                playbook_key TEXT REFERENCES admin_playbooks(key) ON DELETE SET NULL,
+                event_type TEXT,
+                entity_type TEXT,
+                entity_id TEXT,
+                ok BOOLEAN NOT NULL DEFAULT true,
+                result_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_playbook_runs_created ON admin_playbook_runs(created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_playbook_runs_key ON admin_playbook_runs(playbook_key, created_at DESC);');
+        console.log('✅ Admin playbooks tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure admin playbooks:', err.message);
+    }
+}
+
+async function ensureDriverRiskColumns() {
+    try {
+        await pool.query('ALTER TABLE drivers ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);');
+        await pool.query('ALTER TABLE drivers ADD COLUMN IF NOT EXISTS risk_note TEXT;');
+        await pool.query('ALTER TABLE drivers ADD COLUMN IF NOT EXISTS risk_flags_json JSONB;');
+        await pool.query('ALTER TABLE drivers ADD COLUMN IF NOT EXISTS risk_updated_at TIMESTAMP;');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_drivers_risk_level ON drivers(risk_level, risk_updated_at DESC);');
+        console.log('✅ Driver risk flag columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure driver risk columns:', err.message);
+    }
+}
+
+async function ensureDefaultAdminPlaybooks() {
+    try {
+        const defaults = [
+            {
+                key: 'refund_high_value_requires_finance',
+                title: 'Refund عالي القيمة → Finance approval + Ticket + Audit',
+                enabled: true,
+                config: {
+                    threshold_amount: 200,
+                    ticket_category: 'finance_refund_review'
+                }
+            },
+            {
+                key: 'sos_incident_escalation',
+                title: 'SOS → فتح Incident عالي الأولوية + Audit',
+                enabled: true,
+                config: {
+                    incident_kind: 'safety',
+                    incident_title: 'SOS من الكابتن'
+                }
+            },
+            {
+                key: 'driver_repeated_complaints_risk_flag',
+                title: 'تكرار شكاوى على سائق → Risk Flag يظهر في Ops Radar',
+                enabled: true,
+                config: {
+                    window_days: 30,
+                    min_cases: 3
+                }
+            }
+        ];
+
+        for (const p of defaults) {
+            await pool.query(
+                `INSERT INTO admin_playbooks (key, title, enabled, config_json)
+                 VALUES ($1,$2,$3,$4::jsonb)
+                 ON CONFLICT (key) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    config_json = EXCLUDED.config_json`,
+                [p.key, p.title, !!p.enabled, JSON.stringify(p.config || {})]
+            );
+        }
+        console.log('✅ Default admin playbooks ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure default admin playbooks:', err.message);
+    }
+}
+
+async function isPlaybookEnabled(key) {
+    const k = String(key || '').trim();
+    if (!k) return false;
+    const r = await pool.query('SELECT enabled FROM admin_playbooks WHERE key = $1 LIMIT 1', [k]);
+    const row = r.rows[0] || null;
+    return !!row?.enabled;
+}
+
+async function getPlaybookConfig(key) {
+    const k = String(key || '').trim();
+    if (!k) return {};
+    const r = await pool.query('SELECT config_json FROM admin_playbooks WHERE key = $1 LIMIT 1', [k]);
+    return r.rows?.[0]?.config_json || {};
+}
+
+async function recordPlaybookRun({ playbookKey, eventType, entityType, entityId, ok = true, result = null }) {
+    try {
+        await pool.query(
+            `INSERT INTO admin_playbook_runs (playbook_key, event_type, entity_type, entity_id, ok, result_json)
+             VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+            [
+                playbookKey ? String(playbookKey) : null,
+                eventType ? String(eventType) : null,
+                entityType ? String(entityType) : null,
+                entityId ? String(entityId) : null,
+                !!ok,
+                result ? JSON.stringify(result) : null
+            ]
+        );
+    } catch (e) {
+        // ignore
+    }
+}
+
+async function playbookRefundHighValue({ refundRequestId }) {
+    const playbookKey = 'refund_high_value_requires_finance';
+    try {
+        if (!(await isPlaybookEnabled(playbookKey))) return { ok: true, skipped: true, reason: 'disabled' };
+        const cfg = await getPlaybookConfig(playbookKey);
+        const threshold = cfg?.threshold_amount !== undefined && cfg?.threshold_amount !== null ? Number(cfg.threshold_amount) : 200;
+
+        const rrRes = await pool.query(
+            `SELECT rr.*, t.driver_id
+             FROM refund_requests rr
+             LEFT JOIN trips t ON t.id = rr.trip_id
+             WHERE rr.id = $1
+             LIMIT 1`,
+            [Number(refundRequestId)]
+        );
+        const rr = rrRes.rows[0] || null;
+        if (!rr) return { ok: false, error: 'refund_request_not_found' };
+        const amt = rr.amount_requested !== null && rr.amount_requested !== undefined ? Number(rr.amount_requested) : null;
+        if (!Number.isFinite(amt) || amt < threshold) return { ok: true, skipped: true, reason: 'below_threshold' };
+
+        // Mark as needs finance approval (reusing status to keep MVP simple)
+        // If already decided, skip.
+        const st = String(rr.status || '').toLowerCase();
+        if (st !== 'pending') return { ok: true, skipped: true, reason: 'already_decided' };
+
+        await pool.query(
+            `UPDATE refund_requests
+             SET status = 'pending',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [Number(refundRequestId)]
+        );
+
+        // Create support ticket for finance review
+        const ticketCategory = cfg?.ticket_category ? String(cfg.ticket_category).slice(0, 60) : 'finance_refund_review';
+        await pool.query(
+            `INSERT INTO support_tickets (trip_id, user_id, category, description, status)
+             VALUES ($1,$2,$3,$4,'open')`,
+            [
+                rr.trip_id ? String(rr.trip_id) : null,
+                rr.user_id ? Number(rr.user_id) : null,
+                ticketCategory,
+                `High value refund request (#${rr.id}) amount=${amt}`
+            ]
+        );
+
+        await recordPlaybookRun({
+            playbookKey,
+            eventType: 'refund_request_created',
+            entityType: 'refund_request',
+            entityId: String(refundRequestId),
+            ok: true,
+            result: { threshold_amount: threshold, amount_requested: amt, ticket_category: ticketCategory }
+        });
+
+        return { ok: true, applied: true };
+    } catch (e) {
+        await recordPlaybookRun({ playbookKey, eventType: 'refund_request_created', entityType: 'refund_request', entityId: String(refundRequestId), ok: false, result: { error: e.message } });
+        return { ok: false, error: e.message };
+    }
+}
+
+async function playbookSosEscalation({ driverId, tripId = null, message = null, lat = null, lng = null }) {
+    const playbookKey = 'sos_incident_escalation';
+    try {
+        if (!(await isPlaybookEnabled(playbookKey))) return { ok: true, skipped: true, reason: 'disabled' };
+        const cfg = await getPlaybookConfig(playbookKey);
+        const kind = cfg?.incident_kind ? String(cfg.incident_kind).slice(0, 20) : 'safety';
+        const title = cfg?.incident_title ? String(cfg.incident_title).slice(0, 120) : 'SOS من الكابتن';
+
+        const pkg = {
+            kind: 'sos',
+            driver_id: driverId || null,
+            trip_id: tripId || null,
+            coords: (Number.isFinite(lat) && Number.isFinite(lng)) ? { lat, lng } : null,
+            message: message || null,
+            created_at: new Date().toISOString()
+        };
+
+        const insert = await pool.query(
+            `INSERT INTO trip_incident_packages (trip_id, kind, status, title, description, created_by_role, created_by_driver_id, package_json)
+             VALUES ($1,$2,'open',$3,NULLIF($4,''),'driver',$5,$6::jsonb)
+             RETURNING id`,
+            [tripId ? String(tripId) : null, kind, title, message ? String(message).slice(0, 800) : '', driverId ? Number(driverId) : null, JSON.stringify(pkg)]
+        );
+
+        await recordPlaybookRun({
+            playbookKey,
+            eventType: 'driver_sos',
+            entityType: 'incident',
+            entityId: String(insert.rows?.[0]?.id || ''),
+            ok: true,
+            result: { trip_id: tripId || null, driver_id: driverId || null }
+        });
+
+        return { ok: true, incident_id: insert.rows?.[0]?.id || null };
+    } catch (e) {
+        await recordPlaybookRun({ playbookKey, eventType: 'driver_sos', entityType: 'driver', entityId: String(driverId || ''), ok: false, result: { error: e.message } });
+        return { ok: false, error: e.message };
+    }
+}
+
+async function playbookDriverRepeatedComplaints({ driverId }) {
+    const playbookKey = 'driver_repeated_complaints_risk_flag';
+    try {
+        if (!driverId) return { ok: true, skipped: true, reason: 'missing_driver' };
+        if (!(await isPlaybookEnabled(playbookKey))) return { ok: true, skipped: true, reason: 'disabled' };
+        const cfg = await getPlaybookConfig(playbookKey);
+        const windowDays = cfg?.window_days !== undefined && cfg?.window_days !== null ? Math.max(1, Math.min(180, Number(cfg.window_days))) : 30;
+        const minCases = cfg?.min_cases !== undefined && cfg?.min_cases !== null ? Math.max(1, Math.min(50, Number(cfg.min_cases))) : 3;
+
+        const counts = await pool.query(
+            `WITH t AS (
+                SELECT id
+                FROM trips
+                WHERE driver_id = $1
+                  AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+            )
+            SELECT
+                (SELECT COUNT(*)::int FROM support_tickets st WHERE st.trip_id IN (SELECT id FROM t) AND st.created_at >= NOW() - ($2 * INTERVAL '1 day')) AS support_count,
+                (SELECT COUNT(*)::int FROM trip_incident_packages ip WHERE ip.trip_id IN (SELECT id FROM t) AND ip.created_at >= NOW() - ($2 * INTERVAL '1 day')) AS incident_count`,
+            [Number(driverId), windowDays]
+        );
+
+        const supportCount = Number(counts.rows?.[0]?.support_count || 0);
+        const incidentCount = Number(counts.rows?.[0]?.incident_count || 0);
+        const total = supportCount + incidentCount;
+        if (total < minCases) return { ok: true, skipped: true, reason: 'below_threshold', total };
+
+        const level = total >= minCases + 2 ? 'high' : 'medium';
+        const flags = { repeated_complaints: { window_days: windowDays, support: supportCount, incidents: incidentCount, total } };
+        await pool.query(
+            `UPDATE drivers
+             SET risk_level = $2,
+                 risk_note = $3,
+                 risk_flags_json = $4::jsonb,
+                 risk_updated_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [Number(driverId), level, `Repeated complaints (last ${windowDays} days): total=${total}`, JSON.stringify(flags)]
+        );
+
+        await recordPlaybookRun({
+            playbookKey,
+            eventType: 'driver_case_created',
+            entityType: 'driver',
+            entityId: String(driverId),
+            ok: true,
+            result: { window_days: windowDays, min_cases: minCases, total, level }
+        });
+
+        return { ok: true, applied: true, total, level };
+    } catch (e) {
+        await recordPlaybookRun({ playbookKey, eventType: 'driver_case_created', entityType: 'driver', entityId: String(driverId || ''), ok: false, result: { error: e.message } });
+        return { ok: false, error: e.message };
+    }
+}
+
+app.get('/api/admin/playbooks', requirePermission('admin.playbooks.manage'), async (req, res) => {
+    try {
+        const rows = await pool.query(
+            `SELECT key, title, enabled, config_json, created_at, updated_at
+             FROM admin_playbooks
+             ORDER BY key ASC`
+        );
+        res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.patch('/api/admin/playbooks/:key', requirePermission('admin.playbooks.manage'), async (req, res) => {
+    try {
+        const key = String(req.params.key || '').trim();
+        const enabled = req.body?.enabled;
+        if (!key) return res.status(400).json({ success: false, error: 'Invalid key' });
+        if (typeof enabled !== 'boolean') return res.status(400).json({ success: false, error: 'enabled must be boolean' });
+        const updated = await pool.query(
+            `UPDATE admin_playbooks
+             SET enabled = $2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE key = $1
+             RETURNING key, title, enabled, config_json, updated_at`,
+            [key, enabled]
+        );
+        if (!updated.rows.length) return res.status(404).json({ success: false, error: 'Playbook not found' });
+        await writeAdminAudit(req, { action: 'playbook.toggle', entity_type: 'playbook', entity_id: key, meta: { enabled } });
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Admin audit feed (super-admin by default via admin.*)
+app.get('/api/admin/audit', requirePermission('admin.audit.read'), async (req, res) => {
+    try {
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 200) : 50;
+        const actorUserId = req.query.actor_user_id !== undefined && req.query.actor_user_id !== null ? Number(req.query.actor_user_id) : null;
+        const entityType = req.query.entity_type ? String(req.query.entity_type).slice(0, 60) : null;
+        const entityId = req.query.entity_id ? String(req.query.entity_id).slice(0, 80) : null;
+
+        const params = [];
+        let where = 'WHERE 1=1';
+        if (Number.isFinite(actorUserId) && actorUserId > 0) {
+            params.push(actorUserId);
+            where += ` AND actor_user_id = $${params.length}`;
+        }
+        if (entityType) {
+            params.push(entityType);
+            where += ` AND entity_type = $${params.length}`;
+        }
+        if (entityId) {
+            params.push(entityId);
+            where += ` AND entity_id = $${params.length}`;
+        }
+        params.push(limit);
+
+        const rows = await pool.query(
+            `SELECT id, actor_user_id, actor_role, action, entity_type, entity_id, meta_json, created_at
+             FROM admin_audit_logs
+             ${where}
+             ORDER BY created_at DESC
+             LIMIT $${params.length}`,
+            params
+        );
+        res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- RBAC Admin (manage roles) ---
+
+app.get('/api/admin/rbac/roles', requirePermission('admin.rbac.manage'), async (req, res) => {
+    try {
+        const roles = Object.keys(ADMIN_ROLE_PERMISSIONS);
+        res.json({ success: true, data: roles.map(r => ({ role: r, permissions: ADMIN_ROLE_PERMISSIONS[r] })) });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.patch('/api/admin/users/:id/role', requirePermission('admin.rbac.manage'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const role = req.body?.role !== undefined && req.body?.role !== null ? String(req.body.role).trim().toLowerCase() : '';
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+        if (!role) return res.status(400).json({ success: false, error: 'role is required' });
+
+        const allowed = new Set(['passenger', 'driver', ...Array.from(ADMIN_ROLES)]);
+        if (!allowed.has(role)) {
+            return res.status(400).json({ success: false, error: 'Invalid role' });
+        }
+
+        const updated = await pool.query(
+            `UPDATE users
+             SET role = $2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING id, phone, name, email, role, created_at, updated_at`,
+            [id, role]
+        );
+        if (!updated.rows.length) return res.status(404).json({ success: false, error: 'User not found' });
+
+        await writeAdminAudit(req, { action: 'rbac.user_role_update', entity_type: 'user', entity_id: String(id), meta: { role } });
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
 
 async function ensureCaptainFeatureTables() {
     try {
@@ -3637,7 +4219,7 @@ app.post('/api/trips/:id/witness-notes', requireRole('driver', 'admin'), audioUp
     }
 });
 
-app.get('/api/trips/:id/witness-notes', requireRole('admin'), async (req, res) => {
+app.get('/api/trips/:id/witness-notes', requirePermission('admin.evidence.read'), async (req, res) => {
     try {
         const tripId = String(req.params.id);
         const rows = await pool.query(
@@ -3754,7 +4336,7 @@ app.post('/api/trips/:id/accessibility-feedback', requireRole('passenger', 'admi
     }
 });
 
-app.post('/api/admin/pickup-hubs', requireRole('admin'), async (req, res) => {
+app.post('/api/admin/pickup-hubs', requirePermission('admin.pickuphubs.write'), async (req, res) => {
     try {
         const { title, category = null, lat, lng, is_active = true } = req.body || {};
         const latitude = Number(lat);
@@ -3768,9 +4350,116 @@ app.post('/api/admin/pickup-hubs', requireRole('admin'), async (req, res) => {
              RETURNING *`,
             [String(title), category !== null && category !== undefined ? String(category) : '', latitude, longitude, !!is_active]
         );
+        await writeAdminAudit(req, { action: 'pickup_hub.create', entity_type: 'pickup_hub', entity_id: String(insert.rows?.[0]?.id || ''), meta: { title } });
         res.status(201).json({ success: true, data: insert.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/admin/pickup-hubs', requirePermission('admin.pickuphubs.read'), async (req, res) => {
+    try {
+        const includeInactive = String(req.query.include_inactive || '').toLowerCase() === 'true' || String(req.query.include_inactive || '') === '1';
+        const where = includeInactive ? '' : 'WHERE is_active = true';
+        const rows = await pool.query(
+            `SELECT *
+             FROM pickup_hubs
+             ${where}
+             ORDER BY id DESC
+             LIMIT 1000`
+        );
+        res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.patch('/api/admin/pickup-hubs/:id', requirePermission('admin.pickuphubs.write'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
+
+        const allowed = {
+            title: (v) => (v === null || v === undefined) ? null : String(v).slice(0, 180),
+            category: (v) => (v === null || v === undefined) ? null : String(v).slice(0, 80),
+            is_active: (v) => (v === null || v === undefined) ? null : !!v,
+            wheelchair_accessible: (v) => (v === null || v === undefined) ? null : !!v,
+            ramp_available: (v) => (v === null || v === undefined) ? null : !!v,
+            low_traffic: (v) => (v === null || v === undefined) ? null : !!v,
+            good_lighting: (v) => (v === null || v === undefined) ? null : !!v,
+            lat: (v) => (v === null || v === undefined) ? null : Number(v),
+            lng: (v) => (v === null || v === undefined) ? null : Number(v)
+        };
+
+        const fields = [];
+        const params = [];
+        const meta = {};
+
+        for (const k of Object.keys(allowed)) {
+            if (!(k in (req.body || {}))) continue;
+            const parsed = allowed[k](req.body[k]);
+            if (k === 'lat' || k === 'lng') {
+                if (parsed !== null && !Number.isFinite(parsed)) {
+                    return res.status(400).json({ success: false, error: `Invalid ${k}` });
+                }
+            }
+            params.push(parsed);
+            fields.push(`${k} = $${params.length}`);
+            meta[k] = parsed;
+        }
+
+        if (!fields.length) return res.status(400).json({ success: false, error: 'No fields to update' });
+        params.push(id);
+        const updated = await pool.query(
+            `UPDATE pickup_hubs
+             SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $${params.length}
+             RETURNING *`,
+            params
+        );
+        if (!updated.rows.length) return res.status(404).json({ success: false, error: 'Hub not found' });
+
+        await writeAdminAudit(req, { action: 'pickup_hub.update', entity_type: 'pickup_hub', entity_id: String(id), meta });
+        res.json({ success: true, data: updated.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/pickup-hubs/metrics', requirePermission('admin.pickuphubs.read'), async (req, res) => {
+    try {
+        const days = Number.isFinite(Number(req.query.days)) ? Math.max(1, Math.min(180, Number(req.query.days))) : 30;
+        const rows = await pool.query(
+            `SELECT
+                h.id AS hub_id,
+                h.title,
+                h.category,
+                h.is_active,
+                COUNT(s.id)::int AS suggestions_total,
+                SUM(CASE WHEN s.status = 'accepted' THEN 1 ELSE 0 END)::int AS accepted_count,
+                SUM(CASE WHEN s.status = 'rejected' THEN 1 ELSE 0 END)::int AS rejected_count,
+                SUM(CASE WHEN s.status = 'pending' THEN 1 ELSE 0 END)::int AS pending_count
+             FROM pickup_hubs h
+             LEFT JOIN trip_pickup_suggestions s
+               ON s.hub_id = h.id
+              AND s.created_at >= NOW() - ($1 * INTERVAL '1 day')
+             GROUP BY h.id
+             ORDER BY suggestions_total DESC, h.id DESC
+             LIMIT 1000`,
+            [days]
+        );
+
+        const data = rows.rows.map(r => {
+            const accepted = Number(r.accepted_count || 0);
+            const rejected = Number(r.rejected_count || 0);
+            const decided = accepted + rejected;
+            const acceptRate = decided > 0 ? Math.round((accepted / decided) * 10000) / 100 : null;
+            return { ...r, accept_rate_percent: acceptRate };
+        });
+
+        res.json({ success: true, data, meta: { days } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
@@ -4524,7 +5213,7 @@ app.post(
 );
 
 // Admin review
-app.get('/api/admin/passenger-verifications', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/passenger-verifications', requirePermission('admin.verifications.read'), async (req, res) => {
     try {
         const status = req.query?.status ? String(req.query.status).toLowerCase() : 'pending';
         const allowed = new Set(['pending', 'approved', 'rejected']);
@@ -4547,7 +5236,7 @@ app.get('/api/admin/passenger-verifications', requireRole('admin'), async (req, 
     }
 });
 
-app.patch('/api/admin/passenger-verifications/:id', requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/passenger-verifications/:id', requirePermission('admin.verifications.write'), async (req, res) => {
     try {
         const id = Number(req.params.id);
         const nextStatus = String(req.body?.status || '').toLowerCase();
@@ -4575,7 +5264,7 @@ app.patch('/api/admin/passenger-verifications/:id', requireRole('admin'), async 
     }
 });
 
-app.get('/api/admin/passenger-verifications/:id/file/:kind', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/passenger-verifications/:id/file/:kind', requirePermission('admin.verifications.read'), async (req, res) => {
     try {
         const id = Number(req.params.id);
         const kind = String(req.params.kind || '').toLowerCase();
@@ -4915,7 +5604,7 @@ async function processGuardianCheckins({ limit = 50, triggeredBy = 'admin' } = {
 }
 
 // Admin job: process due check-ins (cron substitute)
-app.post('/api/admin/jobs/guardian-checkins/process', requireRole('admin'), async (req, res) => {
+app.post('/api/admin/jobs/guardian-checkins/process', requirePermission('admin.jobs.run'), async (req, res) => {
     try {
         const limit = req.body?.limit !== undefined && req.body?.limit !== null ? Number(req.body.limit) : 50;
         const result = await processGuardianCheckins({ limit, triggeredBy: 'admin' });
@@ -5281,7 +5970,7 @@ app.post('/api/scheduled-rides/:id/confirm', requireRole('passenger', 'admin'), 
 });
 
 // Admin/cron helper: create real trips for scheduled rides near time window
-app.post('/api/scheduled-rides/process', requireRole('admin'), async (req, res) => {
+app.post('/api/scheduled-rides/process', requirePermission('admin.jobs.run'), async (req, res) => {
     const client = await pool.connect();
     try {
         const windowMinutes = Number.isFinite(Number(req.body?.window_minutes)) ? Math.min(Math.max(Number(req.body.window_minutes), 1), 180) : 15;
@@ -6152,9 +6841,10 @@ app.post('/api/support/tickets', requireAuth, upload.single('attachment'), async
 
         if (!category) return res.status(400).json({ success: false, error: 'category is required' });
 
+        let tripRow = null;
         if (tripId) {
             const tripRes = await pool.query('SELECT id, user_id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
-            const tripRow = tripRes.rows[0] || null;
+            tripRow = tripRes.rows[0] || null;
             const access = requireTripAccess({
                 tripRow,
                 authRole,
@@ -6171,6 +6861,13 @@ app.post('/api/support/tickets', requireAuth, upload.single('attachment'), async
              RETURNING *`,
             [tripId, authUserId || null, category, description || '', attachmentPath || '']
         );
+
+        // Playbook: repeated complaints risk flag (best-effort)
+        try {
+            if (tripRow?.driver_id) {
+                playbookDriverRepeatedComplaints({ driverId: Number(tripRow.driver_id) }).catch(() => {});
+            }
+        } catch (e) {}
 
         res.status(201).json({ success: true, data: insert.rows[0] });
     } catch (err) {
@@ -6212,7 +6909,7 @@ app.get('/api/support/me/tickets', requireRole('passenger', 'admin'), async (req
     }
 });
 
-app.get('/api/admin/support/tickets', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/support/tickets', requirePermission('admin.support.read'), async (req, res) => {
     try {
         const status = req.query.status ? String(req.query.status) : null;
         const params = [];
@@ -6251,7 +6948,7 @@ app.get('/api/admin/support/tickets', requireRole('admin'), async (req, res) => 
     }
 });
 
-app.patch('/api/admin/support/tickets/:id', requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/support/tickets/:id', requirePermission('admin.support.write'), async (req, res) => {
     try {
         const id = Number(req.params.id);
         const nextStatus = req.body?.status ? String(req.body.status) : null;
@@ -6266,6 +6963,12 @@ app.patch('/api/admin/support/tickets/:id', requireRole('admin'), async (req, re
             [id, nextStatus]
         );
         if (updated.rows.length === 0) return res.status(404).json({ success: false, error: 'Ticket not found' });
+        await writeAdminAudit(req, {
+            action: 'support_ticket.status_update',
+            entity_type: 'support_ticket',
+            entity_id: String(id),
+            meta: { status: nextStatus }
+        });
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -6562,7 +7265,7 @@ app.get('/api/support/me/lost-items', requireRole('passenger', 'admin'), async (
     }
 });
 
-app.get('/api/admin/lost-items', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/lost-items', requirePermission('admin.lost.read'), async (req, res) => {
     try {
         const status = req.query.status ? String(req.query.status) : null;
         const params = [];
@@ -6589,7 +7292,7 @@ app.get('/api/admin/lost-items', requireRole('admin'), async (req, res) => {
     }
 });
 
-app.patch('/api/admin/lost-items/:id', requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/lost-items/:id', requirePermission('admin.lost.write'), async (req, res) => {
     try {
         const id = Number(req.params.id);
         const nextStatus = req.body?.status ? String(req.body.status) : null;
@@ -6605,6 +7308,12 @@ app.patch('/api/admin/lost-items/:id', requireRole('admin'), async (req, res) =>
             [id, nextStatus]
         );
         if (updated.rows.length === 0) return res.status(404).json({ success: false, error: 'Lost item not found' });
+        await writeAdminAudit(req, {
+            action: 'lost_item.status_update',
+            entity_type: 'lost_item',
+            entity_id: String(id),
+            meta: { status: nextStatus }
+        });
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -6641,6 +7350,15 @@ app.post('/api/trips/:id/refund-request', requireRole('passenger', 'admin'), asy
              RETURNING *`,
             [tripId, tripRow.user_id || authUserId || null, reason, amountRequested]
         );
+
+        // Playbooks (best-effort)
+        try { playbookRefundHighValue({ refundRequestId: insert.rows?.[0]?.id }).catch(() => {}); } catch (e) {}
+        try {
+            if (tripRow?.driver_id) {
+                playbookDriverRepeatedComplaints({ driverId: Number(tripRow.driver_id) }).catch(() => {});
+            }
+        } catch (e) {}
+
         res.status(201).json({ success: true, data: insert.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -6668,7 +7386,7 @@ app.get('/api/support/me/refund-requests', requireRole('passenger', 'admin'), as
     }
 });
 
-app.get('/api/admin/refund-requests', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/refund-requests', requirePermission('admin.refunds.read'), async (req, res) => {
     try {
         const status = req.query.status ? String(req.query.status) : null;
         const params = [];
@@ -6695,7 +7413,7 @@ app.get('/api/admin/refund-requests', requireRole('admin'), async (req, res) => 
     }
 });
 
-app.patch('/api/admin/refund-requests/:id', requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/refund-requests/:id', requirePermission('admin.refunds.write'), async (req, res) => {
     const client = await pool.connect();
     try {
         const id = Number(req.params.id);
@@ -6730,6 +7448,10 @@ app.patch('/api/admin/refund-requests/:id', requireRole('admin'), async (req, re
             : null;
 
         if (nextStatus === 'approved') {
+            if (!hasPermission(req, 'admin.refunds.approve')) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
             if (!userId) {
                 throw new Error('refund_request_missing_user');
             }
@@ -6773,12 +7495,359 @@ app.patch('/api/admin/refund-requests/:id', requireRole('admin'), async (req, re
         );
 
         await client.query('COMMIT');
+        await writeAdminAudit(req, {
+            action: 'refund_request.status_update',
+            entity_type: 'refund_request',
+            entity_id: String(id),
+            meta: {
+                status: nextStatus,
+                amount_approved: nextStatus === 'approved' ? Math.abs(amountToCredit) : null,
+                resolution_note: resolutionNote ? String(resolutionNote).slice(0, 300) : null
+            }
+        });
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
         try { await client.query('ROLLBACK'); } catch (e) {}
         res.status(500).json({ success: false, error: err.message });
     } finally {
         client.release();
+    }
+});
+
+// --- Case Inbox (Unified) ---
+
+app.get('/api/admin/cases', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const qRaw = req.query.q !== undefined && req.query.q !== null ? String(req.query.q).trim() : '';
+        const q = qRaw.slice(0, 120);
+        const qDigits = q.replace(/\D/g, '').slice(0, 30);
+        const type = req.query.type ? String(req.query.type).trim().toLowerCase() : 'all';
+        const status = req.query.status ? String(req.query.status).trim().toLowerCase() : 'all';
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 300) : 200;
+
+        const params = [];
+        const filters = [];
+        if (type && type !== 'all') {
+            params.push(type);
+            filters.push(`case_type = $${params.length}`);
+        }
+        if (status && status !== 'all') {
+            params.push(status);
+            filters.push(`LOWER(COALESCE(status,'')) = $${params.length}`);
+        }
+        if (q) {
+            const qNum = Number(q);
+            const qIsInt = Number.isFinite(qNum) && String(qNum) === q;
+            params.push(q);
+            const qParam = `$${params.length}`;
+            if (qDigits) {
+                params.push(qDigits);
+            }
+            const qDigitsParam = qDigits ? `$${params.length}` : null;
+
+            const parts = [
+                `COALESCE(trip_id,'') ILIKE '%' || ${qParam} || '%'`,
+                `COALESCE(title,'') ILIKE '%' || ${qParam} || '%'`,
+                `COALESCE(description,'') ILIKE '%' || ${qParam} || '%'`,
+                `COALESCE(user_phone,'') ILIKE '%' || ${qParam} || '%'`,
+                `COALESCE(driver_phone,'') ILIKE '%' || ${qParam} || '%'`
+            ];
+            if (qDigitsParam) {
+                parts.push(`regexp_replace(COALESCE(user_phone,''), '\\D', '', 'g') ILIKE '%' || ${qDigitsParam} || '%'`);
+                parts.push(`regexp_replace(COALESCE(driver_phone,''), '\\D', '', 'g') ILIKE '%' || ${qDigitsParam} || '%'`);
+            }
+            if (qIsInt) {
+                parts.push(`user_id = ${qParam}::bigint`);
+                parts.push(`driver_id = ${qParam}::bigint`);
+                parts.push(`case_id = ${qParam}::bigint`);
+            }
+            filters.push(`(${parts.join(' OR ')})`);
+        }
+
+        const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+        params.push(limit);
+
+        const query = `
+            WITH cases AS (
+                SELECT
+                    'support_ticket'::text AS case_type,
+                    st.id::bigint AS case_id,
+                    st.status::text AS status,
+                    st.trip_id::text AS trip_id,
+                    st.user_id::bigint AS user_id,
+                    t.driver_id::bigint AS driver_id,
+                    st.category::text AS title,
+                    st.description::text AS description,
+                    u.name::text AS user_name,
+                    u.phone::text AS user_phone,
+                    d.name::text AS driver_name,
+                    d.phone::text AS driver_phone,
+                    st.created_at
+                FROM support_tickets st
+                LEFT JOIN trips t ON t.id = st.trip_id
+                LEFT JOIN users u ON u.id = st.user_id
+                LEFT JOIN drivers d ON d.id = t.driver_id
+
+                UNION ALL
+
+                SELECT
+                    'refund_request'::text AS case_type,
+                    rr.id::bigint AS case_id,
+                    rr.status::text AS status,
+                    rr.trip_id::text AS trip_id,
+                    rr.user_id::bigint AS user_id,
+                    t.driver_id::bigint AS driver_id,
+                    'Refund Request'::text AS title,
+                    rr.reason::text AS description,
+                    u.name::text AS user_name,
+                    u.phone::text AS user_phone,
+                    d.name::text AS driver_name,
+                    d.phone::text AS driver_phone,
+                    rr.created_at
+                FROM refund_requests rr
+                LEFT JOIN trips t ON t.id = rr.trip_id
+                LEFT JOIN users u ON u.id = rr.user_id
+                LEFT JOIN drivers d ON d.id = t.driver_id
+
+                UNION ALL
+
+                SELECT
+                    'lost_item'::text AS case_type,
+                    li.id::bigint AS case_id,
+                    li.status::text AS status,
+                    li.trip_id::text AS trip_id,
+                    li.user_id::bigint AS user_id,
+                    t.driver_id::bigint AS driver_id,
+                    'Lost Item'::text AS title,
+                    li.description::text AS description,
+                    u.name::text AS user_name,
+                    u.phone::text AS user_phone,
+                    d.name::text AS driver_name,
+                    d.phone::text AS driver_phone,
+                    li.created_at
+                FROM lost_items li
+                LEFT JOIN trips t ON t.id = li.trip_id
+                LEFT JOIN users u ON u.id = li.user_id
+                LEFT JOIN drivers d ON d.id = t.driver_id
+
+                UNION ALL
+
+                SELECT
+                    'incident'::text AS case_type,
+                    ip.id::bigint AS case_id,
+                    ip.status::text AS status,
+                    ip.trip_id::text AS trip_id,
+                    ip.created_by_user_id::bigint AS user_id,
+                    t.driver_id::bigint AS driver_id,
+                    COALESCE(ip.title, 'Incident')::text AS title,
+                    ip.description::text AS description,
+                    u.name::text AS user_name,
+                    u.phone::text AS user_phone,
+                    d.name::text AS driver_name,
+                    d.phone::text AS driver_phone,
+                    ip.created_at
+                FROM trip_incident_packages ip
+                LEFT JOIN trips t ON t.id = ip.trip_id
+                LEFT JOIN users u ON u.id = ip.created_by_user_id
+                LEFT JOIN drivers d ON d.id = t.driver_id
+            )
+            SELECT *
+            FROM cases
+            ${where}
+            ORDER BY created_at DESC
+            LIMIT $${params.length};
+        `;
+
+        const rows = await pool.query(query, params);
+        res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Incident Evidence Bundle (Admin) ---
+
+app.get('/api/admin/trips/:tripId/evidence-bundle', requirePermission('admin.evidence.read'), async (req, res) => {
+    try {
+        const tripId = String(req.params.tripId);
+        const tripRes = await pool.query(
+            `SELECT t.*, u.name AS user_name, u.phone AS user_phone, u.email AS user_email,
+                    d.name AS driver_name, d.phone AS driver_phone, d.email AS driver_email
+             FROM trips t
+             LEFT JOIN users u ON u.id = t.user_id
+             LEFT JOIN drivers d ON d.id = t.driver_id
+             WHERE t.id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        let timeline = [];
+        let messages = [];
+        let waitProof = null;
+        let safetyEvents = [];
+        let driverAudio = [];
+        let witnessNotes = [];
+
+        try {
+            const r = await pool.query(
+                `SELECT id, trip_id, seq, event_type, payload_json, prev_hash, hash, created_at
+                 FROM trip_timeline_events
+                 WHERE trip_id = $1
+                 ORDER BY seq ASC
+                 LIMIT 500`,
+                [tripId]
+            );
+            timeline = r.rows;
+        } catch (e) {
+            timeline = [];
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT id, trip_id, sender_role, sender_user_id, sender_driver_id, message, created_at,
+                        reason_key, requires_ack, ack_status, ack_by_user_id, ack_at
+                 FROM trip_messages
+                 WHERE trip_id = $1
+                 ORDER BY created_at ASC
+                 LIMIT 300`,
+                [tripId]
+            );
+            messages = r.rows;
+        } catch (e) {
+            messages = [];
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT *
+                 FROM trip_wait_proofs
+                 WHERE trip_id = $1
+                 LIMIT 1`,
+                [tripId]
+            );
+            waitProof = r.rows[0] || null;
+        } catch (e) {
+            waitProof = null;
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT id, trip_id, created_by_role, created_by_user_id, created_by_driver_id, event_type, message, created_at
+                 FROM trip_safety_events
+                 WHERE trip_id = $1
+                 ORDER BY created_at DESC
+                 LIMIT 200`,
+                [tripId]
+            );
+            safetyEvents = r.rows;
+        } catch (e) {
+            safetyEvents = [];
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT id, trip_id, driver_id, file_mime, file_size_bytes, algo, created_at
+                 FROM trip_driver_audio_recordings
+                 WHERE trip_id = $1
+                 ORDER BY created_at DESC
+                 LIMIT 50`,
+                [tripId]
+            );
+            driverAudio = r.rows;
+        } catch (e) {
+            driverAudio = [];
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT id, trip_id, driver_id, duration_seconds, file_mime, file_size_bytes, algo, created_at
+                 FROM trip_witness_notes
+                 WHERE trip_id = $1
+                 ORDER BY created_at DESC
+                 LIMIT 50`,
+                [tripId]
+            );
+            witnessNotes = r.rows;
+        } catch (e) {
+            witnessNotes = [];
+        }
+
+        await writeAdminAudit(req, { action: 'evidence_bundle.read', entity_type: 'trip', entity_id: tripId });
+
+        res.json({
+            success: true,
+            data: {
+                trip,
+                timeline,
+                messages,
+                wait_proof: waitProof,
+                safety_events: safetyEvents,
+                driver_audio: driverAudio,
+                witness_notes: witnessNotes
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Ops Snapshot (Admin) ---
+
+app.get('/api/admin/ops/snapshot', requirePermission('admin.ops.read'), async (req, res) => {
+    try {
+        const liveTtlMin = Number.isFinite(Number(req.query.location_ttl_minutes))
+            ? Math.max(1, Math.min(60, Number(req.query.location_ttl_minutes)))
+            : DRIVER_LOCATION_TTL_MINUTES;
+
+                const driversRes = await pool.query(
+                        `SELECT id, name, phone, car_type, car_plate, status, approval_status, rating,
+                                        last_lat, last_lng, last_location_at,
+                                        risk_level, risk_note, risk_updated_at, risk_flags_json
+             FROM drivers
+             WHERE last_location_at IS NOT NULL
+               AND last_location_at >= NOW() - ($1 * INTERVAL '1 minute')
+             ORDER BY last_location_at DESC
+             LIMIT 800`,
+            [liveTtlMin]
+        );
+
+        const pendingRes = await pool.query(
+            `SELECT id, request_id, trip_id, user_id, passenger_name, passenger_phone,
+                    pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                    car_type, status, created_at, updated_at
+             FROM pending_ride_requests
+             WHERE status IN ('waiting','accepted')
+             ORDER BY created_at DESC
+             LIMIT 400`
+        );
+
+        const incidentsRes = await pool.query(
+            `SELECT ip.id, ip.trip_id, ip.kind, ip.status, ip.title, ip.description, ip.created_at,
+                    t.pickup_lat, t.pickup_lng, t.dropoff_lat, t.dropoff_lng,
+                    t.pickup_location, t.dropoff_location
+             FROM trip_incident_packages ip
+             LEFT JOIN trips t ON t.id = ip.trip_id
+             WHERE ip.status = 'open'
+             ORDER BY ip.created_at DESC
+             LIMIT 300`
+        );
+
+        res.json({
+            success: true,
+            data: {
+                drivers_live: driversRes.rows,
+                pending_rides: pendingRes.rows,
+                open_incidents: incidentsRes.rows,
+                meta: {
+                    location_ttl_minutes: liveTtlMin,
+                    generated_at: new Date().toISOString()
+                }
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
@@ -8356,7 +9425,7 @@ app.get('/api/trips/:id/incidents', requireAuth, async (req, res) => {
     }
 });
 
-app.get('/api/admin/incidents', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/incidents', requirePermission('admin.incidents.read'), async (req, res) => {
     try {
         const statusRaw = req.query?.status !== undefined && req.query.status !== null ? String(req.query.status) : 'open';
         const status = ['open', 'resolved', 'rejected'].includes(statusRaw.toLowerCase()) ? statusRaw.toLowerCase() : 'open';
@@ -8376,7 +9445,7 @@ app.get('/api/admin/incidents', requireRole('admin'), async (req, res) => {
     }
 });
 
-app.get('/api/admin/incidents/:id', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/incidents/:id', requirePermission('admin.incidents.read'), async (req, res) => {
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'invalid_id' });
@@ -8395,10 +9464,30 @@ app.get('/api/admin/incidents/:id', requireRole('admin'), async (req, res) => {
     }
 });
 
-app.patch('/api/admin/incidents/:id/resolve', requireRole('admin'), async (req, res) => {
+app.patch('/api/admin/incidents/:id/resolve', requirePermission('admin.incidents.write'), async (req, res) => {
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'invalid_id' });
+
+        // Extra RBAC guard: SOS incidents are restricted to super_admin for status changes
+        try {
+            const check = await pool.query(
+                `SELECT kind, title, package_json
+                 FROM trip_incident_packages
+                 WHERE id = $1
+                 LIMIT 1`,
+                [id]
+            );
+            const row = check.rows[0] || null;
+            const pkgKind = row?.package_json && typeof row.package_json === 'object' ? String(row.package_json.kind || '') : '';
+            const isSos = String(pkgKind).toLowerCase() === 'sos' || String(row?.title || '').toLowerCase().includes('sos');
+            const actorRole = String(req.auth?.role || '').toLowerCase();
+            if (isSos && actorRole !== 'super_admin' && actorRole !== 'admin') {
+                return res.status(403).json({ success: false, error: 'Forbidden' });
+            }
+        } catch (e) {
+            // ignore check failures
+        }
 
         const statusRaw = req.body?.status !== undefined && req.body.status !== null ? String(req.body.status) : 'resolved';
         const status = ['resolved', 'rejected'].includes(statusRaw.toLowerCase()) ? statusRaw.toLowerCase() : 'resolved';
@@ -8418,6 +9507,12 @@ app.patch('/api/admin/incidents/:id/resolve', requireRole('admin'), async (req, 
         );
 
         if (updated.rows.length === 0) return res.status(404).json({ success: false, error: 'not_found' });
+        await writeAdminAudit(req, {
+            action: 'incident.resolve',
+            entity_type: 'incident',
+            entity_id: String(id),
+            meta: { status, resolution_note: note ? String(note).slice(0, 300) : null }
+        });
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -10049,7 +11144,7 @@ app.get('/api/trips/stats/summary', requireAuth, async (req, res) => {
 });
 
 // Get admin dashboard statistics
-app.get('/api/admin/dashboard/stats', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/dashboard/stats', requirePermission('admin.dashboard.read'), async (req, res) => {
     try {
         const now = new Date();
         const monthKey = monthKeyFromDate(now);
@@ -10457,7 +11552,7 @@ app.get('/api/drivers/status/:phone', async (req, res) => {
 });
 
 // Get pending driver registrations (admin only)
-app.get('/api/drivers/pending', requireRole('admin'), async (req, res) => {
+app.get('/api/drivers/pending', requirePermission('admin.ops.read'), async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT id, name, phone, email, car_type, car_plate,
@@ -10479,7 +11574,7 @@ app.get('/api/drivers/pending', requireRole('admin'), async (req, res) => {
 });
 
 // Approve or reject driver registration (admin only)
-app.patch('/api/drivers/:id/approval', requireRole('admin'), async (req, res) => {
+app.patch('/api/drivers/:id/approval', requirePermission('admin.ops.write'), async (req, res) => {
     try {
         const { id } = req.params;
         const { approval_status, rejection_reason, approved_by } = req.body;
@@ -10693,7 +11788,7 @@ app.get('/api/drivers/:id/earnings', requireRole('driver', 'admin'), async (req,
 });
 
 // Update driver earnings (Admin)
-app.put('/api/drivers/:id/earnings/update', requireRole('admin'), async (req, res) => {
+app.put('/api/drivers/:id/earnings/update', requirePermission('admin.ops.write'), async (req, res) => {
     try {
         const { id } = req.params;
         const { today_trips_count, today_earnings, total_trips, total_earnings, balance } = req.body;
@@ -10781,7 +11876,7 @@ app.put('/api/drivers/:id/earnings/update', requireRole('admin'), async (req, re
 });
 
 // Update driver profile (comprehensive update with sync)
-app.put('/api/drivers/:id/update', requireRole('admin'), async (req, res) => {
+app.put('/api/drivers/:id/update', requirePermission('admin.ops.write'), async (req, res) => {
     try {
         const { id } = req.params;
         const updates = req.body;
@@ -10812,7 +11907,7 @@ app.put('/api/drivers/:id/update', requireRole('admin'), async (req, res) => {
 });
 
 // Force sync driver data from database
-app.post('/api/drivers/:id/sync', async (req, res) => {
+app.post('/api/drivers/:id/sync', requirePermission('admin.sync.run'), async (req, res) => {
     try {
         const { id } = req.params;
         
@@ -10837,7 +11932,7 @@ app.post('/api/drivers/:id/sync', async (req, res) => {
 });
 
 // Sync all drivers
-app.post('/api/drivers/sync-all', async (req, res) => {
+app.post('/api/drivers/sync-all', requirePermission('admin.sync.run'), async (req, res) => {
     try {
         await driverSync.syncAllDriversEarnings();
         
@@ -10857,7 +11952,7 @@ app.post('/api/drivers/sync-all', async (req, res) => {
 // ==================== USERS ENDPOINTS ====================
 
 // Get users with optional filtering
-app.get('/api/users', requireRole('admin'), async (req, res) => {
+app.get('/api/users', requirePermission('admin.ops.read'), async (req, res) => {
     try {
         const { role, limit = 50, offset = 0 } = req.query;
 
@@ -11121,7 +12216,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
 // ==================== PASSENGERS ENDPOINTS ====================
 
 // Get all passengers with filtering and search
-app.get('/api/passengers', requireRole('admin'), async (req, res) => {
+app.get('/api/passengers', requirePermission('admin.ops.read'), async (req, res) => {
     try {
         const { search, limit = 50, offset = 0 } = req.query;
 
@@ -11226,7 +12321,7 @@ app.get('/api/passengers/:id', requireAuth, async (req, res) => {
 });
 
 // Create new passenger
-app.post('/api/passengers', requireRole('admin'), async (req, res) => {
+app.post('/api/passengers', requirePermission('admin.ops.write'), async (req, res) => {
     try {
         const { phone, name, email, password } = req.body;
 
@@ -11422,7 +12517,7 @@ app.put('/api/passengers/:id', requireAuth, async (req, res) => {
 });
 
 // Delete passenger
-app.delete('/api/passengers/:id', requireRole('admin'), async (req, res) => {
+app.delete('/api/passengers/:id', requirePermission('admin.ops.write'), async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -11980,6 +13075,7 @@ async function oauthCallback(provider, req, res) {
             sub: String(user.id),
             uid: user.id,
             role: user.role,
+            perms: isAdminRole(user.role) ? permissionsForRole(user.role) : [],
             email: user.email,
             phone: user.phone,
             name: user.name
@@ -12080,6 +13176,7 @@ app.post('/api/auth/login', async (req, res) => {
                     sub: String(createdUser.id),
                     uid: createdUser.id,
                     role: createdUser.role,
+                    perms: isAdminRole(createdUser.role) ? permissionsForRole(createdUser.role) : [],
                     email: createdUser.email,
                     phone: createdUser.phone,
                     name: createdUser.name
@@ -12133,6 +13230,7 @@ app.post('/api/auth/login', async (req, res) => {
             sub: String(user.id),
             uid: user.id,
             role: user.role,
+            perms: isAdminRole(user.role) ? permissionsForRole(user.role) : [],
             email: user.email,
             phone: user.phone,
             name: user.name,
@@ -12194,6 +13292,7 @@ app.post('/api/users/login', async (req, res) => {
             sub: String(user.id),
             uid: user.id,
             role: user.role,
+            perms: isAdminRole(user.role) ? permissionsForRole(user.role) : [],
             email: user.email,
             phone: user.phone,
             name: user.name
@@ -12298,7 +13397,7 @@ app.get('/api/wallet/me/transactions', requireAuth, async (req, res) => {
 });
 
 // Admin creates wallet ledger entry (credit/debit)
-app.post('/api/admin/wallet/transaction', requireRole('admin'), async (req, res) => {
+app.post('/api/admin/wallet/transaction', requirePermission('admin.wallet.write'), async (req, res) => {
     try {
         const {
             owner_type,
@@ -12361,6 +13460,19 @@ app.post('/api/admin/wallet/transaction', requireRole('admin'), async (req, res)
         }
 
         res.status(201).json({ success: true, data: insert.rows[0] });
+        await writeAdminAudit(req, {
+            action: 'wallet.transaction_create',
+            entity_type: 'wallet_transaction',
+            entity_id: String(insert.rows?.[0]?.id || ''),
+            meta: {
+                owner_type: normalizedOwnerType,
+                owner_id: normalizedOwnerId,
+                amount: normalizedAmount,
+                currency: String(currency || 'SAR').toUpperCase(),
+                reference_type: reference_type !== undefined && reference_type !== null ? String(reference_type) : null,
+                reference_id: reference_id !== undefined && reference_id !== null ? String(reference_id) : null
+            }
+        });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -12464,7 +13576,7 @@ app.post('/api/pending-rides', requireRole('passenger', 'admin'), async (req, re
 });
 
 // Get all pending ride requests
-app.get('/api/pending-rides', requireRole('admin'), async (req, res) => {
+app.get('/api/pending-rides', requirePermission('admin.pending_rides.read'), async (req, res) => {
     try {
         const { status, car_type, limit } = req.query;
         
@@ -13723,6 +14835,17 @@ app.post('/api/drivers/me/sos', requireRole('driver', 'admin'), async (req, res)
             [driverId, tripId, message || '', Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null]
         );
 
+        // Playbook: SOS escalation into admin incident package (best-effort)
+        try {
+            playbookSosEscalation({
+                driverId,
+                tripId: tripId || null,
+                message: message || null,
+                lat: Number.isFinite(lat) ? lat : null,
+                lng: Number.isFinite(lng) ? lng : null
+            }).catch(() => {});
+        } catch (e) {}
+
         // Optional: also log into trip safety events when a trip is provided
         if (tripId) {
             try {
@@ -14600,7 +15723,7 @@ app.post('/api/trips/:id/driver-audio', requireRole('driver', 'admin'), audioUpl
     }
 });
 
-app.get('/api/admin/trips/:tripId/driver-audio/:recId/download', requireRole('admin'), async (req, res) => {
+app.get('/api/admin/trips/:tripId/driver-audio/:recId/download', requirePermission('admin.audio.download'), async (req, res) => {
     try {
         const tripId = String(req.params.tripId);
         const recId = Number(req.params.recId);
@@ -14965,7 +16088,7 @@ app.get('/api/drivers/:driver_id/pending-rides', requireRole('driver', 'admin'),
 });
 
 // Cleanup expired ride requests (can be called periodically)
-app.post('/api/pending-rides/cleanup', requireRole('admin'), async (req, res) => {
+app.post('/api/pending-rides/cleanup', requirePermission('admin.pending_rides.write'), async (req, res) => {
     try {
         const result = await pool.query(`
             UPDATE pending_ride_requests
@@ -15016,6 +16139,9 @@ ensureCoreSchema()
     .then(() => ensureDefaultAdmins())
     .then(() => ensureDefaultOffers())
     .then(() => ensureWalletTables())
+    .then(() => ensureAdminAuditTables())
+    .then(() => ensureAdminPlaybooksTables())
+    .then(() => ensureDefaultAdminPlaybooks())
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
@@ -15025,6 +16151,7 @@ ensureCoreSchema()
     .then(() => ensurePickupMetaColumns())
     .then(() => ensurePendingRideColumns())
     .then(() => ensureDriverLocationColumns())
+    .then(() => ensureDriverRiskColumns())
     .then(() => ensureAdminTripCountersTables())
     .then(() => ensurePassengerFeatureTables())
     .then(() => ensureCaptainFeatureTables())

@@ -377,6 +377,12 @@
                 طلبات الرحلات في قائمة الانتظار
             </h1>
             <p>إدارة ومتابعة طلبات الرحلات التي لم يوافق عليها السائقون</p>
+
+            <div style="margin-top: 15px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <input id="tokenInput" type="password" placeholder="Admin Token (Bearer)" style="flex:1; min-width:260px; padding:10px 14px; border-radius:12px; border:2px solid #e5e7eb; font-weight:700;" />
+                <button onclick="saveToken()" style="padding:10px 14px; border-radius:12px; background:#667eea; color:white; font-weight:800; border:none;">حفظ التوكن</button>
+                <button onclick="clearToken()" style="padding:10px 14px; border-radius:12px; background:#f3f4f6; color:#111827; font-weight:800; border:none;">مسح</button>
+            </div>
         </div>
 
         <div class="stats">
@@ -427,24 +433,36 @@
         </div>
     </div>
 
+    <script src="api-service.js"></script>
     <script>
-        const API_BASE = '/api';
+        const TOKEN_KEY = 'akwadra_token';
+
+        function saveToken() {
+            const v = document.getElementById('tokenInput').value;
+            if (!v || !v.trim()) return alert('أدخل التوكن');
+            try { localStorage.setItem(TOKEN_KEY, String(v).trim()); } catch (e) {}
+            alert('تم حفظ التوكن');
+        }
+
+        function clearToken() {
+            try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+            document.getElementById('tokenInput').value = '';
+            alert('تم مسح التوكن');
+        }
 
         async function loadRequests() {
             try {
                 const statusFilter = document.getElementById('statusFilter').value;
                 const carTypeFilter = document.getElementById('carTypeFilter').value;
 
-                let url = `${API_BASE}/pending-rides?`;
-                if (statusFilter) url += `status=${statusFilter}&`;
-                if (carTypeFilter) url += `car_type=${carTypeFilter}&`;
+                const params = new URLSearchParams();
+                if (statusFilter) params.set('status', statusFilter);
+                if (carTypeFilter) params.set('car_type', carTypeFilter);
+                const data = await ApiService.request(`/pending-rides${params.toString() ? `?${params.toString()}` : ''}`);
 
-                const response = await fetch(url);
-                const data = await response.json();
-
-                if (data.success) {
-                    displayRequests(data.data);
-                    updateStats(data.data);
+                if (data && data.success) {
+                    displayRequests(data.data || []);
+                    updateStats(data.data || []);
                 }
             } catch (error) {
                 console.error('Error loading requests:', error);
@@ -587,18 +605,12 @@
 
         async function cleanupExpired() {
             try {
-                const response = await fetch(`${API_BASE}/pending-rides/cleanup`, {
-                    method: 'POST'
-                });
-                const data = await response.json();
-
-                if (data.success) {
-                    alert(`✅ ${data.message}`);
-                    loadRequests();
-                }
+                const data = await ApiService.request('/pending-rides/cleanup', { method: 'POST' });
+                alert(`✅ ${data.message || 'تم'}`);
+                loadRequests();
             } catch (error) {
                 console.error('Error cleaning up:', error);
-                alert('❌ حدث خطأ أثناء التنظيف');
+                alert(`❌ حدث خطأ أثناء التنظيف: ${error.message}`);
             }
         }
 
@@ -611,6 +623,13 @@
 
         // Initial load
         loadRequests();
+
+        (function initToken(){
+            try {
+                const t = localStorage.getItem(TOKEN_KEY);
+                if (t) document.getElementById('tokenInput').value = t;
+            } catch (e) {}
+        })();
     </script>
 </body>
 </html>
