@@ -129,6 +129,35 @@
               <label class="block text-xs font-extrabold text-gray-600 mb-1">Note (اختياري)</label>
               <textarea id="action-note" rows="3" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="ملاحظة/سبب القرار"></textarea>
             </div>
+
+            <div id="wallet-wrap" class="hidden mt-4 pt-4 border-t">
+              <h4 class="text-sm font-extrabold text-gray-800 mb-2">Wallet credit/debit (اختياري)</h4>
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Owner Type</label>
+                  <select id="wallet-owner-type" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" onchange="onWalletOwnerTypeChange()">
+                    <option value="user">user</option>
+                    <option value="driver">driver</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Owner ID</label>
+                  <input id="wallet-owner-id" type="number" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="user_id / driver_id" />
+                </div>
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Amount (SAR)</label>
+                  <input id="wallet-amount" type="number" step="0.01" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="مثال: 10 أو -10" />
+                </div>
+                <div class="flex items-end">
+                  <button onclick="createWalletTransaction()" class="w-full bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">تنفيذ</button>
+                </div>
+              </div>
+              <div class="mt-3">
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">Reason</label>
+                <input id="wallet-reason" type="text" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري" />
+                <p class="text-[11px] text-gray-500 mt-1">يتطلب صلاحية admin.wallet.write</p>
+              </div>
+            </div>
           </div>
 
           <div id="evidence" class="hidden mt-5 border-t pt-4">
@@ -143,7 +172,12 @@
   <script src="api-service.js"></script>
   <script>
     const TOKEN_KEY = 'akwadra_token';
-    let selected = null; // { case_type, case_id, trip_id }
+    let selected = null; // { case_type, case_id, trip_id, meta }
+    let caseIndex = new Map(); // key => row from /admin/cases
+
+    function caseKey(caseType, caseId) {
+      return `${String(caseType || '')}#${String(caseId || '')}`;
+    }
 
     function getToken() {
       try { return window.localStorage.getItem(TOKEN_KEY); } catch(e) { return null; }
@@ -214,6 +248,15 @@
 
     function renderList(items) {
       const el = document.getElementById('list');
+
+      // cache meta for quick actions (wallet credit, etc)
+      caseIndex = new Map();
+      for (const x of (items || [])) {
+        try {
+          caseIndex.set(caseKey(x.case_type, x.case_id), x);
+        } catch (e) {}
+      }
+
       if (!items.length) {
         el.innerHTML = `<div class="text-center py-10 text-gray-500"><i class="fas fa-circle-check text-3xl mb-3"></i><p class="font-bold">لا توجد عناصر</p></div>`;
         return;
@@ -262,7 +305,8 @@
     }
 
     async function selectCase(caseType, caseId, tripId) {
-      selected = { case_type: caseType, case_id: caseId, trip_id: tripId && String(tripId).trim() ? String(tripId).trim() : null };
+      const meta = caseIndex.get(caseKey(caseType, caseId)) || null;
+      selected = { case_type: caseType, case_id: caseId, trip_id: tripId && String(tripId).trim() ? String(tripId).trim() : null, meta };
       document.getElementById('details-sub').textContent = `${caseType} #${caseId}`;
       document.getElementById('details').innerHTML = `<div class="text-center py-10 text-gray-500"><i class="fas fa-spinner fa-spin text-3xl mb-3"></i><p class="font-bold">جاري التحميل...</p></div>`;
 
@@ -271,6 +315,9 @@
       document.getElementById('evidence-btn').classList.toggle('hidden', !selected.trip_id);
 
       try {
+        // Prefill wallet quick action from /admin/cases meta if available
+        try { prefillWalletFromSelected(); } catch (e) {}
+
         let details = null;
         if (caseType === 'incident') {
           const data = await ApiService.request(`/admin/incidents/${encodeURIComponent(caseId)}`);
@@ -359,6 +406,82 @@
       } catch (e) {
         console.error(e);
         alert(`تعذر تنفيذ الإجراء: ${e.message}`);
+      }
+    }
+
+    function getSelectedOwnerId(ownerType) {
+      const meta = selected?.meta;
+      if (!meta || typeof meta !== 'object') return '';
+      if (String(ownerType).toLowerCase() === 'driver') {
+        const d = meta.driver_id;
+        return (d !== null && d !== undefined) ? String(d) : '';
+      }
+      const u = meta.user_id;
+      return (u !== null && u !== undefined) ? String(u) : '';
+    }
+
+    function prefillWalletFromSelected() {
+      const wrap = document.getElementById('wallet-wrap');
+      if (!wrap) return;
+      const meta = selected?.meta;
+      const hasAny = meta && (meta.user_id || meta.driver_id);
+      wrap.classList.toggle('hidden', !hasAny);
+
+      const ownerTypeEl = document.getElementById('wallet-owner-type');
+      const ownerIdEl = document.getElementById('wallet-owner-id');
+      const reasonEl = document.getElementById('wallet-reason');
+
+      if (!ownerTypeEl || !ownerIdEl) return;
+
+      // Choose default owner type
+      let def = 'user';
+      if ((!meta?.user_id) && meta?.driver_id) def = 'driver';
+      ownerTypeEl.value = def;
+      ownerIdEl.value = getSelectedOwnerId(def);
+
+      // Default reason
+      if (reasonEl && !String(reasonEl.value || '').trim()) {
+        reasonEl.value = `case ${selected.case_type}#${selected.case_id}`;
+      }
+    }
+
+    function onWalletOwnerTypeChange() {
+      const ownerTypeEl = document.getElementById('wallet-owner-type');
+      const ownerIdEl = document.getElementById('wallet-owner-id');
+      if (!ownerTypeEl || !ownerIdEl) return;
+      ownerIdEl.value = getSelectedOwnerId(ownerTypeEl.value);
+    }
+
+    async function createWalletTransaction() {
+      if (!selected) return;
+      try {
+        const owner_type = String(document.getElementById('wallet-owner-type').value || '').toLowerCase();
+        const owner_id = Number(document.getElementById('wallet-owner-id').value);
+        const amount = Number(document.getElementById('wallet-amount').value);
+        const reason = String(document.getElementById('wallet-reason').value || '').trim();
+
+        if (!['user', 'driver'].includes(owner_type)) return alert('owner_type غير صحيح');
+        if (!Number.isFinite(owner_id) || owner_id <= 0) return alert('owner_id غير صحيح');
+        if (!Number.isFinite(amount) || amount === 0) return alert('amount لازم يكون رقم غير صفر');
+
+        await ApiService.request('/admin/wallet/transaction', {
+          method: 'POST',
+          body: JSON.stringify({
+            owner_type,
+            owner_id,
+            amount,
+            currency: 'SAR',
+            reason: reason || null,
+            reference_type: selected.case_type,
+            reference_id: String(selected.case_id)
+          })
+        });
+
+        alert('تم إنشاء Wallet Transaction');
+        document.getElementById('wallet-amount').value = '';
+      } catch (e) {
+        console.error(e);
+        alert(`تعذر إنشاء Wallet Transaction: ${e.message}`);
       }
     }
 
