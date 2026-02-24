@@ -313,6 +313,24 @@
                 </div>
                 <button onclick="createQaReview()" class="mt-2 w-full bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-emerald-700">Create QA Review</button>
                 <div id="qa-list" class="mt-3 space-y-2 max-h-56 overflow-auto"></div>
+
+                <div class="mt-4 pt-4 border-t border-gray-200">
+                  <div class="flex items-center justify-between gap-2 flex-wrap">
+                    <h4 class="text-xs font-extrabold text-gray-700">QA Sampling (U6)</h4>
+                    <button onclick="loadQaSample()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">Load sample</button>
+                  </div>
+                  <div class="mt-2 grid grid-cols-2 gap-2">
+                    <div>
+                      <label class="block text-xs font-extrabold text-gray-600 mb-1">Days</label>
+                      <input id="qa-sample-days" type="number" min="1" max="90" value="7" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-extrabold text-gray-600 mb-1">Limit</label>
+                      <input id="qa-sample-limit" type="number" min="1" max="100" value="20" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
+                    </div>
+                  </div>
+                  <div id="qa-sample-list" class="mt-3 space-y-2 max-h-56 overflow-auto"></div>
+                </div>
               </div>
             </div>
 
@@ -341,6 +359,20 @@
                 </div>
                 <div id="rec-out" class="mt-3 space-y-2 max-h-56 overflow-auto"></div>
               </div>
+            </div>
+
+            <div class="mt-4 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <h3 class="text-sm font-extrabold text-gray-800">Root‑Cause Top 10 (U10)</h3>
+                <button onclick="loadRootCausesTop()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">Load</button>
+              </div>
+              <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Days</label>
+                  <input id="rc-days" type="number" min="1" max="365" value="7" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
+                </div>
+              </div>
+              <div id="rc-top" class="mt-3 space-y-2"></div>
             </div>
           </div>
         </div>
@@ -959,11 +991,10 @@
         <html dir="rtl" lang="ar"><head><meta charset="utf-8" />
         <title>Case Timeline</title>
         <style>body{font-family:Arial; padding:16px;} .row{border:1px solid #ddd; border-radius:12px; padding:10px; margin:8px 0;} .t{font-weight:700;} .m{color:#555; font-size:12px;} pre{white-space:pre-wrap;}</style>
-        </head><body>
+        </head><body onload="window.print()">
         <h2>Case Time‑Machine</h2>
         <p><b>${selected.case_type} #${selected.case_id}</b></p>
         ${ev.map(x => `<div class="row"><div class="t">${x.title || x.kind}</div><div class="m">${new Date(x.at).toLocaleString('ar-EG')} • ${x.kind}</div>${x.payload ? `<pre>${JSON.stringify(x.payload, null, 2)}</pre>` : ''}</div>`).join('')}
-        <script>window.print();</script>
         </body></html>
       `;
       w.document.write(html);
@@ -1041,19 +1072,77 @@
             <div class="p-3 rounded-2xl border border-gray-200 bg-white"><p class="text-xs font-bold text-gray-500">Platform net</p><p class="font-extrabold" dir="ltr">${net.platform ?? 0} SAR</p></div>
           </div>
           <div class="mt-3 space-y-2">
-            ${items.map(it => `
+            ${items.map(it => {
+              const ref = it.ref && typeof it.ref === 'object' ? JSON.stringify(it.ref, null, 0) : '';
+              const st = it.status ? String(it.status) : '';
+              return `
               <div class="p-3 rounded-2xl border border-gray-200 bg-white">
                 <div class="flex items-center justify-between gap-2 flex-wrap">
                   <p class="font-extrabold text-gray-800">${it.title || it.kind}</p>
                   <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${fmtDate(it.at)}</span>
                 </div>
-                <p class="text-xs font-bold text-gray-500" dir="ltr">${it.amount ?? '--'} ${it.currency || 'SAR'} ${it.method ? '• ' + it.method : ''}</p>
+                <p class="text-xs font-bold text-gray-500" dir="ltr">${it.amount ?? '--'} ${it.currency || 'SAR'} ${it.method ? '• ' + it.method : ''} ${st ? '• ' + st : ''}</p>
+                ${ref ? `<textarea class="mt-2 w-full h-16 px-3 py-2.5 rounded-2xl border border-gray-200 font-mono text-[11px]" readonly>${ref}</textarea>` : ''}
               </div>
-            `).join('')}
+            `;
+            }).join('')}
           </div>
         `;
       } catch (e) {
         el.innerHTML = `<div class="text-center py-6 text-red-600"><p class="font-extrabold">تعذر تحميل Ledger</p><p class="text-sm font-bold">${e.message}</p></div>`;
+      }
+    }
+
+    async function loadQaSample() {
+      const el = document.getElementById('qa-sample-list');
+      if (!el) return;
+      el.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin"></i></div>';
+      try {
+        const days = Number(document.getElementById('qa-sample-days')?.value || 7);
+        const limit = Number(document.getElementById('qa-sample-limit')?.value || 20);
+        const data = await ApiService.request(`/admin/qa/sample?days=${encodeURIComponent(String(days))}&limit=${encodeURIComponent(String(limit))}`);
+        const rows = Array.isArray(data.data) ? data.data : [];
+        if (!rows.length) { el.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد Sample في الفترة دي</p>'; return; }
+        el.innerHTML = rows.map(r => {
+          const ct = String(r.case_type || '');
+          const cid = String(r.case_id || '');
+          const cidNum = Number(cid);
+          const closedAt = fmtDate(r.closed_at);
+          return `
+            <div class="p-3 rounded-2xl border border-gray-200 bg-white">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <p class="font-extrabold text-gray-800">${ct} #${cid}</p>
+                <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${closedAt}</span>
+              </div>
+              <button class="mt-2 w-full bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700" onclick="selectCase('${ct}', ${Number.isFinite(cidNum) ? cidNum : 0}, '')">Open case</button>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {
+        el.innerHTML = `<p class="text-xs font-extrabold text-red-600">${e.message}</p>`;
+      }
+    }
+
+    async function loadRootCausesTop() {
+      const el = document.getElementById('rc-top');
+      if (!el) return;
+      el.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin"></i></div>';
+      try {
+        const days = Number(document.getElementById('rc-days')?.value || 7);
+        const data = await ApiService.request(`/admin/root-causes/top?days=${encodeURIComponent(String(days))}`);
+        const rows = Array.isArray(data.data) ? data.data : [];
+        if (!rows.length) { el.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد بيانات</p>'; return; }
+        el.innerHTML = rows.map(r => `
+          <div class="p-3 rounded-2xl border border-gray-200 bg-white">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <p class="font-extrabold text-gray-800">${r.root_cause_key || '--'}</p>
+              <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">${r.cases_count || 0}</span>
+            </div>
+            <p class="text-xs font-bold text-gray-500">Last seen: ${fmtDate(r.last_seen)}</p>
+          </div>
+        `).join('');
+      } catch (e) {
+        el.innerHTML = `<p class="text-xs font-extrabold text-red-600">${e.message}</p>`;
       }
     }
 
