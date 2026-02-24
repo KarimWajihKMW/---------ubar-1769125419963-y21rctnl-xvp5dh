@@ -1,8 +1,10 @@
-# ملف اقتراحات الإدارة (معتمد) — Akwadra / Ubar
+# ملف اقتراحات الإدارة (مؤرشف) — Akwadra / Ubar
 
-**اسم الملف:** Mlf_ala8tra7at_administration_haged_ubar
+> تم اعتماد نسخة أحدث من هذا الملف تحت الاسم: [Mlf_ala8tra7at_administration_haged_ubar1.md](Mlf_ala8tra7at_administration_haged_ubar1.md)
 
-**الحالة:** ✅ معتمد
+**اسم الملف:** Mlf_ala8tra7at_administration_haged_ubar (Archived)
+
+**الحالة:** 🗂️ مؤرشف (تم استبداله)
 
 **التاريخ:** 2026-02-24
 
