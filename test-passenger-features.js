@@ -901,7 +901,11 @@ async function run() {
   const lostUpdate = await jsonFetch(`${baseURL}/admin/lost-items/${encodeURIComponent(String(lostId))}`, {
     method: 'PATCH',
     headers: adminHeaders,
-    body: JSON.stringify({ status: 'resolved' })
+    body: JSON.stringify({
+      status: 'resolved',
+      root_cause_key: 'other',
+      prevention_key: 'agent_training'
+    })
   });
   if (!lostUpdate.res.ok) throw new Error(`Admin lost update failed: ${lostUpdate.data.error || lostUpdate.res.status}`);
 
@@ -927,7 +931,13 @@ async function run() {
   const rrApprove = await jsonFetch(`${baseURL}/admin/refund-requests/${encodeURIComponent(String(rrId))}`, {
     method: 'PATCH',
     headers: adminHeaders,
-    body: JSON.stringify({ status: 'approved', amount_approved: 5, resolution_note: 'تمت الموافقة' })
+    body: JSON.stringify({
+      status: 'approved',
+      amount_approved: 5,
+      resolution_note: 'تمت الموافقة',
+      root_cause_key: 'payment_mix_confusion',
+      prevention_key: 'policy_update'
+    })
   });
   if (!rrApprove.res.ok) throw new Error(`Refund approve failed: ${rrApprove.data.error || rrApprove.res.status}`);
 

@@ -20,6 +20,16 @@
 <body class="bg-gray-50">
     <div class="min-h-screen p-6">
         <div class="max-w-7xl mx-auto">
+            <div id="crisis-banner" class="hidden mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                        <p class="font-extrabold text-amber-900"><i class="fas fa-triangle-exclamation ml-2"></i><span id="crisis-title">Crisis Mode</span></p>
+                        <p id="crisis-message" class="text-xs font-bold text-amber-800 mt-1"></p>
+                    </div>
+                    <button onclick="refreshCrisis()" class="bg-white text-amber-700 px-4 py-2 rounded-xl font-extrabold hover:bg-amber-100">تحديث</button>
+                </div>
+            </div>
+
             <!-- Header -->
             <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-8 mb-8 text-white">
                 <div class="flex items-center justify-between">
@@ -459,10 +469,25 @@
                 const t = localStorage.getItem(TOKEN_KEY);
                 if (t) document.getElementById('token-input').value = t;
             } catch (e) {}
+            refreshCrisis();
             loadDrivers();
             startAutoRefresh();
             console.log('✅ Auto-refresh enabled: البيانات تتحدث كل 5 ثواني');
         });
+
+        async function refreshCrisis(){
+            try{
+                const data = await ApiService.request('/admin/crisis-mode');
+                const c = data.data || {};
+                const enabled = !!c.enabled;
+                const banner = document.getElementById('crisis-banner');
+                banner.classList.toggle('hidden', !enabled);
+                if(enabled){
+                    document.getElementById('crisis-title').textContent = c.title || 'Crisis Mode';
+                    document.getElementById('crisis-message').textContent = c.message || 'تم تفعيل وضع الطوارئ';
+                }
+            }catch(e){}
+        }
 
         // Close modal on Escape key
         document.addEventListener('keydown', (e) => {

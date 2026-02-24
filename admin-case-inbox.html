@@ -14,6 +14,16 @@
 <body class="bg-gray-50">
   <div class="min-h-screen p-6">
     <div class="max-w-7xl mx-auto">
+      <div id="crisis-banner" class="hidden mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p class="font-extrabold text-amber-900"><i class="fas fa-triangle-exclamation ml-2"></i><span id="crisis-title">Crisis Mode</span></p>
+            <p id="crisis-message" class="text-xs font-bold text-amber-800 mt-1"></p>
+          </div>
+          <button onclick="refreshCrisis()" class="bg-white text-amber-700 px-4 py-2 rounded-xl font-extrabold hover:bg-amber-100">تحديث</button>
+        </div>
+      </div>
+
       <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-6 mb-6 text-white">
         <div class="flex items-center justify-between gap-4 flex-wrap">
           <div>
@@ -26,6 +36,10 @@
           <button onclick="refreshAll()" class="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow">
             <i class="fas fa-sync-alt ml-2"></i>
             تحديث
+          </button>
+          <button onclick="toggleCrisis()" class="bg-amber-50 text-amber-900 px-5 py-2.5 rounded-xl font-extrabold hover:bg-amber-100 transition-all shadow border border-amber-200">
+            <i class="fas fa-triangle-exclamation ml-2"></i>
+            Crisis Mode
           </button>
         </div>
       </div>
@@ -100,6 +114,7 @@
             </div>
             <div class="flex gap-2">
               <button id="evidence-btn" onclick="loadEvidence()" class="hidden bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">Evidence Bundle</button>
+              <button id="reveal-btn" onclick="revealSensitive()" class="hidden bg-amber-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-amber-700">Reveal Sensitive</button>
             </div>
           </div>
 
@@ -128,6 +143,49 @@
             <div id="note-wrap" class="mt-3">
               <label class="block text-xs font-extrabold text-gray-600 mb-1">Note (اختياري)</label>
               <textarea id="action-note" rows="3" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="ملاحظة/سبب القرار"></textarea>
+            </div>
+
+            <div id="root-cause-wrap" class="hidden mt-4 pt-4 border-t">
+              <h4 class="text-sm font-extrabold text-gray-800 mb-2">Root‑Cause Closure (إجباري عند الإغلاق) — U10</h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Root‑Cause Key</label>
+                  <select id="rc-key" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold">
+                    <option value="">اختر...</option>
+                    <option value="payment_mix_confusion">payment_mix_confusion</option>
+                    <option value="ops_delay">ops_delay</option>
+                    <option value="pricing_bug">pricing_bug</option>
+                    <option value="gps_issue">gps_issue</option>
+                    <option value="driver_behavior">driver_behavior</option>
+                    <option value="passenger_behavior">passenger_behavior</option>
+                    <option value="fraud_suspected">fraud_suspected</option>
+                    <option value="other">other</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Prevention Key</label>
+                  <select id="rc-prev" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold">
+                    <option value="">اختر...</option>
+                    <option value="agent_training">agent_training</option>
+                    <option value="policy_update">policy_update</option>
+                    <option value="product_fix">product_fix</option>
+                    <option value="ops_process">ops_process</option>
+                    <option value="driver_penalty">driver_penalty</option>
+                    <option value="passenger_warning">passenger_warning</option>
+                    <option value="other">other</option>
+                  </select>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Root‑Cause Note (اختياري)</label>
+                  <textarea id="rc-note" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="تفاصيل مختصرة"></textarea>
+                </div>
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Prevention Note (اختياري)</label>
+                  <textarea id="rc-prev-note" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="إجراء منع تكرار"></textarea>
+                </div>
+              </div>
             </div>
 
             <div id="wallet-wrap" class="hidden mt-4 pt-4 border-t">
@@ -164,6 +222,127 @@
             <h3 class="text-sm font-extrabold text-gray-800 mb-2">Evidence Bundle</h3>
             <div id="evidence-body" class="text-sm text-gray-700"></div>
           </div>
+
+          <div id="excellence" class="mt-5 border-t pt-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 class="text-sm font-extrabold text-gray-800">Case Time‑Machine</h3>
+                  <div class="flex gap-2">
+                    <button onclick="loadTimeline()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">Replay</button>
+                    <button onclick="exportTimelineJson()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">Export JSON</button>
+                    <button onclick="printTimeline()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">PDF</button>
+                  </div>
+                </div>
+                <div class="mt-3">
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Add note</label>
+                  <div class="flex gap-2">
+                    <input id="timeline-note" type="text" class="flex-1 px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="ملاحظة سريعة" />
+                    <button onclick="addCaseNote()" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">Add</button>
+                  </div>
+                </div>
+                <div id="timeline" class="mt-3 space-y-2 max-h-80 overflow-auto"></div>
+              </div>
+
+              <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                <h3 class="text-sm font-extrabold text-gray-800">Remedy Packs</h3>
+                <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-600 mb-1">Pack</label>
+                    <select id="pack-select" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" onchange="previewPack()"></select>
+                  </div>
+                  <div id="pack-amount-wrap" class="hidden">
+                    <label class="block text-xs font-extrabold text-gray-600 mb-1">Amount (SAR)</label>
+                    <input id="pack-amount" type="number" step="0.01" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="مثال: 10" oninput="previewPack()" />
+                  </div>
+                </div>
+                <div class="mt-3">
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Note (اختياري)</label>
+                  <textarea id="pack-note" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="سبب/رسالة داخلية"></textarea>
+                </div>
+                <div id="pack-preview" class="mt-3 text-xs font-bold text-gray-700"></div>
+                <button onclick="executePack()" class="mt-3 w-full bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-emerald-700">Execute Pack</button>
+              </div>
+            </div>
+
+            <div class="mt-4 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <h3 class="text-sm font-extrabold text-gray-800">Payment Truth Ledger</h3>
+                <button onclick="loadLedger()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">Load</button>
+              </div>
+              <div id="ledger" class="mt-3"></div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 class="text-sm font-extrabold text-gray-800">Dispute Mediation</h3>
+                  <div class="flex gap-2">
+                    <button onclick="loadDispute()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">Load</button>
+                    <button onclick="saveDispute()" class="bg-indigo-600 text-white px-3 py-2 rounded-xl font-extrabold hover:bg-indigo-700">Save</button>
+                    <button onclick="closeDispute()" class="bg-gray-800 text-white px-3 py-2 rounded-xl font-extrabold hover:bg-black">Close</button>
+                  </div>
+                </div>
+                <div class="mt-3 space-y-2">
+                  <textarea id="d-claim" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="ادعاء"></textarea>
+                  <textarea id="d-evidence" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="دليل"></textarea>
+                  <textarea id="d-response" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="رد الطرف الآخر"></textarea>
+                  <textarea id="d-offer" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="عرض تسوية"></textarea>
+                  <textarea id="d-decision" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="قرار"></textarea>
+                </div>
+              </div>
+
+              <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 class="text-sm font-extrabold text-gray-800">QA Review</h3>
+                  <button onclick="loadQaReviews()" class="bg-white border border-gray-200 text-gray-800 px-3 py-2 rounded-xl font-extrabold hover:bg-gray-100">Refresh</button>
+                </div>
+                <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-600 mb-1">Score (0-100)</label>
+                    <input id="qa-score" type="number" min="0" max="100" value="100" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
+                  </div>
+                  <div class="md:col-span-2">
+                    <label class="block text-xs font-extrabold text-gray-600 mb-1">Reason</label>
+                    <input id="qa-reason" type="text" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري" />
+                  </div>
+                </div>
+                <div class="mt-2">
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Notes</label>
+                  <textarea id="qa-notes" rows="2" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري"></textarea>
+                </div>
+                <button onclick="createQaReview()" class="mt-2 w-full bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-emerald-700">Create QA Review</button>
+                <div id="qa-list" class="mt-3 space-y-2 max-h-56 overflow-auto"></div>
+              </div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                <h3 class="text-sm font-extrabold text-gray-800">Policy Sandbox (Refund Cap)</h3>
+                <div class="mt-3 grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-600 mb-1">Cap (SAR)</label>
+                    <input id="ps-cap" type="number" step="0.01" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" value="50" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-extrabold text-gray-600 mb-1">Days</label>
+                    <input id="ps-days" type="number" min="1" max="365" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" value="30" />
+                  </div>
+                </div>
+                <button onclick="runPolicySandbox()" class="mt-3 w-full bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">Run</button>
+                <pre id="ps-out" class="mt-3 p-3 rounded-2xl border border-gray-200 bg-white text-xs overflow-auto max-h-56"></pre>
+              </div>
+
+              <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                <h3 class="text-sm font-extrabold text-gray-800">Daily Reconciliation</h3>
+                <div class="mt-3 flex gap-2">
+                  <input id="rec-date" type="date" class="flex-1 px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
+                  <button onclick="loadReconciliation()" class="bg-white border border-gray-200 text-gray-800 px-4 py-2.5 rounded-xl font-extrabold hover:bg-gray-100">Load</button>
+                </div>
+                <div id="rec-out" class="mt-3 space-y-2 max-h-56 overflow-auto"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -174,6 +353,8 @@
     const TOKEN_KEY = 'akwadra_token';
     let selected = null; // { case_type, case_id, trip_id, meta }
     let caseIndex = new Map(); // key => row from /admin/cases
+    let sensitiveGrant = null; // { id, expires_at }
+    let cachedTimeline = null;
 
     function caseKey(caseType, caseId) {
       return `${String(caseType || '')}#${String(caseId || '')}`;
@@ -214,6 +395,116 @@
       const d = new Date(v);
       if (Number.isNaN(d.getTime())) return '--';
       return d.toLocaleString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function isFinalStatus(caseType, st) {
+      const t = String(caseType || '').toLowerCase();
+      const s = String(st || '').toLowerCase();
+      if (!t || !s) return false;
+      if (t === 'support_ticket') return ['resolved','closed'].includes(s);
+      if (t === 'lost_item') return ['resolved','closed','returned'].includes(s);
+      if (t === 'refund_request') return ['approved','rejected'].includes(s);
+      if (t === 'incident') return ['resolved','rejected'].includes(s);
+      return false;
+    }
+
+    function getRootCausePayload() {
+      const rootKey = String(document.getElementById('rc-key')?.value || '').trim();
+      const prevKey = String(document.getElementById('rc-prev')?.value || '').trim();
+      const rootNote = String(document.getElementById('rc-note')?.value || '').trim();
+      const prevNote = String(document.getElementById('rc-prev-note')?.value || '').trim();
+      return {
+        root_cause_key: rootKey || null,
+        root_cause_note: rootNote || null,
+        prevention_key: prevKey || null,
+        prevention_note: prevNote || null
+      };
+    }
+
+    function refreshRootCauseUi() {
+      const st = document.getElementById('action-status')?.value;
+      const wrap = document.getElementById('root-cause-wrap');
+      if (!wrap || !selected) return;
+      wrap.classList.toggle('hidden', !isFinalStatus(selected.case_type, st));
+    }
+
+    async function refreshCrisis() {
+      try {
+        const data = await ApiService.request('/admin/crisis-mode');
+        const c = data.data || {};
+        const enabled = !!c.enabled;
+        const banner = document.getElementById('crisis-banner');
+        banner.classList.toggle('hidden', !enabled);
+        if (enabled) {
+          document.getElementById('crisis-title').textContent = c.title || 'Crisis Mode';
+          document.getElementById('crisis-message').textContent = c.message || 'تم تفعيل وضع الطوارئ';
+        }
+      } catch (e) {
+        // silent
+      }
+    }
+
+    async function toggleCrisis(){
+      try{
+        const cur = await ApiService.request('/admin/crisis-mode');
+        const c = cur.data || {};
+        const enabledNow = !!c.enabled;
+        if(enabledNow){
+          if(!confirm('إلغاء Crisis Mode؟')) return;
+          await ApiService.request('/admin/crisis-mode', { method: 'PATCH', body: JSON.stringify({ enabled: false }) });
+          await refreshCrisis();
+          alert('تم إلغاء Crisis Mode');
+          return;
+        }
+
+        const title = prompt('عنوان Crisis Mode (مثال: ازدحام شديد):', 'Crisis Mode') || '';
+        const message = prompt('رسالة مختصرة تظهر للأدمن:', 'تم تفعيل وضع الطوارئ مؤقتًا') || '';
+        if(!String(title).trim() && !String(message).trim()){
+          if(!confirm('تفعيل بدون عنوان/رسالة؟')) return;
+        }
+        await ApiService.request('/admin/crisis-mode', {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: true, title: String(title).trim() || null, message: String(message).trim() || null })
+        });
+        await refreshCrisis();
+        alert('تم تفعيل Crisis Mode');
+      }catch(e){
+        alert(`تعذر تغيير Crisis Mode: ${e.message}`);
+      }
+    }
+
+    async function ensureSensitiveGrant() {
+      if (!selected) throw new Error('no_case_selected');
+      if (sensitiveGrant && sensitiveGrant.id) return sensitiveGrant;
+      const reason = prompt('سبب الوصول للبيانات الحساسة؟');
+      if (!reason || !String(reason).trim()) throw new Error('reason_required');
+      const ttl = prompt('مدة الصلاحية بالدقائق (مثال 30):', '30');
+      const ttlMinutes = ttl ? Number(ttl) : 30;
+      const resp = await ApiService.request('/admin/sensitive-access/grant', {
+        method: 'POST',
+        body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id), reason: String(reason).trim(), ttl_minutes: ttlMinutes })
+      });
+      sensitiveGrant = resp.data;
+      return sensitiveGrant;
+    }
+
+    async function revealSensitive() {
+      if (!selected) return;
+      try {
+        const g = await ensureSensitiveGrant();
+        const data = await ApiService.request(`/admin/cases/${encodeURIComponent(selected.case_type)}/${encodeURIComponent(String(selected.case_id))}/sensitive`, {
+          headers: { 'X-Sensitive-Access-Grant': String(g.id) }
+        });
+        const u = data.data?.user;
+        const d = data.data?.driver;
+        const up = document.getElementById('sens-user');
+        const dp = document.getElementById('sens-driver');
+        if (up) up.textContent = u?.phone || u?.email ? `${u?.phone || '--'} ${u?.email ? '• ' + u.email : ''}` : '--';
+        if (dp) dp.textContent = d?.phone || d?.email ? `${d?.phone || '--'} ${d?.email ? '• ' + d.email : ''}` : '--';
+        alert('تم الكشف عن البيانات الحساسة (لفترة محدودة)');
+      } catch (e) {
+        alert(`تعذر الكشف: ${e.message}`);
+      }
     }
 
     function short(v, n=120) {
@@ -296,12 +587,14 @@
       amountWrap.classList.add('hidden');
 
       let options = [];
-      if (type === 'support_ticket') options = ['open', 'closed'];
+      if (type === 'support_ticket') options = ['open', 'pending', 'resolved', 'closed'];
       else if (type === 'lost_item') options = ['open', 'resolved', 'closed'];
       else if (type === 'refund_request') { options = ['pending', 'approved', 'rejected']; amountWrap.classList.remove('hidden'); }
       else if (type === 'incident') options = ['resolved', 'rejected'];
 
       el.innerHTML = options.map(s => `<option value="${s}">${s}</option>`).join('');
+      el.onchange = refreshRootCauseUi;
+      setTimeout(refreshRootCauseUi, 0);
     }
 
     async function selectCase(caseType, caseId, tripId) {
@@ -313,6 +606,20 @@
       document.getElementById('actions').classList.add('hidden');
       document.getElementById('evidence').classList.add('hidden');
       document.getElementById('evidence-btn').classList.toggle('hidden', !selected.trip_id);
+      document.getElementById('reveal-btn').classList.remove('hidden');
+      sensitiveGrant = null;
+      cachedTimeline = null;
+      document.getElementById('timeline').innerHTML = '';
+      document.getElementById('ledger').innerHTML = '';
+      document.getElementById('pack-preview').innerHTML = '';
+      document.getElementById('qa-list').innerHTML = '';
+      document.getElementById('ps-out').textContent = '';
+      document.getElementById('rec-out').innerHTML = '';
+
+      try {
+        document.getElementById('sens-user').textContent = '*** (Reveal Sensitive)';
+        document.getElementById('sens-driver').textContent = '*** (Reveal Sensitive)';
+      } catch (e) {}
 
       try {
         // Prefill wallet quick action from /admin/cases meta if available
@@ -323,13 +630,13 @@
           const data = await ApiService.request(`/admin/incidents/${encodeURIComponent(caseId)}`);
           details = data.data;
         } else if (caseType === 'support_ticket') {
-          const data = await ApiService.request(`/admin/support/tickets?status=all`);
+          const data = await ApiService.request(`/admin/support/tickets`);
           details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
         } else if (caseType === 'lost_item') {
-          const data = await ApiService.request(`/admin/lost-items?status=all`);
+          const data = await ApiService.request(`/admin/lost-items`);
           details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
         } else if (caseType === 'refund_request') {
-          const data = await ApiService.request(`/admin/refund-requests?status=all`);
+          const data = await ApiService.request(`/admin/refund-requests`);
           details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
         }
 
@@ -344,6 +651,22 @@
         document.getElementById('action-note').value = '';
         document.getElementById('action-amount').value = '';
         document.getElementById('actions').classList.remove('hidden');
+
+        // Remedy packs list
+        try {
+          const packs = await ApiService.request(`/admin/remedy-packs?case_type=${encodeURIComponent(selected.case_type)}`);
+          const list = Array.isArray(packs.data) ? packs.data : [];
+          const sel = document.getElementById('pack-select');
+          sel.innerHTML = list.length
+            ? list.map(p => `<option value="${p.key}">${p.title}</option>`).join('')
+            : `<option value="">لا يوجد</option>`;
+          await previewPack();
+        } catch (e) {
+          // ignore
+        }
+
+        // QA reviews for this case
+        try { await loadQaReviews(); } catch (e) {}
       } catch (e) {
         console.error(e);
         document.getElementById('details').innerHTML = `<div class="text-center py-10 text-red-600"><i class="fas fa-triangle-exclamation text-3xl mb-3"></i><p class="font-extrabold">تعذر تحميل التفاصيل</p><p class="text-sm font-bold">${e.message}</p></div>`;
@@ -364,6 +687,13 @@
 
       const desc = row.description || row.reason || '--';
       pieces.push(`<div class="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-3"><p class="text-xs text-gray-500 font-bold">Description</p><p class="text-sm font-bold text-gray-700 whitespace-pre-wrap">${desc || '--'}</p></div>`);
+
+      pieces.push(`<div class="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-3">
+        <p class="text-xs text-gray-500 font-bold">Sensitive</p>
+        <p class="text-sm font-extrabold text-gray-800">Passenger: <span id="sens-user">*** (Reveal Sensitive)</span></p>
+        <p class="text-sm font-extrabold text-gray-800">Driver: <span id="sens-driver">*** (Reveal Sensitive)</span></p>
+        <p class="text-[11px] text-gray-500 font-bold mt-1">لن يتم كشف الهاتف/الإيميل إلا بعد إدخال سبب الوصول (U7)</p>
+      </div>`);
 
       if (caseType === 'refund_request') {
         pieces.push(`<div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">`
@@ -388,16 +718,24 @@
       const amount = document.getElementById('action-amount').value;
 
       try {
+        const rc = getRootCausePayload();
+        if (isFinalStatus(selected.case_type, status)) {
+          if (!rc.root_cause_key || !rc.prevention_key) {
+            return alert('لا يمكن إغلاق/حسم القضية بدون Root‑Cause + Prevention (U10)');
+          }
+        }
+
         if (selected.case_type === 'support_ticket') {
-          await ApiService.request(`/admin/support/tickets/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+          await ApiService.request(`/admin/support/tickets/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status, ...rc }) });
         } else if (selected.case_type === 'lost_item') {
-          await ApiService.request(`/admin/lost-items/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+          await ApiService.request(`/admin/lost-items/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status, ...rc }) });
         } else if (selected.case_type === 'refund_request') {
           const payload = { status, resolution_note: note || null };
+          Object.assign(payload, rc);
           if (amount && String(amount).trim()) payload.amount_approved = Number(amount);
           await ApiService.request(`/admin/refund-requests/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
         } else if (selected.case_type === 'incident') {
-          await ApiService.request(`/admin/incidents/${encodeURIComponent(selected.case_id)}/resolve`, { method: 'PATCH', body: JSON.stringify({ status, resolution_note: note || null }) });
+          await ApiService.request(`/admin/incidents/${encodeURIComponent(selected.case_id)}/resolve`, { method: 'PATCH', body: JSON.stringify({ status, resolution_note: note || null, ...rc }) });
         }
 
         alert('تم تنفيذ الإجراء');
@@ -489,8 +827,15 @@
       const token = ApiService.getToken ? ApiService.getToken() : getToken();
       if (!token) return alert('لا يوجد توكن');
 
-      const url = `/api/admin/trips/${encodeURIComponent(tripId)}/driver-audio/${encodeURIComponent(recId)}/download`;
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      const g = await ensureSensitiveGrant();
+
+      const url = `/api/admin/trips/${encodeURIComponent(tripId)}/driver-audio/${encodeURIComponent(recId)}/download?case_type=${encodeURIComponent(selected.case_type)}&case_id=${encodeURIComponent(String(selected.case_id))}`;
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Sensitive-Access-Grant': String(g.id)
+        }
+      });
       if (!res.ok) {
         const t = await res.text().catch(()=> '');
         throw new Error(t || `HTTP ${res.status}`);
@@ -512,7 +857,11 @@
       document.getElementById('evidence-body').innerHTML = `<div class="text-center py-6 text-gray-500"><i class="fas fa-spinner fa-spin text-2xl mb-2"></i><p class="font-bold">جاري تحميل الأدلة...</p></div>`;
 
       try {
-        const data = await ApiService.request(`/admin/trips/${encodeURIComponent(selected.trip_id)}/evidence-bundle`);
+        const headers = {};
+        try {
+          if (sensitiveGrant && sensitiveGrant.id) headers['X-Sensitive-Access-Grant'] = String(sensitiveGrant.id);
+        } catch (e) {}
+        const data = await ApiService.request(`/admin/trips/${encodeURIComponent(selected.trip_id)}/evidence-bundle?case_type=${encodeURIComponent(selected.case_type)}&case_id=${encodeURIComponent(String(selected.case_id))}`, { headers });
         const b = data.data;
 
         const audio = Array.isArray(b.driver_audio) ? b.driver_audio : [];
@@ -551,9 +900,296 @@
       }
     }
 
+    async function addCaseNote() {
+      if (!selected) return;
+      const v = String(document.getElementById('timeline-note').value || '').trim();
+      if (!v) return alert('اكتب ملاحظة');
+      await ApiService.request(`/admin/cases/${encodeURIComponent(selected.case_type)}/${encodeURIComponent(String(selected.case_id))}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ note: v })
+      });
+      document.getElementById('timeline-note').value = '';
+      await loadTimeline();
+    }
+
+    async function loadTimeline() {
+      if (!selected) return;
+      const el = document.getElementById('timeline');
+      el.innerHTML = '<div class="text-center py-6 text-gray-500"><i class="fas fa-spinner fa-spin text-2xl mb-2"></i><p class="font-bold">جاري التحميل...</p></div>';
+      const data = await ApiService.request(`/admin/cases/${encodeURIComponent(selected.case_type)}/${encodeURIComponent(String(selected.case_id))}/timeline`);
+      cachedTimeline = data.data;
+      const ev = Array.isArray(cachedTimeline?.events) ? cachedTimeline.events : [];
+      if (!ev.length) {
+        el.innerHTML = '<div class="text-center py-6 text-gray-500"><p class="font-bold">لا يوجد Timeline بعد</p></div>';
+        return;
+      }
+      el.innerHTML = ev.map(x => {
+        const payload = x.payload ? JSON.stringify(x.payload) : '';
+        return `
+          <div class="p-3 rounded-2xl border border-gray-200 bg-white">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <p class="font-extrabold text-gray-800">${x.title || x.kind}</p>
+              <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${fmtDate(x.at)}</span>
+            </div>
+            <p class="text-[11px] font-bold text-gray-500">${x.kind}</p>
+            ${payload ? `<textarea class="mt-2 w-full h-20 px-3 py-2.5 rounded-2xl border border-gray-200 font-mono text-xs" readonly>${payload}</textarea>` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function exportTimelineJson() {
+      if (!cachedTimeline) return alert('اعمل Replay الأول');
+      const blob = new Blob([JSON.stringify(cachedTimeline, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `case-timeline-${selected.case_type}-${selected.case_id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function printTimeline() {
+      if (!cachedTimeline) return alert('اعمل Replay الأول');
+      const w = window.open('', '_blank');
+      const ev = Array.isArray(cachedTimeline?.events) ? cachedTimeline.events : [];
+      const html = `
+        <html dir="rtl" lang="ar"><head><meta charset="utf-8" />
+        <title>Case Timeline</title>
+        <style>body{font-family:Arial; padding:16px;} .row{border:1px solid #ddd; border-radius:12px; padding:10px; margin:8px 0;} .t{font-weight:700;} .m{color:#555; font-size:12px;} pre{white-space:pre-wrap;}</style>
+        </head><body>
+        <h2>Case Time‑Machine</h2>
+        <p><b>${selected.case_type} #${selected.case_id}</b></p>
+        ${ev.map(x => `<div class="row"><div class="t">${x.title || x.kind}</div><div class="m">${new Date(x.at).toLocaleString('ar-EG')} • ${x.kind}</div>${x.payload ? `<pre>${JSON.stringify(x.payload, null, 2)}</pre>` : ''}</div>`).join('')}
+        <script>window.print();</script>
+        </body></html>
+      `;
+      w.document.write(html);
+      w.document.close();
+    }
+
+    async function previewPack() {
+      if (!selected) return;
+      const packKey = String(document.getElementById('pack-select').value || '').trim();
+      const out = document.getElementById('pack-preview');
+      if (!packKey) { out.innerHTML = '<p>لا يوجد باكدج</p>'; return; }
+
+      // determine if pack needs amount from option list
+      const opt = document.getElementById('pack-select').selectedOptions?.[0];
+      const title = opt ? opt.textContent : packKey;
+
+      const amount = document.getElementById('pack-amount').value;
+      try {
+        const data = await ApiService.request('/admin/remedy-packs/preview', {
+          method: 'POST',
+          body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id), pack_key: packKey, amount: amount ? Number(amount) : null })
+        });
+        const steps = data.data?.preview?.steps || [];
+        const needsAmt = (steps || []).some(s => s.kind === 'wallet_credit' || s.kind === 'refund_approve');
+        document.getElementById('pack-amount-wrap').classList.toggle('hidden', !needsAmt);
+        out.innerHTML = `<p class="font-extrabold">${title}</p><pre class="mt-2 p-3 rounded-2xl border border-gray-200 bg-white text-xs overflow-auto">${JSON.stringify(steps, null, 2)}</pre>`;
+      } catch (e) {
+        out.innerHTML = `<p class="text-red-600 font-extrabold">Preview failed: ${e.message}</p>`;
+      }
+    }
+
+    async function executePack() {
+      if (!selected) return;
+      const packKey = String(document.getElementById('pack-select').value || '').trim();
+      const amount = document.getElementById('pack-amount').value;
+      const note = String(document.getElementById('pack-note').value || '').trim();
+      const rc = getRootCausePayload();
+      // Packs غالبًا بتقفل، فخلّي المستخدم يجهز Root‑Cause
+      if (!rc.root_cause_key || !rc.prevention_key) {
+        if (!confirm('Remedy Pack قد يحتاج Root‑Cause/Prevention (U10). تكمل؟')) return;
+      }
+      try {
+        await ApiService.request('/admin/remedy-packs/execute', {
+          method: 'POST',
+          body: JSON.stringify({
+            case_type: selected.case_type,
+            case_id: String(selected.case_id),
+            pack_key: packKey,
+            amount: amount ? Number(amount) : null,
+            note: note || null,
+            ...rc
+          })
+        });
+        alert('تم تنفيذ Remedy Pack');
+        await refreshAll();
+        await selectCase(selected.case_type, selected.case_id, selected.trip_id || '');
+        await loadTimeline();
+      } catch (e) {
+        alert(`فشل التنفيذ: ${e.message}`);
+      }
+    }
+
+    async function loadLedger() {
+      if (!selected || !selected.trip_id) return alert('لا يوجد trip_id');
+      const el = document.getElementById('ledger');
+      el.innerHTML = '<div class="text-center py-6 text-gray-500"><i class="fas fa-spinner fa-spin text-2xl mb-2"></i><p class="font-bold">جاري التحميل...</p></div>';
+      try {
+        const data = await ApiService.request(`/admin/trips/${encodeURIComponent(selected.trip_id)}/payment-ledger`);
+        const items = Array.isArray(data.data?.items) ? data.data.items : [];
+        const net = data.data?.net || {};
+        el.innerHTML = `
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div class="p-3 rounded-2xl border border-gray-200 bg-white"><p class="text-xs font-bold text-gray-500">Passenger net</p><p class="font-extrabold" dir="ltr">${net.passenger ?? 0} SAR</p></div>
+            <div class="p-3 rounded-2xl border border-gray-200 bg-white"><p class="text-xs font-bold text-gray-500">Driver net</p><p class="font-extrabold" dir="ltr">${net.driver ?? 0} SAR</p></div>
+            <div class="p-3 rounded-2xl border border-gray-200 bg-white"><p class="text-xs font-bold text-gray-500">Platform net</p><p class="font-extrabold" dir="ltr">${net.platform ?? 0} SAR</p></div>
+          </div>
+          <div class="mt-3 space-y-2">
+            ${items.map(it => `
+              <div class="p-3 rounded-2xl border border-gray-200 bg-white">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <p class="font-extrabold text-gray-800">${it.title || it.kind}</p>
+                  <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${fmtDate(it.at)}</span>
+                </div>
+                <p class="text-xs font-bold text-gray-500" dir="ltr">${it.amount ?? '--'} ${it.currency || 'SAR'} ${it.method ? '• ' + it.method : ''}</p>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } catch (e) {
+        el.innerHTML = `<div class="text-center py-6 text-red-600"><p class="font-extrabold">تعذر تحميل Ledger</p><p class="text-sm font-bold">${e.message}</p></div>`;
+      }
+    }
+
+    async function loadDispute() {
+      if (!selected) return;
+      const data = await ApiService.request(`/admin/disputes/session?case_type=${encodeURIComponent(selected.case_type)}&case_id=${encodeURIComponent(String(selected.case_id))}`);
+      const s = data.data || {};
+      document.getElementById('d-claim').value = s.claim || '';
+      document.getElementById('d-evidence').value = s.evidence || '';
+      document.getElementById('d-response').value = s.response || '';
+      document.getElementById('d-offer').value = s.settlement_offer || '';
+      document.getElementById('d-decision').value = s.decision || '';
+    }
+
+    async function saveDispute() {
+      if (!selected) return;
+      await ApiService.request('/admin/disputes/session', {
+        method: 'POST',
+        body: JSON.stringify({
+          case_type: selected.case_type,
+          case_id: String(selected.case_id),
+          claim: document.getElementById('d-claim').value,
+          evidence: document.getElementById('d-evidence').value,
+          response: document.getElementById('d-response').value,
+          settlement_offer: document.getElementById('d-offer').value,
+          decision: document.getElementById('d-decision').value
+        })
+      });
+      alert('تم حفظ جلسة النزاع');
+    }
+
+    async function closeDispute() {
+      if (!selected) return;
+      await ApiService.request('/admin/disputes/session/close', {
+        method: 'PATCH',
+        body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id) })
+      });
+      alert('تم قفل جلسة النزاع');
+    }
+
+    async function loadQaReviews() {
+      if (!selected) return;
+      const el = document.getElementById('qa-list');
+      el.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin"></i></div>';
+      const data = await ApiService.request(`/admin/qa/reviews?limit=50&case_type=${encodeURIComponent(selected.case_type)}&case_id=${encodeURIComponent(String(selected.case_id))}`);
+      const rows = Array.isArray(data.data) ? data.data : [];
+      if (!rows.length) { el.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد QA Reviews</p>'; return; }
+      el.innerHTML = rows.map(r => `
+        <div class="p-3 rounded-2xl border border-gray-200 bg-white">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <p class="font-extrabold text-gray-800">Score: ${r.score}</p>
+            <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${fmtDate(r.created_at)}</span>
+          </div>
+          <p class="text-xs font-bold text-gray-500">${r.reason || '--'}</p>
+          ${r.notes ? `<p class="text-xs font-bold text-gray-700 mt-1 whitespace-pre-wrap">${r.notes}</p>` : ''}
+        </div>
+      `).join('');
+    }
+
+    async function createQaReview() {
+      if (!selected) return;
+      const score = Number(document.getElementById('qa-score').value);
+      const reason = String(document.getElementById('qa-reason').value || '').trim();
+      const notes = String(document.getElementById('qa-notes').value || '').trim();
+      await ApiService.request('/admin/qa/reviews', {
+        method: 'POST',
+        body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id), score, reason: reason || null, notes: notes || null })
+      });
+      document.getElementById('qa-reason').value = '';
+      document.getElementById('qa-notes').value = '';
+      await loadQaReviews();
+      alert('تم إنشاء QA Review');
+    }
+
+    async function runPolicySandbox() {
+      const cap = Number(document.getElementById('ps-cap').value);
+      const days = Number(document.getElementById('ps-days').value);
+      const out = document.getElementById('ps-out');
+      out.textContent = '...';
+      try {
+        const data = await ApiService.request('/admin/policy-sandbox/refund-cap', {
+          method: 'POST',
+          body: JSON.stringify({ cap, days })
+        });
+        out.textContent = JSON.stringify(data.data, null, 2);
+      } catch (e) {
+        out.textContent = `Error: ${e.message}`;
+      }
+    }
+
+    async function loadReconciliation() {
+      const date = document.getElementById('rec-date').value;
+      if (!date) return alert('اختر تاريخ');
+      const out = document.getElementById('rec-out');
+      out.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin"></i></div>';
+      try {
+        const data = await ApiService.request(`/admin/reconciliation/daily?date=${encodeURIComponent(date)}`);
+        const rows = Array.isArray(data.data) ? data.data : [];
+        if (!rows.length) { out.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد بيانات</p>'; return; }
+        out.innerHTML = rows.slice(0, 50).map(r => `
+          <div class="p-3 rounded-2xl border border-gray-200 bg-white">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <p class="font-extrabold text-gray-800">${r.driver_name || 'Driver'} (#${r.driver_id})</p>
+              <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700" dir="ltr">Δ ${r.delta ?? 0} SAR</span>
+            </div>
+            <p class="text-xs font-bold text-gray-500" dir="ltr">cash=${r.cash_fare_sum ?? 0} • expected_commission=${r.expected_commission ?? 0} • trips=${r.trips_count ?? 0}</p>
+            <button class="mt-2 bg-amber-600 text-white px-3 py-2 rounded-xl font-extrabold hover:bg-amber-700" onclick="openReconciliationCase(${Number(r.driver_id)}, '${date}', ${Number(r.delta || 0)})">فتح Case</button>
+          </div>
+        `).join('');
+      } catch (e) {
+        out.innerHTML = `<p class="text-xs font-extrabold text-red-600">${e.message}</p>`;
+      }
+    }
+
+    async function openReconciliationCase(driverId, date, delta) {
+      try {
+        await ApiService.request('/admin/reconciliation/open-case', {
+          method: 'POST',
+          body: JSON.stringify({ driver_id: driverId, date, delta })
+        });
+        alert('تم فتح Case');
+        await refreshAll();
+      } catch (e) {
+        alert(`تعذر فتح Case: ${e.message}`);
+      }
+    }
+
     (function init(){
       const t = getToken();
       if (t) document.getElementById('token-input').value = t;
+      try {
+        const d = new Date();
+        const ds = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0,10);
+        document.getElementById('rec-date').value = ds;
+      } catch (e) {}
+      refreshCrisis();
     })();
   </script>
 </body>

@@ -160,6 +160,215 @@ function requirePermission(...permissions) {
     };
 }
 
+// ------------------------------
+// Admin Excellence helpers (U1-U10)
+// ------------------------------
+
+const ADMIN_CASE_TYPES = new Set(['support_ticket', 'refund_request', 'lost_item', 'incident']);
+
+function normCaseType(v) {
+    const t = v !== undefined && v !== null ? String(v).trim().toLowerCase() : '';
+    return t;
+}
+
+function normCaseId(v) {
+    if (v === undefined || v === null) return '';
+    const s = String(v).trim();
+    return s.slice(0, 80);
+}
+
+function assertCaseRef(caseType, caseId) {
+    const t = normCaseType(caseType);
+    const id = normCaseId(caseId);
+    if (!t || !ADMIN_CASE_TYPES.has(t)) {
+        return { ok: false, error: 'invalid_case_type' };
+    }
+    if (!id) {
+        return { ok: false, error: 'invalid_case_id' };
+    }
+    return { ok: true, case_type: t, case_id: id };
+}
+
+function isFinalCaseStatus(caseType, status) {
+    const t = normCaseType(caseType);
+    const st = status !== undefined && status !== null ? String(status).trim().toLowerCase() : '';
+    if (!t || !st) return false;
+    if (t === 'support_ticket') return ['resolved', 'closed'].includes(st);
+    if (t === 'lost_item') return ['resolved', 'closed', 'returned'].includes(st);
+    if (t === 'refund_request') return ['approved', 'rejected'].includes(st);
+    if (t === 'incident') return ['resolved', 'rejected'].includes(st);
+    return false;
+}
+
+function maskPhone(v) {
+    const s = v === undefined || v === null ? '' : String(v);
+    const digits = s.replace(/\D/g, '');
+    if (!digits) return null;
+    if (digits.length <= 4) return '****';
+    const last4 = digits.slice(-4);
+    return `***${last4}`;
+}
+
+function maskEmail(v) {
+    const s = v === undefined || v === null ? '' : String(v).trim();
+    if (!s || !s.includes('@')) return null;
+    const [user, dom] = s.split('@');
+    const u = user ? (user.length <= 2 ? '*' : (user[0] + '*'.repeat(Math.min(6, user.length - 2)) + user[user.length - 1])) : '*';
+    return `${u}@${dom}`;
+}
+
+async function getRootCauseClosure({ caseType, caseId }) {
+    const ref = assertCaseRef(caseType, caseId);
+    if (!ref.ok) return null;
+    const r = await pool.query(
+        `SELECT case_type, case_id, root_cause_key, root_cause_note, prevention_key, prevention_note, closed_by_user_id, closed_at
+         FROM admin_case_root_causes
+         WHERE case_type = $1 AND case_id = $2
+         LIMIT 1`,
+        [ref.case_type, ref.case_id]
+    );
+    return r.rows[0] || null;
+}
+
+async function upsertRootCauseClosure(req, { caseType, caseId, rootCauseKey, rootCauseNote = null, preventionKey, preventionNote = null, suppressAudit = false }) {
+    const ref = assertCaseRef(caseType, caseId);
+    if (!ref.ok) throw new Error(ref.error);
+
+    const rootKey = String(rootCauseKey || '').trim().slice(0, 80);
+    const prevKey = String(preventionKey || '').trim().slice(0, 80);
+    if (!rootKey) throw new Error('root_cause_key_required');
+    if (!prevKey) throw new Error('prevention_key_required');
+
+    const rootNote = rootCauseNote !== undefined && rootCauseNote !== null ? String(rootCauseNote).trim().slice(0, 2000) : null;
+    const prevNote = preventionNote !== undefined && preventionNote !== null ? String(preventionNote).trim().slice(0, 2000) : null;
+
+    const row = await pool.query(
+        `INSERT INTO admin_case_root_causes (
+            case_type, case_id, root_cause_key, root_cause_note, prevention_key, prevention_note, closed_by_user_id, closed_at
+         ) VALUES ($1,$2,$3,NULLIF($4,''),$5,NULLIF($6,''),$7,CURRENT_TIMESTAMP)
+         ON CONFLICT (case_type, case_id)
+         DO UPDATE SET
+            root_cause_key = EXCLUDED.root_cause_key,
+            root_cause_note = EXCLUDED.root_cause_note,
+            prevention_key = EXCLUDED.prevention_key,
+            prevention_note = EXCLUDED.prevention_note,
+            closed_by_user_id = EXCLUDED.closed_by_user_id,
+            closed_at = EXCLUDED.closed_at
+         RETURNING *`,
+        [
+            ref.case_type,
+            ref.case_id,
+            rootKey,
+            rootNote || '',
+            prevKey,
+            prevNote || '',
+            req.auth?.uid || null
+        ]
+    );
+
+    if (!suppressAudit) {
+        await writeAdminAudit(req, {
+            action: 'case.root_cause_closure',
+            entity_type: ref.case_type,
+            entity_id: ref.case_id,
+            meta: {
+                root_cause_key: rootKey,
+                prevention_key: prevKey
+            }
+        });
+    }
+
+    return row.rows[0] || null;
+}
+
+async function requireRootCauseOnFinal(req, { caseType, caseId, nextStatus, payload, suppressAudit = false }) {
+    if (!isFinalCaseStatus(caseType, nextStatus)) return;
+    const existing = await getRootCauseClosure({ caseType, caseId });
+    if (existing) return;
+
+    const rootCauseKey = payload?.root_cause_key;
+    const preventionKey = payload?.prevention_key;
+    if (!String(rootCauseKey || '').trim() || !String(preventionKey || '').trim()) {
+        const err = new Error('root_cause_required_before_closing');
+        err.statusCode = 409;
+        throw err;
+    }
+
+    await upsertRootCauseClosure(req, {
+        caseType,
+        caseId,
+        rootCauseKey,
+        rootCauseNote: payload?.root_cause_note || null,
+        preventionKey,
+        preventionNote: payload?.prevention_note || null,
+        suppressAudit
+    });
+}
+
+async function createSensitiveAccessGrant(req, { caseType, caseId, reason, ttlMinutes }) {
+    const ref = assertCaseRef(caseType, caseId);
+    if (!ref.ok) throw new Error(ref.error);
+
+    const actorUserId = req?.auth?.uid ? Number(req.auth.uid) : null;
+    const actorRole = String(req?.auth?.role || '').toLowerCase();
+    if (!actorUserId || !isAdminRole(actorRole)) {
+        const e = new Error('Unauthorized');
+        e.statusCode = 401;
+        throw e;
+    }
+
+    const safeReason = String(reason || '').trim().slice(0, 240);
+    if (!safeReason) {
+        const e = new Error('reason_required');
+        e.statusCode = 400;
+        throw e;
+    }
+
+    const ttl = Number.isFinite(Number(ttlMinutes)) ? Math.max(1, Math.min(240, Number(ttlMinutes))) : 30;
+    const expiresAt = new Date(Date.now() + ttl * 60 * 1000);
+
+    const inserted = await pool.query(
+        `INSERT INTO admin_sensitive_access_grants (case_type, case_id, actor_user_id, actor_role, reason, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING id, case_type, case_id, reason, expires_at, created_at`,
+        [ref.case_type, ref.case_id, actorUserId, actorRole, safeReason, expiresAt]
+    );
+
+    await writeAdminAudit(req, {
+        action: 'sensitive_access.justify',
+        entity_type: ref.case_type,
+        entity_id: ref.case_id,
+        meta: { reason: safeReason, expires_at: expiresAt.toISOString() }
+    });
+
+    return inserted.rows[0] || null;
+}
+
+async function isSensitiveGrantValid(req, { caseType, caseId, grantId }) {
+    const ref = assertCaseRef(caseType, caseId);
+    if (!ref.ok) return { ok: false, error: ref.error };
+
+    const actorUserId = req?.auth?.uid ? Number(req.auth.uid) : null;
+    if (!actorUserId) return { ok: false, error: 'Unauthorized', statusCode: 401 };
+
+    const id = grantId !== undefined && grantId !== null ? Number(grantId) : null;
+    if (!Number.isFinite(id) || id <= 0) return { ok: false, error: 'missing_sensitive_access_grant' };
+
+    const r = await pool.query(
+        `SELECT id, expires_at
+         FROM admin_sensitive_access_grants
+         WHERE id = $1
+           AND case_type = $2
+           AND case_id = $3
+           AND actor_user_id = $4
+           AND expires_at > NOW()
+         LIMIT 1`,
+        [id, ref.case_type, ref.case_id, actorUserId]
+    );
+    if (!r.rows.length) return { ok: false, error: 'sensitive_access_required', statusCode: 403 };
+    return { ok: true, data: r.rows[0] };
+}
+
 async function writeAdminAudit(req, { action, entity_type = null, entity_id = null, meta = null } = {}) {
     try {
         const actorUserId = req?.auth?.uid ? Number(req.auth.uid) : null;
@@ -1260,6 +1469,125 @@ async function ensureAdminPlaybooksTables() {
     }
 }
 
+async function ensureAdminExcellenceTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_case_notes (
+                id BIGSERIAL PRIMARY KEY,
+                case_type VARCHAR(40) NOT NULL,
+                case_id VARCHAR(80) NOT NULL,
+                note TEXT NOT NULL,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_by_role VARCHAR(40),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_case_notes_case ON admin_case_notes(case_type, case_id, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_sensitive_access_grants (
+                id BIGSERIAL PRIMARY KEY,
+                case_type VARCHAR(40) NOT NULL,
+                case_id VARCHAR(80) NOT NULL,
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                actor_role VARCHAR(40),
+                reason VARCHAR(240) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_sensitive_grants_case ON admin_sensitive_access_grants(case_type, case_id, expires_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_sensitive_grants_actor ON admin_sensitive_access_grants(actor_user_id, expires_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_case_root_causes (
+                case_type VARCHAR(40) NOT NULL,
+                case_id VARCHAR(80) NOT NULL,
+                root_cause_key VARCHAR(80) NOT NULL,
+                root_cause_note TEXT,
+                prevention_key VARCHAR(80) NOT NULL,
+                prevention_note TEXT,
+                closed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                closed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (case_type, case_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_case_root_causes_created ON admin_case_root_causes(closed_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_case_root_causes_key ON admin_case_root_causes(root_cause_key, closed_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_dispute_sessions (
+                id BIGSERIAL PRIMARY KEY,
+                case_type VARCHAR(40) NOT NULL,
+                case_id VARCHAR(80) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                claim TEXT,
+                evidence TEXT,
+                response TEXT,
+                settlement_offer TEXT,
+                decision TEXT,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (case_type, case_id)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_disputes_status ON admin_dispute_sessions(status, updated_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_qa_reviews (
+                id BIGSERIAL PRIMARY KEY,
+                case_type VARCHAR(40) NOT NULL,
+                case_id VARCHAR(80) NOT NULL,
+                reviewer_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                score INTEGER NOT NULL,
+                reason VARCHAR(240),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_qa_reviews_created ON admin_qa_reviews(created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_qa_reviews_case ON admin_qa_reviews(case_type, case_id, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_policy_sandbox_runs (
+                id BIGSERIAL PRIMARY KEY,
+                scenario_key VARCHAR(80) NOT NULL,
+                params_json JSONB,
+                report_json JSONB,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_policy_runs_created ON admin_policy_sandbox_runs(created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_policy_runs_scenario ON admin_policy_sandbox_runs(scenario_key, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_crisis_mode (
+                id SMALLINT PRIMARY KEY DEFAULT 1,
+                enabled BOOLEAN NOT NULL DEFAULT false,
+                title VARCHAR(120),
+                message TEXT,
+                starts_at TIMESTAMP,
+                ends_at TIMESTAMP,
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT admin_crisis_mode_singleton CHECK (id = 1)
+            );
+        `);
+        await pool.query(
+            `INSERT INTO admin_crisis_mode (id, enabled)
+             VALUES (1, false)
+             ON CONFLICT (id) DO NOTHING`
+        );
+
+        console.log('✅ Admin excellence tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure admin excellence tables:', err.message);
+    }
+}
+
 async function ensureDriverRiskColumns() {
     try {
         await pool.query('ALTER TABLE drivers ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);');
@@ -1581,6 +1909,1321 @@ app.get('/api/admin/audit', requirePermission('admin.audit.read'), async (req, r
             params
         );
         res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Crisis Mode (U9) ---
+
+app.get('/api/admin/crisis-mode', requirePermission('admin.cases.read', 'admin.ops.read'), async (req, res) => {
+    try {
+        const r = await pool.query(
+            `SELECT enabled, title, message, starts_at, ends_at, updated_by_user_id, updated_at
+             FROM admin_crisis_mode
+             WHERE id = 1
+             LIMIT 1`
+        );
+        res.json({ success: true, data: r.rows[0] || { enabled: false } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.patch('/api/admin/crisis-mode', requirePermission('admin.ops.write'), async (req, res) => {
+    try {
+        const enabled = req.body?.enabled;
+        if (typeof enabled !== 'boolean') return res.status(400).json({ success: false, error: 'enabled must be boolean' });
+
+        const title = req.body?.title !== undefined && req.body.title !== null ? String(req.body.title).trim().slice(0, 120) : null;
+        const message = req.body?.message !== undefined && req.body.message !== null ? String(req.body.message).trim().slice(0, 2000) : null;
+        const startsAt = req.body?.starts_at ? new Date(String(req.body.starts_at)) : null;
+        const endsAt = req.body?.ends_at ? new Date(String(req.body.ends_at)) : null;
+        const startsOk = !startsAt || Number.isFinite(startsAt.getTime());
+        const endsOk = !endsAt || Number.isFinite(endsAt.getTime());
+        if (!startsOk) return res.status(400).json({ success: false, error: 'invalid_starts_at' });
+        if (!endsOk) return res.status(400).json({ success: false, error: 'invalid_ends_at' });
+
+        const up = await pool.query(
+            `UPDATE admin_crisis_mode
+             SET enabled = $1,
+                 title = NULLIF($2,''),
+                 message = NULLIF($3,''),
+                 starts_at = $4,
+                 ends_at = $5,
+                 updated_by_user_id = $6,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = 1
+             RETURNING enabled, title, message, starts_at, ends_at, updated_by_user_id, updated_at`,
+            [
+                enabled,
+                title || '',
+                message || '',
+                startsAt && Number.isFinite(startsAt.getTime()) ? startsAt : null,
+                endsAt && Number.isFinite(endsAt.getTime()) ? endsAt : null,
+                req.auth?.uid || null
+            ]
+        );
+
+        await writeAdminAudit(req, { action: 'crisis_mode.toggle', entity_type: 'crisis_mode', entity_id: '1', meta: { enabled, title: title || null } });
+        res.json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Sensitive Access Justification (U7) ---
+
+app.post('/api/admin/sensitive-access/grant', requirePermission('admin.cases.read', 'admin.ops.read'), async (req, res) => {
+    try {
+        const caseType = req.body?.case_type;
+        const caseId = req.body?.case_id;
+        const reason = req.body?.reason;
+        const ttlMinutes = req.body?.ttl_minutes;
+        const grant = await createSensitiveAccessGrant(req, { caseType, caseId, reason, ttlMinutes });
+        res.status(201).json({ success: true, data: grant });
+    } catch (e) {
+        const sc = e.statusCode && Number.isFinite(Number(e.statusCode)) ? Number(e.statusCode) : 500;
+        res.status(sc).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/cases/:caseType/:caseId/sensitive', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const caseType = normCaseType(req.params.caseType);
+        const caseId = normCaseId(req.params.caseId);
+        const ref = assertCaseRef(caseType, caseId);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+
+        const grantId = req.headers['x-sensitive-access-grant'];
+        const check = await isSensitiveGrantValid(req, { caseType: ref.case_type, caseId: ref.case_id, grantId });
+        if (!check.ok) {
+            return res.status(check.statusCode || 403).json({ success: false, error: check.error || 'sensitive_access_required' });
+        }
+
+        const ctx = await loadCaseContext({ caseType: ref.case_type, caseId: ref.case_id });
+        if (!ctx.ok) return res.status(ctx.statusCode || 400).json({ success: false, error: ctx.error });
+
+        const userId = ctx.data.user_id ? Number(ctx.data.user_id) : null;
+        const driverId = ctx.data.driver_id ? Number(ctx.data.driver_id) : null;
+
+        let user = null;
+        let driver = null;
+        if (userId) {
+            const u = await pool.query('SELECT id, phone, email, name FROM users WHERE id = $1 LIMIT 1', [userId]);
+            user = u.rows[0] || null;
+        }
+        if (driverId) {
+            const d = await pool.query('SELECT id, phone, email, name FROM drivers WHERE id = $1 LIMIT 1', [driverId]);
+            driver = d.rows[0] || null;
+        }
+
+        await writeAdminAudit(req, {
+            action: 'case.sensitive.read',
+            entity_type: ref.case_type,
+            entity_id: ref.case_id,
+            meta: { user_id: userId || null, driver_id: driverId || null }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                user: user ? { id: user.id, name: user.name || null, phone: user.phone || null, email: user.email || null } : null,
+                driver: driver ? { id: driver.id, name: driver.name || null, phone: driver.phone || null, email: driver.email || null } : null
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Case Notes (U1: notes in timeline) ---
+
+app.get('/api/admin/cases/:caseType/:caseId/notes', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const caseType = normCaseType(req.params.caseType);
+        const caseId = normCaseId(req.params.caseId);
+        const ref = assertCaseRef(caseType, caseId);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+        const rows = await pool.query(
+            `SELECT id, note, created_by_user_id, created_by_role, created_at
+             FROM admin_case_notes
+             WHERE case_type = $1 AND case_id = $2
+             ORDER BY created_at DESC
+             LIMIT 200`,
+            [ref.case_type, ref.case_id]
+        );
+        res.json({ success: true, data: rows.rows || [] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/cases/:caseType/:caseId/notes', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const caseType = normCaseType(req.params.caseType);
+        const caseId = normCaseId(req.params.caseId);
+        const ref = assertCaseRef(caseType, caseId);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+
+        const note = req.body?.note !== undefined && req.body.note !== null ? String(req.body.note).trim().slice(0, 2000) : '';
+        if (!note) return res.status(400).json({ success: false, error: 'note_required' });
+
+        const inserted = await pool.query(
+            `INSERT INTO admin_case_notes (case_type, case_id, note, created_by_user_id, created_by_role)
+             VALUES ($1,$2,$3,$4,$5)
+             RETURNING id, note, created_by_user_id, created_by_role, created_at`,
+            [ref.case_type, ref.case_id, note, req.auth?.uid || null, String(req.auth?.role || '')]
+        );
+        await writeAdminAudit(req, { action: 'case.note.add', entity_type: ref.case_type, entity_id: ref.case_id, meta: { chars: note.length } });
+        res.status(201).json({ success: true, data: inserted.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Case Time‑Machine Timeline (U1) ---
+
+app.get('/api/admin/cases/:caseType/:caseId/timeline', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const caseType = normCaseType(req.params.caseType);
+        const caseId = normCaseId(req.params.caseId);
+        const ref = assertCaseRef(caseType, caseId);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+
+        const events = [];
+
+        // Base case snapshot (created)
+        try {
+            if (ref.case_type === 'support_ticket') {
+                const r = await pool.query('SELECT id, trip_id, status, category, description, created_at, updated_at FROM support_tickets WHERE id = $1 LIMIT 1', [Number(ref.case_id)]);
+                const row = r.rows[0];
+                if (row) {
+                    events.push({
+                        kind: 'case_created',
+                        at: row.created_at,
+                        title: `Support Ticket created`,
+                        payload: { status: row.status, category: row.category, trip_id: row.trip_id }
+                    });
+                }
+            }
+            if (ref.case_type === 'lost_item') {
+                const r = await pool.query('SELECT id, trip_id, status, description, created_at, updated_at FROM lost_items WHERE id = $1 LIMIT 1', [Number(ref.case_id)]);
+                const row = r.rows[0];
+                if (row) {
+                    events.push({ kind: 'case_created', at: row.created_at, title: 'Lost Item created', payload: { status: row.status, trip_id: row.trip_id } });
+                }
+            }
+            if (ref.case_type === 'refund_request') {
+                const r = await pool.query('SELECT id, trip_id, status, reason, amount_requested, created_at, updated_at FROM refund_requests WHERE id = $1 LIMIT 1', [Number(ref.case_id)]);
+                const row = r.rows[0];
+                if (row) {
+                    events.push({ kind: 'case_created', at: row.created_at, title: 'Refund Request created', payload: { status: row.status, trip_id: row.trip_id, amount_requested: row.amount_requested } });
+                }
+            }
+            if (ref.case_type === 'incident') {
+                const r = await pool.query('SELECT id, trip_id, kind, status, title, created_at, updated_at, resolved_at FROM trip_incident_packages WHERE id = $1 LIMIT 1', [Number(ref.case_id)]);
+                const row = r.rows[0];
+                if (row) {
+                    events.push({ kind: 'case_created', at: row.created_at, title: 'Incident created', payload: { status: row.status, trip_id: row.trip_id, kind: row.kind, title: row.title } });
+                    if (row.resolved_at) {
+                        events.push({ kind: 'incident_resolved', at: row.resolved_at, title: 'Incident resolved', payload: { status: row.status } });
+                    }
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        // Notes
+        try {
+            const r = await pool.query(
+                `SELECT id, note, created_by_user_id, created_by_role, created_at
+                 FROM admin_case_notes
+                 WHERE case_type = $1 AND case_id = $2
+                 ORDER BY created_at ASC
+                 LIMIT 300`,
+                [ref.case_type, ref.case_id]
+            );
+            for (const n of (r.rows || [])) {
+                events.push({ kind: 'note', at: n.created_at, title: 'Admin note', payload: { id: n.id, note: n.note, by: n.created_by_user_id, role: n.created_by_role } });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        // Root cause closure
+        try {
+            const rc = await getRootCauseClosure({ caseType: ref.case_type, caseId: ref.case_id });
+            if (rc) {
+                events.push({
+                    kind: 'root_cause',
+                    at: rc.closed_at,
+                    title: 'Root cause closure',
+                    payload: {
+                        root_cause_key: rc.root_cause_key,
+                        prevention_key: rc.prevention_key
+                    }
+                });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        // Sensitive access grants
+        try {
+            const r = await pool.query(
+                `SELECT id, reason, expires_at, actor_user_id, actor_role, created_at
+                 FROM admin_sensitive_access_grants
+                 WHERE case_type = $1 AND case_id = $2
+                 ORDER BY created_at ASC
+                 LIMIT 100`,
+                [ref.case_type, ref.case_id]
+            );
+            for (const g of (r.rows || [])) {
+                events.push({ kind: 'sensitive_access', at: g.created_at, title: 'Sensitive access granted', payload: { id: g.id, reason: g.reason, expires_at: g.expires_at, actor_user_id: g.actor_user_id, actor_role: g.actor_role } });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        // Audit events
+        try {
+            const r = await pool.query(
+                `SELECT id, action, meta_json, actor_user_id, actor_role, created_at
+                 FROM admin_audit_logs
+                 WHERE entity_type = $1 AND entity_id = $2
+                 ORDER BY created_at ASC
+                 LIMIT 400`,
+                [ref.case_type, ref.case_id]
+            );
+            for (const a of (r.rows || [])) {
+                events.push({ kind: 'audit', at: a.created_at, title: a.action, payload: { id: a.id, meta: a.meta_json, actor_user_id: a.actor_user_id, actor_role: a.actor_role } });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        // Wallet tx (refund + manual case-linked)
+        try {
+            let walletRows = [];
+            if (ref.case_type === 'refund_request') {
+                const r = await pool.query(
+                    `SELECT wt.id, wt.owner_type, wt.owner_id, wt.amount, wt.currency, wt.reason, wt.reference_type, wt.reference_id, wt.created_at
+                     FROM wallet_transactions wt
+                     WHERE (wt.reference_type = 'refund' AND wt.reference_id = $1)
+                        OR (wt.reference_type = $2 AND wt.reference_id = $3)
+                     ORDER BY wt.created_at ASC
+                     LIMIT 200`,
+                    [`refund:${ref.case_id}`, ref.case_type, ref.case_id]
+                );
+                walletRows = r.rows || [];
+            } else {
+                const r = await pool.query(
+                    `SELECT wt.id, wt.owner_type, wt.owner_id, wt.amount, wt.currency, wt.reason, wt.reference_type, wt.reference_id, wt.created_at
+                     FROM wallet_transactions wt
+                     WHERE wt.reference_type = $1 AND wt.reference_id = $2
+                     ORDER BY wt.created_at ASC
+                     LIMIT 200`,
+                    [ref.case_type, ref.case_id]
+                );
+                walletRows = r.rows || [];
+            }
+            for (const w of walletRows) {
+                events.push({ kind: 'wallet_tx', at: w.created_at, title: 'Wallet transaction', payload: w });
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        events.sort((a, b) => {
+            const ta = a?.at ? new Date(a.at).getTime() : 0;
+            const tb = b?.at ? new Date(b.at).getTime() : 0;
+            return ta - tb;
+        });
+
+        res.json({ success: true, data: { case_type: ref.case_type, case_id: ref.case_id, events } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- One‑Click Remedy Packs (U2) ---
+
+const REMEDY_PACKS = Object.freeze([
+    {
+        key: 'delay_apology_credit',
+        title: 'تأخير → اعتذار + تعويض محفظة + إغلاق',
+        applies_to: ['support_ticket', 'incident'],
+        needs_amount: true,
+        close_status: { support_ticket: 'resolved', incident: 'resolved' }
+    },
+    {
+        key: 'cancel_rebook',
+        title: 'إلغاء/Timeout → Rebook + إغلاق',
+        applies_to: ['support_ticket'],
+        needs_amount: false,
+        close_status: { support_ticket: 'resolved' }
+    },
+    {
+        key: 'refund_full_wallet',
+        title: 'Refund → موافقة كاملة + محفظة + إغلاق',
+        applies_to: ['refund_request'],
+        needs_amount: false,
+        close_status: { refund_request: 'approved' }
+    },
+    {
+        key: 'refund_partial_wallet',
+        title: 'Refund → موافقة جزئية + محفظة + إغلاق',
+        applies_to: ['refund_request'],
+        needs_amount: true,
+        close_status: { refund_request: 'approved' }
+    },
+    {
+        key: 'lost_followup',
+        title: 'مفقودات → متابعة منظمة + تحديث الحالة',
+        applies_to: ['lost_item'],
+        needs_amount: false,
+        close_status: { lost_item: 'pending' }
+    }
+]);
+
+function packsForCaseType(caseType) {
+    const t = normCaseType(caseType);
+    return REMEDY_PACKS.filter(p => Array.isArray(p.applies_to) && p.applies_to.includes(t));
+}
+
+async function loadCaseContext({ caseType, caseId }) {
+    const ref = assertCaseRef(caseType, caseId);
+    if (!ref.ok) return { ok: false, error: ref.error };
+
+    const idNum = Number(ref.case_id);
+    if (!Number.isFinite(idNum) || idNum <= 0) return { ok: false, error: 'invalid_case_id' };
+
+    if (ref.case_type === 'support_ticket') {
+        const r = await pool.query(
+            `SELECT st.id, st.trip_id, st.user_id, st.status, st.category, st.description, st.created_at,
+                    t.driver_id, t.status AS trip_status
+             FROM support_tickets st
+             LEFT JOIN trips t ON t.id = st.trip_id
+             WHERE st.id = $1
+             LIMIT 1`,
+            [idNum]
+        );
+        const row = r.rows[0] || null;
+        if (!row) return { ok: false, error: 'case_not_found', statusCode: 404 };
+        return { ok: true, data: row };
+    }
+
+    if (ref.case_type === 'refund_request') {
+        const r = await pool.query(
+            `SELECT rr.id, rr.trip_id, rr.user_id, rr.status, rr.reason, rr.amount_requested, rr.created_at,
+                    t.driver_id, t.status AS trip_status
+             FROM refund_requests rr
+             LEFT JOIN trips t ON t.id = rr.trip_id
+             WHERE rr.id = $1
+             LIMIT 1`,
+            [idNum]
+        );
+        const row = r.rows[0] || null;
+        if (!row) return { ok: false, error: 'case_not_found', statusCode: 404 };
+        return { ok: true, data: row };
+    }
+
+    if (ref.case_type === 'lost_item') {
+        const r = await pool.query(
+            `SELECT li.id, li.trip_id, li.user_id, li.status, li.description, li.created_at,
+                    t.driver_id, t.status AS trip_status
+             FROM lost_items li
+             LEFT JOIN trips t ON t.id = li.trip_id
+             WHERE li.id = $1
+             LIMIT 1`,
+            [idNum]
+        );
+        const row = r.rows[0] || null;
+        if (!row) return { ok: false, error: 'case_not_found', statusCode: 404 };
+        return { ok: true, data: row };
+    }
+
+    if (ref.case_type === 'incident') {
+        const r = await pool.query(
+            `SELECT ip.id, ip.trip_id, ip.status, ip.title, ip.description, ip.created_at,
+                    t.user_id, t.driver_id, t.status AS trip_status
+             FROM trip_incident_packages ip
+             LEFT JOIN trips t ON t.id = ip.trip_id
+             WHERE ip.id = $1
+             LIMIT 1`,
+            [idNum]
+        );
+        const row = r.rows[0] || null;
+        if (!row) return { ok: false, error: 'case_not_found', statusCode: 404 };
+        return { ok: true, data: row };
+    }
+
+    return { ok: false, error: 'unsupported_case_type' };
+}
+
+async function adminRebookTrip({ baseTripId }) {
+    // Minimal rebook (same as /api/trips/:id/rebook but for admin inside remedy packs)
+    const tripRes = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [String(baseTripId)]);
+    const tripRow = tripRes.rows[0] || null;
+    if (!tripRow) return { ok: false, error: 'Trip not found' };
+    const st = String(tripRow.status || '').toLowerCase();
+    if (!(st === 'cancelled' || st === 'pending')) {
+        return { ok: false, error: 'rebook_allowed_for_cancelled_or_pending_only' };
+    }
+
+    const newTripId = `TR-${Date.now()}`;
+    const baseCost = tripRow.cost !== undefined && tripRow.cost !== null ? Number(tripRow.cost) : 0;
+    const created = await pool.query(
+        `INSERT INTO trips (
+            id, user_id, rider_id, driver_id,
+            pickup_location, dropoff_location,
+            pickup_lat, pickup_lng, pickup_accuracy, pickup_timestamp,
+            dropoff_lat, dropoff_lng,
+            car_type, cost, price,
+            distance, distance_km, duration, duration_minutes,
+            payment_method, status, driver_name, source,
+            pickup_hub_id, passenger_note, booked_for_family_member_id, price_lock_id, quiet_mode
+        ) VALUES (
+            $1,$2,$3,NULL,
+            $4,$5,
+            $6,$7,NULL,NULL,
+            $8,$9,
+            $10,$11,$11,
+            $12,$12,$13,$13,
+            $14,'pending',NULL,'rebook_admin',
+            $15,$16,$17,NULL,$18
+        )
+        RETURNING *`,
+        [
+            newTripId,
+            tripRow.user_id,
+            tripRow.user_id,
+            tripRow.pickup_location,
+            tripRow.dropoff_location,
+            tripRow.pickup_lat,
+            tripRow.pickup_lng,
+            tripRow.dropoff_lat,
+            tripRow.dropoff_lng,
+            tripRow.car_type || 'economy',
+            Number.isFinite(baseCost) ? baseCost : 0,
+            tripRow.distance_km !== undefined && tripRow.distance_km !== null ? Number(tripRow.distance_km) : (tripRow.distance !== undefined && tripRow.distance !== null ? Number(tripRow.distance) : null),
+            tripRow.duration_minutes !== undefined && tripRow.duration_minutes !== null ? Number(tripRow.duration_minutes) : (tripRow.duration !== undefined && tripRow.duration !== null ? Number(tripRow.duration) : null),
+            tripRow.payment_method || 'cash',
+            tripRow.pickup_hub_id || null,
+            tripRow.passenger_note || null,
+            tripRow.booked_for_family_member_id || null,
+            !!tripRow.quiet_mode
+        ]
+    );
+
+    return { ok: true, data: { old_trip_id: String(tripRow.id), new_trip_id: String(created.rows[0].id) } };
+}
+
+app.get('/api/admin/remedy-packs', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const caseType = req.query.case_type ? String(req.query.case_type) : '';
+        const packs = packsForCaseType(caseType).map(p => ({ key: p.key, title: p.title, needs_amount: !!p.needs_amount }));
+        res.json({ success: true, data: packs });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/remedy-packs/preview', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const ref = assertCaseRef(req.body?.case_type, req.body?.case_id);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+        const packKey = String(req.body?.pack_key || '').trim();
+        const pack = REMEDY_PACKS.find(p => p.key === packKey) || null;
+        if (!pack) return res.status(404).json({ success: false, error: 'pack_not_found' });
+        if (!pack.applies_to.includes(ref.case_type)) return res.status(400).json({ success: false, error: 'pack_not_applicable_to_case_type' });
+
+        const ctx = await loadCaseContext({ caseType: ref.case_type, caseId: ref.case_id });
+        if (!ctx.ok) return res.status(ctx.statusCode || 400).json({ success: false, error: ctx.error });
+
+        const amount = req.body?.amount !== undefined && req.body.amount !== null ? Number(req.body.amount) : null;
+        const steps = [];
+        if (pack.key === 'delay_apology_credit') {
+            steps.push({ kind: 'case_status', next_status: pack.close_status[ref.case_type] || 'resolved' });
+            steps.push({ kind: 'wallet_credit', owner_type: 'user', owner_id: ctx.data.user_id || null, amount: Number.isFinite(amount) ? Math.abs(amount) : null });
+        }
+        if (pack.key === 'cancel_rebook') {
+            steps.push({ kind: 'rebook_trip', trip_id: ctx.data.trip_id || null });
+            steps.push({ kind: 'case_status', next_status: 'resolved' });
+        }
+        if (pack.key === 'refund_full_wallet') {
+            steps.push({ kind: 'refund_approve', amount: ctx.data.amount_requested !== undefined ? Number(ctx.data.amount_requested) : null });
+        }
+        if (pack.key === 'refund_partial_wallet') {
+            steps.push({ kind: 'refund_approve', amount: Number.isFinite(amount) ? Math.abs(amount) : null });
+        }
+        if (pack.key === 'lost_followup') {
+            steps.push({ kind: 'case_status', next_status: 'pending' });
+            steps.push({ kind: 'note', template: 'متابعة مفقودات: تم فتح متابعة منظمة مع السائق/الراكب' });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                case_type: ref.case_type,
+                case_id: ref.case_id,
+                pack: { key: pack.key, title: pack.title, needs_amount: !!pack.needs_amount },
+                preview: {
+                    trip_id: ctx.data.trip_id || null,
+                    user_id: ctx.data.user_id || null,
+                    driver_id: ctx.data.driver_id || null,
+                    steps
+                }
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/remedy-packs/execute', requirePermission('admin.cases.read'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const ref = assertCaseRef(req.body?.case_type, req.body?.case_id);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+        const packKey = String(req.body?.pack_key || '').trim();
+        const pack = REMEDY_PACKS.find(p => p.key === packKey) || null;
+        if (!pack) return res.status(404).json({ success: false, error: 'pack_not_found' });
+        if (!pack.applies_to.includes(ref.case_type)) return res.status(400).json({ success: false, error: 'pack_not_applicable_to_case_type' });
+
+        const ctx = await loadCaseContext({ caseType: ref.case_type, caseId: ref.case_id });
+        if (!ctx.ok) return res.status(ctx.statusCode || 400).json({ success: false, error: ctx.error });
+
+        const amount = req.body?.amount !== undefined && req.body.amount !== null ? Number(req.body.amount) : null;
+        const note = req.body?.note !== undefined && req.body.note !== null ? String(req.body.note).trim().slice(0, 2000) : null;
+
+        const steps = [];
+        await client.query('BEGIN');
+
+        // Execute pack-specific steps
+        if (pack.key === 'delay_apology_credit') {
+            if (!hasPermission(req, 'admin.wallet.write')) {
+                throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
+            }
+            const userId = ctx.data.user_id ? Number(ctx.data.user_id) : null;
+            if (!userId) throw new Error('case_missing_user_id');
+            if (!Number.isFinite(amount) || amount <= 0) {
+                throw Object.assign(new Error('amount_required'), { statusCode: 400 });
+            }
+
+            const reason = `Remedy pack (${pack.key}) for ${ref.case_type}#${ref.case_id}`;
+            const wt = await client.query(
+                `INSERT INTO wallet_transactions (owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_by_user_id, created_by_role)
+                 VALUES ('user', $1, $2, 'SAR', $3, $4, $5, $6, 'admin')
+                 RETURNING id`,
+                [userId, Math.abs(amount), reason, ref.case_type, ref.case_id, req.auth?.uid || null]
+            );
+            await client.query(
+                `UPDATE users
+                 SET balance = COALESCE(balance, 0) + $1,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [Math.abs(amount), userId]
+            );
+            steps.push({ kind: 'wallet_credit', wallet_tx_id: wt.rows?.[0]?.id || null, owner_id: userId, amount: Math.abs(amount) });
+
+            const nextStatus = pack.close_status[ref.case_type] || 'resolved';
+            await requireRootCauseOnFinal(req, { caseType: ref.case_type, caseId: ref.case_id, nextStatus, payload: req.body, suppressAudit: true });
+
+            if (ref.case_type === 'support_ticket') {
+                await client.query(
+                    `UPDATE support_tickets
+                     SET status = $2,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $1`,
+                    [Number(ref.case_id), nextStatus]
+                );
+            } else if (ref.case_type === 'incident') {
+                await client.query(
+                    `UPDATE trip_incident_packages
+                     SET status = $2,
+                         resolution_note = NULLIF($3,''),
+                         resolved_at = CURRENT_TIMESTAMP,
+                         resolved_by_admin_id = $4,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $1`,
+                    [Number(ref.case_id), nextStatus, note || '', req.auth?.uid || null]
+                );
+            }
+            steps.push({ kind: 'case_status', next_status: nextStatus });
+        }
+
+        if (pack.key === 'cancel_rebook') {
+            const tripId = ctx.data.trip_id ? String(ctx.data.trip_id) : null;
+            if (!tripId) throw new Error('case_missing_trip_id');
+            const rb = await adminRebookTrip({ baseTripId: tripId });
+            if (!rb.ok) throw Object.assign(new Error(rb.error || 'rebook_failed'), { statusCode: 409 });
+            steps.push({ kind: 'rebook_trip', ...rb.data });
+
+            const nextStatus = 'resolved';
+            await requireRootCauseOnFinal(req, { caseType: ref.case_type, caseId: ref.case_id, nextStatus, payload: req.body, suppressAudit: true });
+            await client.query(
+                `UPDATE support_tickets
+                 SET status = $2,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1`,
+                [Number(ref.case_id), nextStatus]
+            );
+            steps.push({ kind: 'case_status', next_status: nextStatus });
+        }
+
+        if (pack.key === 'refund_full_wallet' || pack.key === 'refund_partial_wallet') {
+            if (!hasPermission(req, 'admin.refunds.approve')) {
+                throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
+            }
+            const userId = ctx.data.user_id ? Number(ctx.data.user_id) : null;
+            if (!userId) throw new Error('case_missing_user_id');
+
+            const base = ctx.data.amount_requested !== undefined && ctx.data.amount_requested !== null ? Number(ctx.data.amount_requested) : null;
+            const toCredit = pack.key === 'refund_partial_wallet'
+                ? (Number.isFinite(amount) ? Math.abs(amount) : null)
+                : (Number.isFinite(base) ? Math.abs(base) : null);
+            if (!Number.isFinite(toCredit) || toCredit <= 0) {
+                throw Object.assign(new Error('invalid_refund_amount'), { statusCode: 400 });
+            }
+
+            const nextStatus = 'approved';
+            await requireRootCauseOnFinal(req, { caseType: ref.case_type, caseId: ref.case_id, nextStatus, payload: req.body, suppressAudit: true });
+
+            // Wallet credit tied to refund_request id for ledger linking
+            await client.query(
+                `INSERT INTO wallet_transactions (
+                    owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_by_user_id, created_by_role
+                 ) VALUES ('user', $1, $2, 'SAR', $3, 'refund', $4, $5, 'admin')
+                 ON CONFLICT DO NOTHING`,
+                [
+                    userId,
+                    Math.abs(toCredit),
+                    `Refund for trip ${String(ctx.data.trip_id || '')}`,
+                    `refund:${String(ref.case_id)}`,
+                    req.auth?.uid || null
+                ]
+            );
+
+            await client.query(
+                `UPDATE users
+                 SET balance = COALESCE(balance, 0) + $1,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2`,
+                [Math.abs(toCredit), userId]
+            );
+
+            await client.query(
+                `UPDATE refund_requests
+                 SET status = 'approved',
+                     resolution_note = NULLIF($2,''),
+                     reviewed_by = $3,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1`,
+                [Number(ref.case_id), note || '', req.auth?.uid || null]
+            );
+
+            steps.push({ kind: 'refund_approve', amount: Math.abs(toCredit) });
+        }
+
+        if (pack.key === 'lost_followup') {
+            const nextStatus = 'pending';
+            await client.query(
+                `UPDATE lost_items
+                 SET status = $2,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1`,
+                [Number(ref.case_id), nextStatus]
+            );
+            steps.push({ kind: 'case_status', next_status: nextStatus });
+
+            const inserted = await client.query(
+                `INSERT INTO admin_case_notes (case_type, case_id, note, created_by_user_id, created_by_role)
+                 VALUES ($1,$2,$3,$4,$5)
+                 RETURNING id`,
+                [ref.case_type, ref.case_id, note || 'متابعة مفقودات: تم فتح متابعة منظمة مع السائق/الراكب', req.auth?.uid || null, String(req.auth?.role || '')]
+            );
+            steps.push({ kind: 'note', note_id: inserted.rows?.[0]?.id || null });
+        }
+
+        await client.query('COMMIT');
+
+        // Single aggregated audit entry
+        await writeAdminAudit(req, {
+            action: 'remedy_pack.execute',
+            entity_type: ref.case_type,
+            entity_id: ref.case_id,
+            meta: {
+                pack_key: pack.key,
+                steps
+            }
+        });
+
+        res.status(201).json({ success: true, data: { case_type: ref.case_type, case_id: ref.case_id, pack_key: pack.key, steps } });
+    } catch (e) {
+        try { await client.query('ROLLBACK'); } catch (err) {}
+        const sc = e?.statusCode && Number.isFinite(Number(e.statusCode)) ? Number(e.statusCode) : 500;
+        res.status(sc).json({ success: false, error: e.message });
+    } finally {
+        client.release();
+    }
+});
+
+// --- Payment Truth Ledger (U3) ---
+
+app.get('/api/admin/trips/:tripId/payment-ledger', requirePermission('admin.cases.read', 'admin.refunds.read', 'admin.ops.read'), async (req, res) => {
+    try {
+        const tripId = String(req.params.tripId);
+
+        const tripRes = await pool.query(
+            `SELECT id, user_id, driver_id, cost, price, payment_method, status, created_at, completed_at,
+                    fare_before_discount, discount_amount, discount_meta_json
+             FROM trips
+             WHERE id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+        const trip = tripRes.rows[0] || null;
+        if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        let split = [];
+        let refunds = [];
+        let tips = [];
+        let refundWalletTx = [];
+        let tipWalletTx = [];
+
+        try {
+            const r = await pool.query(
+                `SELECT id, payer_user_id, amount, method, status, paid_at, created_at
+                 FROM trip_split_payments
+                 WHERE trip_id = $1
+                 ORDER BY created_at ASC`,
+                [tripId]
+            );
+            split = r.rows || [];
+        } catch (e) {
+            split = [];
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT id, trip_id, user_id, status, amount_requested, resolution_note, created_at, updated_at
+                 FROM refund_requests
+                 WHERE trip_id = $1
+                 ORDER BY created_at ASC`,
+                [tripId]
+            );
+            refunds = r.rows || [];
+        } catch (e) {
+            refunds = [];
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT id, user_id, driver_id, amount, method, created_at
+                 FROM trip_tips
+                 WHERE trip_id = $1
+                 ORDER BY created_at ASC`,
+                [tripId]
+            );
+            tips = r.rows || [];
+        } catch (e) {
+            tips = [];
+        }
+
+        try {
+            if (refunds.length) {
+                const ids = refunds.map(x => `refund:${x.id}`);
+                const r = await pool.query(
+                    `SELECT id, owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_at
+                     FROM wallet_transactions
+                     WHERE reference_type = 'refund' AND reference_id = ANY($1::text[])
+                     ORDER BY created_at ASC`,
+                    [ids]
+                );
+                refundWalletTx = r.rows || [];
+            }
+        } catch (e) {
+            refundWalletTx = [];
+        }
+
+        try {
+            const r = await pool.query(
+                `SELECT id, owner_type, owner_id, amount, currency, reason, reference_type, reference_id, created_at
+                 FROM wallet_transactions
+                 WHERE reference_type = 'tip' AND reference_id = $1
+                 ORDER BY created_at ASC`,
+                [`tip:${tripId}`]
+            );
+            tipWalletTx = r.rows || [];
+        } catch (e) {
+            tipWalletTx = [];
+        }
+
+        const items = [];
+        const fare = trip.fare_before_discount !== undefined && trip.fare_before_discount !== null
+            ? Number(trip.fare_before_discount)
+            : (trip.cost !== undefined && trip.cost !== null ? Number(trip.cost) : 0);
+        const discount = trip.discount_amount !== undefined && trip.discount_amount !== null ? Number(trip.discount_amount) : 0;
+        const fareNet = Number.isFinite(fare) ? fare - (Number.isFinite(discount) ? discount : 0) : 0;
+
+        items.push({
+            kind: 'fare',
+            title: 'Fare',
+            amount: Number.isFinite(fareNet) ? fareNet : null,
+            currency: 'SAR',
+            method: trip.payment_method || null,
+            at: trip.created_at,
+            ref: { trip_id: tripId }
+        });
+
+        if (Number.isFinite(discount) && discount > 0) {
+            items.push({ kind: 'discount', title: 'Discount', amount: -Math.abs(discount), currency: 'SAR', at: trip.created_at, ref: { trip_id: tripId } });
+        }
+
+        for (const s of split) {
+            items.push({
+                kind: 'split_payment',
+                title: 'Split payment',
+                amount: s.amount !== undefined && s.amount !== null ? Number(s.amount) : null,
+                currency: 'SAR',
+                method: s.method || null,
+                at: s.paid_at || s.created_at,
+                ref: { split_payment_id: s.id }
+            });
+        }
+
+        for (const rr of refunds) {
+            items.push({
+                kind: 'refund_request',
+                title: `Refund request #${rr.id}`,
+                amount: rr.amount_requested !== undefined && rr.amount_requested !== null ? -Math.abs(Number(rr.amount_requested)) : null,
+                currency: 'SAR',
+                status: rr.status,
+                at: rr.updated_at || rr.created_at,
+                ref: { refund_request_id: rr.id }
+            });
+        }
+
+        for (const w of refundWalletTx) {
+            items.push({ kind: 'wallet_tx', title: 'Refund wallet tx', amount: w.amount !== undefined && w.amount !== null ? Number(w.amount) : null, currency: w.currency || 'SAR', at: w.created_at, ref: { wallet_tx_id: w.id, reference_id: w.reference_id } });
+        }
+
+        for (const t of tips) {
+            items.push({ kind: 'tip', title: `Tip #${t.id}`, amount: t.amount !== undefined && t.amount !== null ? Number(t.amount) : null, currency: 'SAR', method: t.method || null, at: t.created_at, ref: { tip_id: t.id } });
+        }
+
+        for (const w of tipWalletTx) {
+            items.push({ kind: 'wallet_tx', title: 'Tip wallet tx', amount: w.amount !== undefined && w.amount !== null ? Number(w.amount) : null, currency: w.currency || 'SAR', at: w.created_at, ref: { wallet_tx_id: w.id, reference_id: w.reference_id } });
+        }
+
+        // Net per party (simple MVP; commission not modeled here)
+        const net = { passenger: 0, driver: 0, platform: 0 };
+        // Assume fare paid by passenger (negative to passenger)
+        if (Number.isFinite(fareNet)) net.passenger -= fareNet;
+        if (Number.isFinite(fareNet)) net.driver += fareNet;
+        // Refunds reduce passenger net-negative and reduce driver net-positive (best-effort)
+        for (const rr of refunds) {
+            const amt = rr.amount_requested !== undefined && rr.amount_requested !== null ? Number(rr.amount_requested) : 0;
+            if (Number.isFinite(amt) && amt > 0 && ['approved'].includes(String(rr.status || '').toLowerCase())) {
+                net.passenger += amt;
+                net.driver -= amt;
+            }
+        }
+        for (const t of tips) {
+            const amt = t.amount !== undefined && t.amount !== null ? Number(t.amount) : 0;
+            if (Number.isFinite(amt) && amt > 0) {
+                net.passenger -= amt;
+                net.driver += amt;
+            }
+        }
+
+        items.sort((a, b) => {
+            const ta = a?.at ? new Date(a.at).getTime() : 0;
+            const tb = b?.at ? new Date(b.at).getTime() : 0;
+            return ta - tb;
+        });
+
+        res.json({
+            success: true,
+            data: {
+                trip,
+                items,
+                net
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Cash & Wallet Reconciliation (U4) ---
+
+app.get('/api/admin/reconciliation/daily', requirePermission('admin.ops.read'), async (req, res) => {
+    try {
+        const dateStr = req.query.date ? String(req.query.date) : null;
+        const d = dateStr ? new Date(`${dateStr}T00:00:00Z`) : new Date();
+        if (!Number.isFinite(d.getTime())) return res.status(400).json({ success: false, error: 'invalid_date' });
+        const day = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+        const dayNext = new Date(day.getTime() + 24 * 60 * 60 * 1000);
+
+        const rate = process.env.DRIVER_CASH_COMMISSION_RATE !== undefined && process.env.DRIVER_CASH_COMMISSION_RATE !== null
+            ? Number(process.env.DRIVER_CASH_COMMISSION_RATE)
+            : 0;
+        const commissionRate = Number.isFinite(rate) ? Math.max(0, Math.min(0.5, rate)) : 0;
+
+        const rows = await pool.query(
+            `WITH trips_day AS (
+                SELECT t.driver_id,
+                       SUM(CASE WHEN LOWER(COALESCE(t.payment_method,'')) = 'cash' THEN COALESCE(t.cost, 0)::numeric ELSE 0::numeric END) AS cash_fare_sum,
+                       MAX(t.id) FILTER (WHERE t.id IS NOT NULL) AS sample_trip_id,
+                       COUNT(*)::int AS trips_count
+                FROM trips t
+                WHERE t.driver_id IS NOT NULL
+                  AND t.status = 'completed'
+                  AND t.completed_at >= $1 AND t.completed_at < $2
+                GROUP BY t.driver_id
+            )
+            SELECT td.driver_id,
+                   d.name AS driver_name,
+                   d.phone AS driver_phone,
+                   td.trips_count,
+                   td.cash_fare_sum,
+                   (td.cash_fare_sum * $3)::numeric AS expected_commission,
+                   td.sample_trip_id
+            FROM trips_day td
+            LEFT JOIN drivers d ON d.id = td.driver_id
+            ORDER BY expected_commission DESC
+            LIMIT 500`,
+            [day, dayNext, commissionRate]
+        );
+
+        const data = (rows.rows || []).map(r => {
+            const expected = r.expected_commission !== undefined && r.expected_commission !== null ? Number(r.expected_commission) : 0;
+            return {
+                driver_id: r.driver_id,
+                driver_name: r.driver_name,
+                driver_phone: r.driver_phone,
+                trips_count: r.trips_count,
+                cash_fare_sum: r.cash_fare_sum,
+                expected_commission: expected,
+                delta: expected,
+                sample_trip_id: r.sample_trip_id
+            };
+        });
+
+        res.json({
+            success: true,
+            data,
+            meta: {
+                date: day.toISOString().slice(0, 10),
+                commission_rate: commissionRate
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/reconciliation/open-case', requirePermission('admin.ops.write'), async (req, res) => {
+    try {
+        const driverId = req.body?.driver_id !== undefined && req.body.driver_id !== null ? Number(req.body.driver_id) : null;
+        const dateStr = req.body?.date ? String(req.body.date) : null;
+        const delta = req.body?.delta !== undefined && req.body.delta !== null ? Number(req.body.delta) : null;
+        if (!Number.isFinite(driverId) || driverId <= 0) return res.status(400).json({ success: false, error: 'invalid_driver_id' });
+        if (!dateStr) return res.status(400).json({ success: false, error: 'date_required' });
+
+        // Find a representative trip to tie the case to (so it appears in Case Inbox with driver_id)
+        const t = await pool.query(
+            `SELECT id
+             FROM trips
+             WHERE driver_id = $1
+               AND status = 'completed'
+               AND completed_at >= ($2::date)
+               AND completed_at < ($2::date + INTERVAL '1 day')
+             ORDER BY completed_at DESC
+             LIMIT 1`,
+            [driverId, dateStr]
+        );
+        const tripId = t.rows?.[0]?.id ? String(t.rows[0].id) : null;
+        if (!tripId) return res.status(404).json({ success: false, error: 'no_completed_trip_found_for_driver_on_date' });
+
+        const desc = `Daily reconciliation delta for driver_id=${driverId} date=${dateStr} delta=${Number.isFinite(delta) ? delta : 'n/a'}`;
+        const inserted = await pool.query(
+            `INSERT INTO support_tickets (trip_id, user_id, category, description, status)
+             VALUES ($1, NULL, 'reconciliation', $2, 'open')
+             RETURNING *`,
+            [tripId, desc]
+        );
+
+        await writeAdminAudit(req, { action: 'reconciliation.case_open', entity_type: 'support_ticket', entity_id: String(inserted.rows?.[0]?.id || ''), meta: { driver_id: driverId, date: dateStr, delta: Number.isFinite(delta) ? delta : null } });
+
+        res.status(201).json({ success: true, data: inserted.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Dispute Mediation Console (U5) ---
+
+app.get('/api/admin/disputes/session', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const ref = assertCaseRef(req.query.case_type, req.query.case_id);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+        const r = await pool.query(
+            `SELECT id, case_type, case_id, status, claim, evidence, response, settlement_offer, decision, created_by_user_id, updated_by_user_id, created_at, updated_at
+             FROM admin_dispute_sessions
+             WHERE case_type = $1 AND case_id = $2
+             LIMIT 1`,
+            [ref.case_type, ref.case_id]
+        );
+        res.json({ success: true, data: r.rows[0] || null });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/disputes/session', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const ref = assertCaseRef(req.body?.case_type, req.body?.case_id);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+
+        const payload = {
+            claim: req.body?.claim !== undefined && req.body.claim !== null ? String(req.body.claim).trim().slice(0, 4000) : null,
+            evidence: req.body?.evidence !== undefined && req.body.evidence !== null ? String(req.body.evidence).trim().slice(0, 4000) : null,
+            response: req.body?.response !== undefined && req.body.response !== null ? String(req.body.response).trim().slice(0, 4000) : null,
+            settlement_offer: req.body?.settlement_offer !== undefined && req.body.settlement_offer !== null ? String(req.body.settlement_offer).trim().slice(0, 4000) : null,
+            decision: req.body?.decision !== undefined && req.body.decision !== null ? String(req.body.decision).trim().slice(0, 4000) : null
+        };
+
+        const up = await pool.query(
+            `INSERT INTO admin_dispute_sessions (case_type, case_id, status, claim, evidence, response, settlement_offer, decision, created_by_user_id, updated_by_user_id)
+             VALUES ($1,$2,'open',NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8,$8)
+             ON CONFLICT (case_type, case_id)
+             DO UPDATE SET
+                claim = COALESCE(EXCLUDED.claim, admin_dispute_sessions.claim),
+                evidence = COALESCE(EXCLUDED.evidence, admin_dispute_sessions.evidence),
+                response = COALESCE(EXCLUDED.response, admin_dispute_sessions.response),
+                settlement_offer = COALESCE(EXCLUDED.settlement_offer, admin_dispute_sessions.settlement_offer),
+                decision = COALESCE(EXCLUDED.decision, admin_dispute_sessions.decision),
+                updated_by_user_id = EXCLUDED.updated_by_user_id,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [ref.case_type, ref.case_id, payload.claim || '', payload.evidence || '', payload.response || '', payload.settlement_offer || '', payload.decision || '', req.auth?.uid || null]
+        );
+
+        await writeAdminAudit(req, { action: 'dispute.session_upsert', entity_type: ref.case_type, entity_id: ref.case_id, meta: { status: 'open' } });
+        res.status(201).json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.patch('/api/admin/disputes/session/close', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const ref = assertCaseRef(req.body?.case_type, req.body?.case_id);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+
+        const up = await pool.query(
+            `UPDATE admin_dispute_sessions
+             SET status = 'closed',
+                 updated_by_user_id = $3,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE case_type = $1 AND case_id = $2
+             RETURNING *`,
+            [ref.case_type, ref.case_id, req.auth?.uid || null]
+        );
+        if (!up.rows.length) return res.status(404).json({ success: false, error: 'session_not_found' });
+
+        await writeAdminAudit(req, { action: 'dispute.session_close', entity_type: ref.case_type, entity_id: ref.case_id });
+        res.json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- QA Sampling + Coach (U6) ---
+
+app.get('/api/admin/qa/reviews', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 200) : 50;
+        const caseType = req.query.case_type !== undefined && req.query.case_type !== null ? String(req.query.case_type) : null;
+        const caseId = req.query.case_id !== undefined && req.query.case_id !== null ? String(req.query.case_id) : null;
+
+        const params = [];
+        let where = 'WHERE 1=1';
+        if (caseType && caseId) {
+            const ref = assertCaseRef(caseType, caseId);
+            if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+            params.push(ref.case_type);
+            where += ` AND case_type = $${params.length}`;
+            params.push(ref.case_id);
+            where += ` AND case_id = $${params.length}`;
+        }
+        params.push(limit);
+
+        const rows = await pool.query(
+            `SELECT id, case_type, case_id, reviewer_user_id, score, reason, notes, created_at
+             FROM admin_qa_reviews
+             ${where}
+             ORDER BY created_at DESC
+             LIMIT $${params.length}`,
+            params
+        );
+        res.json({ success: true, data: rows.rows || [] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/qa/reviews', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const ref = assertCaseRef(req.body?.case_type, req.body?.case_id);
+        if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
+
+        const score = req.body?.score !== undefined && req.body.score !== null ? Number(req.body.score) : null;
+        if (!Number.isFinite(score) || score < 0 || score > 100) return res.status(400).json({ success: false, error: 'score must be 0..100' });
+        const reason = req.body?.reason !== undefined && req.body.reason !== null ? String(req.body.reason).trim().slice(0, 240) : null;
+        const notes = req.body?.notes !== undefined && req.body.notes !== null ? String(req.body.notes).trim().slice(0, 2000) : null;
+
+        const inserted = await pool.query(
+            `INSERT INTO admin_qa_reviews (case_type, case_id, reviewer_user_id, score, reason, notes)
+             VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''))
+             RETURNING *`,
+            [ref.case_type, ref.case_id, req.auth?.uid || null, Math.round(score), reason || '', notes || '']
+        );
+
+        await writeAdminAudit(req, { action: 'qa.review.create', entity_type: ref.case_type, entity_id: ref.case_id, meta: { score: Math.round(score), reason: reason || null } });
+        res.status(201).json({ success: true, data: inserted.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/qa/sample', requirePermission('admin.cases.read'), async (req, res) => {
+    try {
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 100) : 20;
+        const days = Number.isFinite(Number(req.query.days)) ? Math.min(Math.max(Number(req.query.days), 1), 90) : 7;
+
+        const rows = await pool.query(
+            `WITH closed_support AS (
+                SELECT 'support_ticket'::text AS case_type, st.id::text AS case_id, st.updated_at AS closed_at
+                FROM support_tickets st
+                WHERE LOWER(st.status) IN ('resolved','closed')
+                  AND st.updated_at >= NOW() - ($1 * INTERVAL '1 day')
+            ),
+            closed_lost AS (
+                SELECT 'lost_item'::text AS case_type, li.id::text AS case_id, li.updated_at AS closed_at
+                FROM lost_items li
+                WHERE LOWER(li.status) IN ('resolved','closed','returned')
+                  AND li.updated_at >= NOW() - ($1 * INTERVAL '1 day')
+            ),
+            closed_refund AS (
+                SELECT 'refund_request'::text AS case_type, rr.id::text AS case_id, rr.updated_at AS closed_at
+                FROM refund_requests rr
+                WHERE LOWER(rr.status) IN ('approved','rejected')
+                  AND rr.updated_at >= NOW() - ($1 * INTERVAL '1 day')
+            ),
+            closed_incident AS (
+                SELECT 'incident'::text AS case_type, ip.id::text AS case_id, ip.updated_at AS closed_at
+                FROM trip_incident_packages ip
+                WHERE LOWER(ip.status) IN ('resolved','rejected')
+                  AND ip.updated_at >= NOW() - ($1 * INTERVAL '1 day')
+            ),
+            all_closed AS (
+                SELECT * FROM closed_support
+                UNION ALL SELECT * FROM closed_lost
+                UNION ALL SELECT * FROM closed_refund
+                UNION ALL SELECT * FROM closed_incident
+            )
+            SELECT ac.case_type, ac.case_id, ac.closed_at
+            FROM all_closed ac
+            ORDER BY ac.closed_at DESC
+            LIMIT $2`,
+            [days, limit]
+        );
+
+        res.json({ success: true, data: rows.rows || [], meta: { days, limit } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Policy Sandbox (U8) ---
+
+app.post('/api/admin/policy-sandbox/refund-cap', requirePermission('admin.refunds.read'), async (req, res) => {
+    try {
+        const cap = req.body?.cap !== undefined && req.body.cap !== null ? Number(req.body.cap) : null;
+        if (!Number.isFinite(cap) || cap <= 0) return res.status(400).json({ success: false, error: 'cap must be > 0' });
+
+        const days = Number.isFinite(Number(req.body?.days)) ? Math.min(Math.max(Number(req.body.days), 1), 365) : 30;
+
+        const rows = await pool.query(
+            `SELECT id, amount_requested, status
+             FROM refund_requests
+             WHERE created_at >= NOW() - ($1 * INTERVAL '1 day')`,
+            [days]
+        );
+
+        let total = 0;
+        let totalCapped = 0;
+        let count = 0;
+        let countApproved = 0;
+
+        for (const r of (rows.rows || [])) {
+            const amt = r.amount_requested !== undefined && r.amount_requested !== null ? Number(r.amount_requested) : 0;
+            if (!Number.isFinite(amt) || amt <= 0) continue;
+            count += 1;
+            total += amt;
+            totalCapped += Math.min(amt, cap);
+            if (String(r.status || '').toLowerCase() === 'approved') countApproved += 1;
+        }
+
+        const report = {
+            scenario: 'refund_cap',
+            params: { cap, days },
+            input: { refund_requests_count: count, approved_count: countApproved },
+            output: {
+                total_requested: total,
+                total_capped: totalCapped,
+                delta: total - totalCapped
+            }
+        };
+
+        const saved = await pool.query(
+            `INSERT INTO admin_policy_sandbox_runs (scenario_key, params_json, report_json, created_by_user_id)
+             VALUES ('refund_cap', $1::jsonb, $2::jsonb, $3)
+             RETURNING id, scenario_key, created_at`,
+            [JSON.stringify(report.params), JSON.stringify(report), req.auth?.uid || null]
+        );
+
+        await writeAdminAudit(req, { action: 'policy_sandbox.run', entity_type: 'policy_sandbox', entity_id: String(saved.rows?.[0]?.id || ''), meta: { scenario: 'refund_cap', cap, days } });
+
+        res.json({ success: true, data: report, meta: { run_id: saved.rows?.[0]?.id || null } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Root‑Cause Closure report (U10) ---
+
+app.get('/api/admin/root-causes/top', requirePermission('admin.cases.read', 'admin.ops.read'), async (req, res) => {
+    try {
+        const days = Number.isFinite(Number(req.query.days)) ? Math.min(Math.max(Number(req.query.days), 1), 365) : 7;
+        const rows = await pool.query(
+            `SELECT root_cause_key,
+                    COUNT(*)::int AS cases_count,
+                    MAX(closed_at) AS last_seen
+             FROM admin_case_root_causes
+             WHERE closed_at >= NOW() - ($1 * INTERVAL '1 day')
+             GROUP BY root_cause_key
+             ORDER BY cases_count DESC, last_seen DESC
+             LIMIT 10`,
+            [days]
+        );
+        res.json({ success: true, data: rows.rows || [], meta: { days } });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -6942,7 +8585,12 @@ app.get('/api/admin/support/tickets', requirePermission('admin.support.read'), a
              LIMIT 200`,
             params
         );
-        res.json({ success: true, data: result.rows });
+        const masked = (result.rows || []).map(r => ({
+            ...r,
+            user_phone: maskPhone(r.user_phone),
+            user_email: maskEmail(r.user_email)
+        }));
+        res.json({ success: true, data: masked });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -6954,6 +8602,9 @@ app.patch('/api/admin/support/tickets/:id', requirePermission('admin.support.wri
         const nextStatus = req.body?.status ? String(req.body.status) : null;
         if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
         if (!nextStatus) return res.status(400).json({ success: false, error: 'status is required' });
+
+        await requireRootCauseOnFinal(req, { caseType: 'support_ticket', caseId: String(id), nextStatus, payload: req.body });
+
         const updated = await pool.query(
             `UPDATE support_tickets
              SET status = $2,
@@ -6971,7 +8622,8 @@ app.patch('/api/admin/support/tickets/:id', requirePermission('admin.support.wri
         });
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        const sc = err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
+        res.status(sc).json({ success: false, error: err.message });
     }
 });
 
@@ -7286,7 +8938,12 @@ app.get('/api/admin/lost-items', requirePermission('admin.lost.read'), async (re
              LIMIT 500`,
             params
         );
-        res.json({ success: true, data: result.rows });
+        const masked = (result.rows || []).map(r => ({
+            ...r,
+            user_phone: maskPhone(r.user_phone),
+            user_email: maskEmail(r.user_email)
+        }));
+        res.json({ success: true, data: masked });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -7298,6 +8955,8 @@ app.patch('/api/admin/lost-items/:id', requirePermission('admin.lost.write'), as
         const nextStatus = req.body?.status ? String(req.body.status) : null;
         if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
         if (!nextStatus) return res.status(400).json({ success: false, error: 'status is required' });
+
+        await requireRootCauseOnFinal(req, { caseType: 'lost_item', caseId: String(id), nextStatus, payload: req.body });
 
         const updated = await pool.query(
             `UPDATE lost_items
@@ -7316,7 +8975,8 @@ app.patch('/api/admin/lost-items/:id', requirePermission('admin.lost.write'), as
         });
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        const sc = err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
+        res.status(sc).json({ success: false, error: err.message });
     }
 });
 
@@ -7407,7 +9067,12 @@ app.get('/api/admin/refund-requests', requirePermission('admin.refunds.read'), a
              LIMIT 500`,
             params
         );
-        res.json({ success: true, data: result.rows });
+        const masked = (result.rows || []).map(r => ({
+            ...r,
+            user_phone: maskPhone(r.user_phone),
+            user_email: maskEmail(r.user_email)
+        }));
+        res.json({ success: true, data: masked });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -7425,6 +9090,8 @@ app.patch('/api/admin/refund-requests/:id', requirePermission('admin.refunds.wri
         if (!nextStatus || !['pending', 'approved', 'rejected'].includes(nextStatus)) {
             return res.status(400).json({ success: false, error: 'status must be pending/approved/rejected' });
         }
+
+        await requireRootCauseOnFinal(req, { caseType: 'refund_request', caseId: String(id), nextStatus, payload: req.body });
 
         await client.query('BEGIN');
 
@@ -7508,7 +9175,8 @@ app.patch('/api/admin/refund-requests/:id', requirePermission('admin.refunds.wri
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
         try { await client.query('ROLLBACK'); } catch (e) {}
-        res.status(500).json({ success: false, error: err.message });
+        const sc = err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
+        res.status(sc).json({ success: false, error: err.message });
     } finally {
         client.release();
     }
@@ -7659,7 +9327,12 @@ app.get('/api/admin/cases', requirePermission('admin.cases.read'), async (req, r
         `;
 
         const rows = await pool.query(query, params);
-        res.json({ success: true, data: rows.rows });
+        const masked = (rows.rows || []).map(r => ({
+            ...r,
+            user_phone: maskPhone(r.user_phone),
+            driver_phone: maskPhone(r.driver_phone)
+        }));
+        res.json({ success: true, data: masked });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -7670,6 +9343,19 @@ app.get('/api/admin/cases', requirePermission('admin.cases.read'), async (req, r
 app.get('/api/admin/trips/:tripId/evidence-bundle', requirePermission('admin.evidence.read'), async (req, res) => {
     try {
         const tripId = String(req.params.tripId);
+
+        // Sensitive access gating (U7): require justification to reveal phones/emails.
+        // UI should pass ?case_type=...&case_id=... and header X-Sensitive-Access-Grant.
+        const caseTypeQ = req.query.case_type !== undefined && req.query.case_type !== null ? String(req.query.case_type) : null;
+        const caseIdQ = req.query.case_id !== undefined && req.query.case_id !== null ? String(req.query.case_id) : null;
+        const grantId = req.headers['x-sensitive-access-grant'];
+
+        let sensitiveOk = false;
+        if (caseTypeQ && caseIdQ) {
+            const check = await isSensitiveGrantValid(req, { caseType: caseTypeQ, caseId: caseIdQ, grantId });
+            sensitiveOk = !!check.ok;
+        }
+
         const tripRes = await pool.query(
             `SELECT t.*, u.name AS user_name, u.phone AS user_phone, u.email AS user_email,
                     d.name AS driver_name, d.phone AS driver_phone, d.email AS driver_email
@@ -7682,6 +9368,14 @@ app.get('/api/admin/trips/:tripId/evidence-bundle', requirePermission('admin.evi
         );
         const trip = tripRes.rows[0] || null;
         if (!trip) return res.status(404).json({ success: false, error: 'Trip not found' });
+
+        if (!sensitiveOk) {
+            // Mask sensitive fields
+            trip.user_phone = null;
+            trip.user_email = null;
+            trip.driver_phone = null;
+            trip.driver_email = null;
+        }
 
         let timeline = [];
         let messages = [];
@@ -7774,7 +9468,12 @@ app.get('/api/admin/trips/:tripId/evidence-bundle', requirePermission('admin.evi
             witnessNotes = [];
         }
 
-        await writeAdminAudit(req, { action: 'evidence_bundle.read', entity_type: 'trip', entity_id: tripId });
+        await writeAdminAudit(req, {
+            action: 'evidence_bundle.read',
+            entity_type: (caseTypeQ && caseIdQ) ? normCaseType(caseTypeQ) : 'trip',
+            entity_id: (caseTypeQ && caseIdQ) ? normCaseId(caseIdQ) : tripId,
+            meta: { trip_id: tripId, sensitive_revealed: sensitiveOk }
+        });
 
         res.json({
             success: true,
@@ -9494,6 +11193,8 @@ app.patch('/api/admin/incidents/:id/resolve', requirePermission('admin.incidents
         const noteRaw = req.body?.resolution_note !== undefined && req.body.resolution_note !== null ? String(req.body.resolution_note) : '';
         const note = noteRaw.trim().slice(0, 2000) || null;
 
+        await requireRootCauseOnFinal(req, { caseType: 'incident', caseId: String(id), nextStatus: status, payload: req.body });
+
         const updated = await pool.query(
             `UPDATE trip_incident_packages
              SET status = $1,
@@ -9515,7 +11216,8 @@ app.patch('/api/admin/incidents/:id/resolve', requirePermission('admin.incidents
         });
         res.json({ success: true, data: updated.rows[0] });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        const sc = err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
+        res.status(sc).json({ success: false, error: err.message });
     }
 });
 
@@ -15729,6 +17431,18 @@ app.get('/api/admin/trips/:tripId/driver-audio/:recId/download', requirePermissi
         const recId = Number(req.params.recId);
         if (!Number.isFinite(recId) || recId <= 0) return res.status(400).json({ success: false, error: 'invalid_recording_id' });
 
+        // Sensitive access gating (U7)
+        const caseTypeQ = req.query.case_type !== undefined && req.query.case_type !== null ? String(req.query.case_type) : null;
+        const caseIdQ = req.query.case_id !== undefined && req.query.case_id !== null ? String(req.query.case_id) : null;
+        if (!caseTypeQ || !caseIdQ) {
+            return res.status(400).json({ success: false, error: 'case_type_and_case_id_required_for_sensitive_access' });
+        }
+        const grantId = req.headers['x-sensitive-access-grant'];
+        const check = await isSensitiveGrantValid(req, { caseType: caseTypeQ, caseId: caseIdQ, grantId });
+        if (!check.ok) {
+            return res.status(check.statusCode || 403).json({ success: false, error: check.error || 'sensitive_access_required' });
+        }
+
         const q = await pool.query(
             `SELECT *
              FROM trip_driver_audio_recordings
@@ -15749,6 +17463,12 @@ app.get('/api/admin/trips/:tripId/driver-audio/:recId/download', requirePermissi
 
         res.setHeader('Content-Type', row.file_mime || 'audio/webm');
         res.setHeader('Content-Disposition', `attachment; filename="trip-${tripId}-audio-${recId}.webm"`);
+        await writeAdminAudit(req, {
+            action: 'driver_audio.download',
+            entity_type: normCaseType(caseTypeQ),
+            entity_id: normCaseId(caseIdQ),
+            meta: { trip_id: tripId, recording_id: recId }
+        });
         res.status(200).send(plaintext);
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -16141,6 +17861,7 @@ ensureCoreSchema()
     .then(() => ensureWalletTables())
     .then(() => ensureAdminAuditTables())
     .then(() => ensureAdminPlaybooksTables())
+    .then(() => ensureAdminExcellenceTables())
     .then(() => ensureDefaultAdminPlaybooks())
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
