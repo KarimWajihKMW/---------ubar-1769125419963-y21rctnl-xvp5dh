@@ -224,6 +224,137 @@
             text-align: center;
             border: 1px solid #eef2ff;
         }
+
+        /* Endpoint tester (interactive but minimal) */
+        .endpoint-details {
+            border-radius: 16px;
+        }
+
+        .endpoint-details > summary {
+            list-style: none;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .endpoint-details > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .endpoint-details[open] > summary.feature-item {
+            border-color: #c7d2fe;
+            background: #eef2ff;
+        }
+
+        .endpoint-panel {
+            background: #fff;
+            border: 1px solid #eef2ff;
+            border-radius: 16px;
+            padding: 14px;
+            margin-top: 10px;
+            text-align: right;
+        }
+
+        body.dark-mode .endpoint-panel {
+            background: #111827;
+            border-color: #1f2937;
+        }
+
+        .endpoint-row {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .endpoint-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 12px;
+        }
+
+        .card-action.small {
+            margin-top: 0;
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-size: 0.9em;
+        }
+
+        .endpoint-btn {
+            border: 0;
+            cursor: pointer;
+        }
+
+        .endpoint-hint {
+            font-size: 0.9em;
+            color: #6b7280;
+            text-align: center;
+        }
+
+        body.dark-mode .endpoint-hint {
+            color: #94a3b8;
+        }
+
+        .endpoint-output {
+            margin-top: 12px;
+            background: #0b1220;
+            color: #e5e7eb;
+            padding: 12px;
+            border-radius: 12px;
+            overflow: auto;
+            max-height: 260px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+            direction: ltr;
+            text-align: left;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .endpoint-field {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .endpoint-field label {
+            font-weight: 700;
+            color: #111827;
+        }
+
+        body.dark-mode .endpoint-field label {
+            color: #e5e7eb;
+        }
+
+        .endpoint-field input,
+        .endpoint-field select,
+        .endpoint-field textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            font-family: inherit;
+        }
+
+        body.dark-mode .endpoint-field input,
+        body.dark-mode .endpoint-field select,
+        body.dark-mode .endpoint-field textarea {
+            border-color: #1f2937;
+            background: #0b1220;
+            color: #e5e7eb;
+        }
+
+        .endpoint-field textarea {
+            min-height: 92px;
+            resize: vertical;
+            direction: ltr;
+            text-align: left;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+        }
         
         .feature-item strong {
             display: block;
@@ -458,38 +589,165 @@
             <h2>🔗 API Endpoints المختبرة</h2>
             
             <div class="feature-grid">
-                <div class="feature-item">
-                    <strong>📡 GET /api/drivers</strong>
-                    <span>الحصول على جميع السائقين</span>
-                </div>
-                <div class="feature-item">
-                    <strong>➕ POST /api/drivers/register</strong>
-                    <span>تسجيل سائق جديد</span>
-                </div>
-                <div class="feature-item">
-                    <strong>📋 GET /api/drivers/pending</strong>
-                    <span>الحصول على السائقين المعلقين</span>
-                </div>
-                <div class="feature-item">
-                    <strong>✓ PATCH /api/drivers/:id/approval</strong>
-                    <span>الموافقة أو الرفض</span>
-                </div>
-                <div class="feature-item">
-                    <strong>📞 GET /api/drivers/status/:phone</strong>
-                    <span>معرفة حالة التسجيل</span>
-                </div>
-                <div class="feature-item">
-                    <strong>🚗 GET /api/trips</strong>
-                    <span>الحصول على الرحلات</span>
-                </div>
-                <div class="feature-item">
-                    <strong>🔑 POST /api/auth/login</strong>
-                    <span>تسجيل الدخول</span>
-                </div>
-                <div class="feature-item">
-                    <strong>❤️ GET /api/health</strong>
-                    <span>فحص صحة الخادم</span>
-                </div>
+                <details class="endpoint-details" data-method="GET" data-path="/api/drivers" data-auth="1">
+                    <summary class="feature-item">
+                        <strong>📡 GET /api/drivers</strong>
+                        <span>الحصول على جميع السائقين</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-hint">يتطلب تسجيل دخول (توكن). استخدم Endpoint تسجيل الدخول بالأسفل أو سجل دخول من النظام.</div>
+                        <div class="endpoint-actions">
+                            <a class="card-action small" href="/api/drivers" target="_blank" rel="noopener">فتح ↗</a>
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
+
+                <details class="endpoint-details" data-method="POST" data-path="/api/drivers/register" data-form="1">
+                    <summary class="feature-item">
+                        <strong>➕ POST /api/drivers/register</strong>
+                        <span>تسجيل سائق جديد (FormData + ملفات)</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-row">
+                            <div class="endpoint-field"><label>الاسم</label><input data-field="name" placeholder="مثال: أحمد علي" /></div>
+                            <div class="endpoint-field"><label>الهاتف</label><input data-field="phone" placeholder="مثال: 01000000000" /></div>
+                            <div class="endpoint-field"><label>الإيميل</label><input data-field="email" placeholder="example@mail.com" /></div>
+                            <div class="endpoint-field"><label>كلمة المرور</label><input data-field="password" type="password" placeholder="********" /></div>
+                            <div class="endpoint-field"><label>نوع السيارة</label>
+                                <select data-field="car_type">
+                                    <option value="economy">اقتصادي</option>
+                                    <option value="comfort">مريح</option>
+                                    <option value="premium">فاخر</option>
+                                </select>
+                            </div>
+                            <div class="endpoint-field"><label>لوحة السيارة</label><input data-field="car_plate" placeholder="ABC-123" /></div>
+                            <div class="endpoint-field"><label>صورة البطاقة</label><input data-file="id_card_photo" type="file" accept="image/*" /></div>
+                            <div class="endpoint-field"><label>رخصة القيادة</label><input data-file="drivers_license" type="file" accept="image/*" /></div>
+                            <div class="endpoint-field"><label>رخصة السيارة</label><input data-file="vehicle_license" type="file" accept="image/*" /></div>
+                        </div>
+                        <div class="endpoint-actions">
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
+
+                <details class="endpoint-details" data-method="GET" data-path="/api/drivers/pending" data-auth="1">
+                    <summary class="feature-item">
+                        <strong>📋 GET /api/drivers/pending</strong>
+                        <span>الحصول على السائقين المعلقين (Admin)</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-hint">يتطلب صلاحيات Admin (permission: admin.ops.read).</div>
+                        <div class="endpoint-actions">
+                            <a class="card-action small" href="/api/drivers/pending" target="_blank" rel="noopener">فتح ↗</a>
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
+
+                <details class="endpoint-details" data-method="PATCH" data-path="/api/drivers/:id/approval" data-auth="1" data-json="1">
+                    <summary class="feature-item">
+                        <strong>✓ PATCH /api/drivers/:id/approval</strong>
+                        <span>الموافقة أو الرفض (Admin)</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-row">
+                            <div class="endpoint-field"><label>Driver ID</label><input data-field="id" placeholder="مثال: 12" /></div>
+                            <div class="endpoint-field"><label>الحالة</label>
+                                <select data-field="approval_status">
+                                    <option value="approved">approved</option>
+                                    <option value="rejected">rejected</option>
+                                </select>
+                            </div>
+                            <div class="endpoint-field"><label>سبب الرفض</label><input data-field="rejection_reason" placeholder="اختياري عند الرفض" /></div>
+                            <div class="endpoint-field"><label>Approved By</label><input data-field="approved_by" placeholder="اختياري" /></div>
+                        </div>
+                        <div class="endpoint-actions">
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
+
+                <details class="endpoint-details" data-method="GET" data-path="/api/drivers/status/:phone">
+                    <summary class="feature-item">
+                        <strong>📞 GET /api/drivers/status/:phone</strong>
+                        <span>معرفة حالة التسجيل</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-row">
+                            <div class="endpoint-field"><label>الهاتف</label><input data-field="phone" placeholder="مثال: 01000000000" /></div>
+                        </div>
+                        <div class="endpoint-actions">
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
+
+                <details class="endpoint-details" data-method="GET" data-path="/api/trips" data-auth="1">
+                    <summary class="feature-item">
+                        <strong>🚗 GET /api/trips</strong>
+                        <span>الحصول على الرحلات</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-row">
+                            <div class="endpoint-field"><label>Query</label><input data-field="query" placeholder="مثال: status=active" /></div>
+                        </div>
+                        <div class="endpoint-actions">
+                            <a class="card-action small" href="/api/trips" target="_blank" rel="noopener">فتح ↗</a>
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
+
+                <details class="endpoint-details" data-method="POST" data-path="/api/auth/login" data-json="1">
+                    <summary class="feature-item">
+                        <strong>🔑 POST /api/auth/login</strong>
+                        <span>تسجيل الدخول (يحفظ التوكن لاختبار الـ APIs)</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-row">
+                            <div class="endpoint-field"><label>Role</label>
+                                <select data-field="role">
+                                    <option value="admin">admin</option>
+                                    <option value="super_admin">super_admin</option>
+                                    <option value="support_agent">support_agent</option>
+                                    <option value="driver">driver</option>
+                                    <option value="passenger">passenger</option>
+                                </select>
+                            </div>
+                            <div class="endpoint-field"><label>Email</label><input data-field="email" placeholder="admin@example.com" /></div>
+                            <div class="endpoint-field"><label>Password</label><input data-field="password" type="password" placeholder="********" /></div>
+                            <div class="endpoint-field"><label>Name</label><input data-field="name" placeholder="اختياري (للراكب)" /></div>
+                            <div class="endpoint-field"><label>Phone</label><input data-field="phone" placeholder="اختياري (للراكب)" /></div>
+                        </div>
+                        <div class="endpoint-actions">
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <div class="endpoint-hint">التوكن بيتخزن في localStorage تحت المفتاح: <span dir="ltr">akwadra_token</span></div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
+
+                <details class="endpoint-details" data-method="GET" data-path="/api/health">
+                    <summary class="feature-item">
+                        <strong>❤️ GET /api/health</strong>
+                        <span>فحص صحة الخادم</span>
+                    </summary>
+                    <div class="endpoint-panel">
+                        <div class="endpoint-actions">
+                            <a class="card-action small" href="/api/health" target="_blank" rel="noopener">فتح ↗</a>
+                            <button type="button" class="card-action small endpoint-btn endpoint-run">تشغيل</button>
+                        </div>
+                        <pre class="endpoint-output" hidden></pre>
+                    </div>
+                </details>
             </div>
         </div>
         
@@ -534,6 +792,156 @@
             } catch (e) {
                 // ignore
             }
+        })();
+
+        (function() {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:';
+            const API_BASE = isLocal ? 'http://localhost:3000' : '';
+
+            function getToken() {
+                try {
+                    return localStorage.getItem('akwadra_token');
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function setToken(token) {
+                try {
+                    if (!token) return;
+                    localStorage.setItem('akwadra_token', String(token));
+                } catch (e) {
+                    // ignore
+                }
+            }
+
+            function showOutput(detailsEl, text) {
+                const out = detailsEl.querySelector('.endpoint-output');
+                if (!out) return;
+                out.hidden = false;
+                out.textContent = text;
+            }
+
+            function safeJsonParse(raw) {
+                if (!raw) return null;
+                try {
+                    return JSON.parse(raw);
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            async function runEndpoint(detailsEl) {
+                const method = String(detailsEl.dataset.method || 'GET').toUpperCase();
+                let rawPath = String(detailsEl.dataset.path || '');
+                const needsAuth = detailsEl.dataset.auth === '1';
+                const isJson = detailsEl.dataset.json === '1';
+                const isForm = detailsEl.dataset.form === '1';
+
+                const fields = {};
+                detailsEl.querySelectorAll('[data-field]').forEach((el) => {
+                    fields[String(el.getAttribute('data-field'))] = (el.value !== undefined ? String(el.value) : '').trim();
+                });
+
+                if (rawPath.includes(':id')) {
+                    const id = fields.id;
+                    if (!id) {
+                        showOutput(detailsEl, '❌ لازم تكتب Driver ID');
+                        return;
+                    }
+                    rawPath = rawPath.replace(':id', encodeURIComponent(id));
+                }
+                if (rawPath.includes(':phone')) {
+                    const phone = fields.phone;
+                    if (!phone) {
+                        showOutput(detailsEl, '❌ لازم تكتب رقم الهاتف');
+                        return;
+                    }
+                    rawPath = rawPath.replace(':phone', encodeURIComponent(phone));
+                }
+
+                if (rawPath === '/api/trips') {
+                    const q = fields.query;
+                    if (q) {
+                        rawPath = `${rawPath}?${q.replace(/^\?/, '')}`;
+                    }
+                }
+
+                const url = `${API_BASE}${rawPath}`;
+
+                const headers = {};
+                if (needsAuth) {
+                    const token = getToken();
+                    if (!token) {
+                        showOutput(detailsEl, '⚠️ مفيش توكن. شغّل (POST /api/auth/login) أو سجل دخول من النظام الأول.');
+                        return;
+                    }
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+
+                showOutput(detailsEl, '⏳ جاري التنفيذ...');
+                try {
+                    let body;
+                    if (method !== 'GET' && method !== 'HEAD') {
+                        if (isForm) {
+                            const fd = new FormData();
+                            ['name', 'phone', 'email', 'password', 'car_type', 'car_plate'].forEach((k) => {
+                                if (fields[k]) fd.append(k, fields[k]);
+                            });
+
+                            const idCard = detailsEl.querySelector('[data-file="id_card_photo"]')?.files?.[0] || null;
+                            const dl = detailsEl.querySelector('[data-file="drivers_license"]')?.files?.[0] || null;
+                            const vl = detailsEl.querySelector('[data-file="vehicle_license"]')?.files?.[0] || null;
+                            if (idCard) fd.append('id_card_photo', idCard);
+                            if (dl) fd.append('drivers_license', dl);
+                            if (vl) fd.append('vehicle_license', vl);
+                            body = fd;
+                        } else {
+                            const payload = {};
+                            if (rawPath.startsWith('/api/auth/login')) {
+                                if (fields.email) payload.email = fields.email;
+                                if (fields.password) payload.password = fields.password;
+                                if (fields.role) payload.role = fields.role;
+                                if (fields.name) payload.name = fields.name;
+                                if (fields.phone) payload.phone = fields.phone;
+                            } else if (rawPath.includes('/approval')) {
+                                if (fields.approval_status) payload.approval_status = fields.approval_status;
+                                if (fields.rejection_reason) payload.rejection_reason = fields.rejection_reason;
+                                if (fields.approved_by) payload.approved_by = fields.approved_by;
+                            } else {
+                                Object.assign(payload, fields);
+                            }
+                            headers['Content-Type'] = 'application/json';
+                            body = JSON.stringify(payload);
+                        }
+                    }
+
+                    const resp = await fetch(url, {
+                        method,
+                        headers,
+                        body
+                    });
+                    const raw = await resp.text();
+                    const parsed = safeJsonParse(raw);
+                    const pretty = parsed ? JSON.stringify(parsed, null, 2) : raw;
+                    showOutput(detailsEl, `${resp.ok ? '✅' : '❌'} HTTP ${resp.status}\n${pretty || ''}`);
+
+                    if (rawPath === '/api/auth/login' && parsed && parsed.token) {
+                        setToken(parsed.token);
+                    }
+                } catch (e) {
+                    showOutput(detailsEl, `❌ Error: ${e.message || e}`);
+                }
+            }
+
+            document.querySelectorAll('.endpoint-run').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const detailsEl = btn.closest('.endpoint-details');
+                    if (!detailsEl) return;
+                    runEndpoint(detailsEl);
+                });
+            });
         })();
     </script>
 </body>
