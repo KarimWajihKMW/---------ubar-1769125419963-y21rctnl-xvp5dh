@@ -8799,7 +8799,9 @@ app.patch('/api/admin/support/tickets/:id', requirePermission('admin.support.wri
 app.get('/api/passengers/me/places', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : (req.query.user_id ? Number(req.query.user_id) : null) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const result = await pool.query(
@@ -8821,7 +8823,9 @@ app.post('/api/passengers/me/places', requireRole('passenger', 'admin'), async (
     const client = await pool.connect();
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : (req.body?.user_id ? Number(req.body.user_id) : null);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : (req.body?.user_id ? Number(req.body.user_id) : null) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const label = req.body?.label ? String(req.body.label).toLowerCase().trim() : null;
@@ -8869,17 +8873,15 @@ app.post('/api/passengers/me/places', requireRole('passenger', 'admin'), async (
 app.delete('/api/passengers/me/places/:id', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : (req.query.user_id ? Number(req.query.user_id) : null) || req.auth?.uid;
         const id = Number(req.params.id);
         if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'Invalid id' });
-        if (authRole === 'passenger' && !userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+        if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
-        const params = [id];
-        let where = 'WHERE id = $1';
-        if (authRole === 'passenger') {
-            params.push(userId);
-            where += ` AND user_id = $2`;
-        }
+        const params = [id, userId];
+        const where = 'WHERE id = $1 AND user_id = $2';
 
         const del = await pool.query(
             `DELETE FROM passenger_saved_places
