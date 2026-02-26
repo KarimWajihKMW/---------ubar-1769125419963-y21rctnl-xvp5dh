@@ -1251,6 +1251,41 @@ const ApiService = {
             return ApiService.request('/admin/ops/snapshot');
         },
 
+        async createExecutiveDecision(payload = {}) {
+            return ApiService.request('/admin/executive/decisions', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getExecutiveDecisionImpact(id) {
+            return ApiService.request(`/admin/executive/decision-impact/${encodeURIComponent(id)}`);
+        },
+
+        async simulateExecutive(payload = {}) {
+            return ApiService.request('/admin/executive/simulate', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getExecutiveTrustIndex(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/executive/trust-index${qs ? `?${qs}` : ''}`);
+        },
+
+        async triggerExecutivePlaybook(payload = {}) {
+            return ApiService.request('/admin/executive/playbook/trigger', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getExecutiveBriefing(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/executive/briefing${qs ? `?${qs}` : ''}`);
+        },
+
         async listPickupHubs(params = {}) {
             const qs = new URLSearchParams(params).toString();
             return ApiService.request(`/admin/pickup-hubs${qs ? `?${qs}` : ''}`);

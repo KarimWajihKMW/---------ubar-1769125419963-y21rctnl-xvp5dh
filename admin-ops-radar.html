@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <style>
     body { font-family: 'Cairo', sans-serif; }
-    #map { height: 72vh; }
+    #map { height: 68vh; }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -29,73 +29,157 @@
       <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-lg p-6 mb-6 text-white">
         <div class="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 class="text-2xl md:text-3xl font-extrabold">
-              <i class="fas fa-radar ml-2"></i>
-              Ops Radar
-            </h1>
-            <p class="text-indigo-100 text-sm mt-1">خريطة تشغيل: السائقين الحيين + Pending Rides + Incidents المفتوحة</p>
+            <h1 class="text-2xl md:text-3xl font-extrabold"><i class="fas fa-radar ml-2"></i>Executive Ops Radar</h1>
+            <p class="text-indigo-100 text-sm mt-1">Command Center + Simulation Lab + Impact Replay</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick="refreshSnapshot()" class="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow">
-              <i class="fas fa-sync-alt ml-2"></i>
-              تحديث
+            <button onclick="refreshAll()" class="bg-white text-indigo-600 px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow">
+              <i class="fas fa-sync-alt ml-2"></i>تحديث شامل
             </button>
           </div>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-2 bg-white rounded-2xl shadow border border-gray-100 overflow-hidden">
-          <div class="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
-            <div class="flex items-center gap-3">
-              <span class="text-sm font-extrabold text-gray-800">الخريطة</span>
-              <span id="last-updated" class="text-xs font-bold text-gray-500">--</span>
+      <div class="mb-4 flex gap-2 flex-wrap">
+        <button data-tab="command" onclick="setTab('command')" class="tab-btn bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold">Command Center</button>
+        <button data-tab="simulation" onclick="setTab('simulation')" class="tab-btn bg-white text-gray-700 px-4 py-2.5 rounded-xl font-extrabold border border-gray-200">Simulation Lab</button>
+        <button data-tab="impact" onclick="setTab('impact')" class="tab-btn bg-white text-gray-700 px-4 py-2.5 rounded-xl font-extrabold border border-gray-200">Impact Replay</button>
+      </div>
+
+      <div id="tab-command" class="tab-panel">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-2 bg-white rounded-2xl shadow border border-gray-100 overflow-hidden">
+            <div class="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+              <div class="flex items-center gap-3">
+                <span class="text-sm font-extrabold text-gray-800">الخريطة التشغيلية</span>
+                <span id="last-updated" class="text-xs font-bold text-gray-500">--</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs font-extrabold">
+                <span class="px-2 py-1 rounded-full bg-blue-50 text-blue-700">Drivers</span>
+                <span class="px-2 py-1 rounded-full bg-amber-50 text-amber-700">Pending</span>
+                <span class="px-2 py-1 rounded-full bg-red-50 text-red-700">Incidents</span>
+              </div>
             </div>
-            <div class="flex items-center gap-2 text-xs font-extrabold">
-              <span class="px-2 py-1 rounded-full bg-blue-50 text-blue-700">Drivers</span>
-              <span class="px-2 py-1 rounded-full bg-amber-50 text-amber-700">Pending</span>
-              <span class="px-2 py-1 rounded-full bg-red-50 text-red-700">Incidents</span>
+            <div id="map"></div>
+          </div>
+
+          <div class="lg:col-span-1 space-y-4">
+            <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+              <div class="space-y-3">
+                <div>
+                  <label class="block text-xs font-extrabold text-gray-600 mb-1">Admin Token (Bearer)</label>
+                  <input id="token-input" type="password" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="الصق التوكن هنا" />
+                </div>
+                <div class="flex gap-2">
+                  <button onclick="saveToken()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">حفظ</button>
+                  <button onclick="clearToken()" class="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-extrabold hover:bg-gray-200">مسح</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+              <h2 class="text-sm font-extrabold text-gray-800 mb-3">ملخص</h2>
+              <div class="grid grid-cols-3 gap-2">
+                <div class="bg-blue-50 rounded-2xl p-3 border border-blue-100">
+                  <p class="text-[11px] font-extrabold text-blue-700">Drivers</p>
+                  <p id="count-drivers" class="text-xl font-extrabold text-blue-800">0</p>
+                </div>
+                <div class="bg-amber-50 rounded-2xl p-3 border border-amber-100">
+                  <p class="text-[11px] font-extrabold text-amber-700">Pending</p>
+                  <p id="count-pending" class="text-xl font-extrabold text-amber-800">0</p>
+                </div>
+                <div class="bg-red-50 rounded-2xl p-3 border border-red-100">
+                  <p class="text-[11px] font-extrabold text-red-700">Incidents</p>
+                  <p id="count-incidents" class="text-xl font-extrabold text-red-800">0</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+              <h2 class="text-sm font-extrabold text-gray-800 mb-2">Executive Narrative</h2>
+              <pre id="briefing-narrative" class="text-xs font-bold text-gray-600 whitespace-pre-wrap">--</pre>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
+              <div class="flex items-center justify-between gap-2 mb-3">
+                <h2 class="text-sm font-extrabold text-gray-800">Shock Autopilot</h2>
+                <button onclick="triggerAutopilot()" class="bg-rose-600 text-white px-3 py-1.5 rounded-xl text-xs font-extrabold hover:bg-rose-700">تشغيل</button>
+              </div>
+              <div id="open-shocks" class="space-y-2 text-sm"></div>
             </div>
           </div>
-          <div id="map"></div>
+        </div>
+      </div>
+
+      <div id="tab-simulation" class="tab-panel hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100 space-y-3">
+            <h2 class="text-sm font-extrabold text-gray-800">City Digital Twin</h2>
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Zone Key</label>
+              <input id="sim-zone" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="citywide" />
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">Pricing Δ %</label>
+                <input id="sim-pricing" type="number" value="10" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-extrabold text-gray-600 mb-1">Driver Supply Δ %</label>
+                <input id="sim-supply" type="number" value="15" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Scenario Key</label>
+              <input id="sim-scenario" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="price_zone_shift" />
+            </div>
+            <button onclick="runSimulation()" class="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">تشغيل المحاكاة</button>
+          </div>
+
+          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100 space-y-3">
+            <h2 class="text-sm font-extrabold text-gray-800">Decision Ledger 2.0</h2>
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Title</label>
+              <input id="decision-title" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="رفع تسعير منطقة الذروة 10%" />
+            </div>
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Reason</label>
+              <textarea id="decision-reason" class="w-full h-20 px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="سبب القرار"></textarea>
+            </div>
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Hypothesis</label>
+              <textarea id="decision-hypothesis" class="w-full h-16 px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="الأثر المتوقع"></textarea>
+            </div>
+            <button onclick="createDecisionFromSimulation()" class="w-full bg-emerald-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-emerald-700">تسجيل القرار</button>
+            <p id="decision-status" class="text-xs font-bold text-gray-500"></p>
+          </div>
         </div>
 
-        <div class="lg:col-span-1 space-y-4">
-          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
-            <div class="space-y-3">
-              <div>
-                <label class="block text-xs font-extrabold text-gray-600 mb-1">Admin Token (Bearer)</label>
-                <input id="token-input" type="password" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="الصق التوكن هنا" />
-                <p class="text-[11px] text-gray-500 mt-1">يتحفظ في localStorage تحت akwadra_token</p>
-              </div>
-              <div class="flex gap-2">
-                <button onclick="saveToken()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">حفظ</button>
-                <button onclick="clearToken()" class="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-extrabold hover:bg-gray-200">مسح</button>
-              </div>
+        <div class="mt-6 bg-white rounded-2xl shadow p-5 border border-gray-100">
+          <h2 class="text-sm font-extrabold text-gray-800 mb-3">نتائج المحاكاة</h2>
+          <pre id="simulation-output" class="text-xs font-bold text-gray-600 whitespace-pre-wrap">--</pre>
+        </div>
+      </div>
+
+      <div id="tab-impact" class="tab-panel hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100 lg:col-span-1 space-y-3">
+            <h2 class="text-sm font-extrabold text-gray-800">Impact Replay</h2>
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Decision ID</label>
+              <input id="impact-decision-id" type="number" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="مثال: 1" />
             </div>
+            <button onclick="loadImpactReplay()" class="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">تحميل الأثر</button>
+            <div>
+              <label class="block text-xs font-extrabold text-gray-600 mb-1">Playbook Key</label>
+              <input id="playbook-key" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="shock_autopilot" value="shock_autopilot" />
+            </div>
+            <button onclick="triggerPlaybook()" class="w-full bg-rose-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-rose-700">Trigger Playbook</button>
           </div>
 
-          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
-            <h2 class="text-sm font-extrabold text-gray-800 mb-3">ملخص</h2>
-            <div class="grid grid-cols-3 gap-2">
-              <div class="bg-blue-50 rounded-2xl p-3 border border-blue-100">
-                <p class="text-[11px] font-extrabold text-blue-700">Drivers</p>
-                <p id="count-drivers" class="text-xl font-extrabold text-blue-800">0</p>
-              </div>
-              <div class="bg-amber-50 rounded-2xl p-3 border border-amber-100">
-                <p class="text-[11px] font-extrabold text-amber-700">Pending</p>
-                <p id="count-pending" class="text-xl font-extrabold text-amber-800">0</p>
-              </div>
-              <div class="bg-red-50 rounded-2xl p-3 border border-red-100">
-                <p class="text-[11px] font-extrabold text-red-700">Incidents</p>
-                <p id="count-incidents" class="text-xl font-extrabold text-red-800">0</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100">
-            <h2 class="text-sm font-extrabold text-gray-800 mb-3">آخر Incidents</h2>
-            <div id="incidents-list" class="space-y-2 text-sm"></div>
+          <div class="bg-white rounded-2xl shadow p-5 border border-gray-100 lg:col-span-2">
+            <h2 class="text-sm font-extrabold text-gray-800 mb-3">Counterfactual Replay + Decision Impact</h2>
+            <pre id="impact-output" class="text-xs font-bold text-gray-600 whitespace-pre-wrap">--</pre>
           </div>
         </div>
       </div>
@@ -111,9 +195,26 @@
     let layerDrivers = null;
     let layerPending = null;
     let layerIncidents = null;
+    let lastSimulation = null;
 
     function getToken() { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } }
     function setToken(t) { try { localStorage.setItem(TOKEN_KEY, String(t||'').trim()); } catch(e) {} }
+
+    function setTab(tab){
+      const panels = document.querySelectorAll('.tab-panel');
+      const buttons = document.querySelectorAll('.tab-btn');
+      panels.forEach(p => p.classList.add('hidden'));
+      buttons.forEach(b => {
+        b.classList.remove('bg-indigo-600','text-white');
+        b.classList.add('bg-white','text-gray-700','border','border-gray-200');
+      });
+      document.getElementById(`tab-${tab}`).classList.remove('hidden');
+      const active = document.querySelector(`button[data-tab='${tab}']`);
+      if(active){
+        active.classList.add('bg-indigo-600','text-white');
+        active.classList.remove('bg-white','text-gray-700','border','border-gray-200');
+      }
+    }
 
     function saveToken() {
       const v = document.getElementById('token-input').value;
@@ -121,6 +222,7 @@
       setToken(v);
       alert('تم حفظ التوكن');
     }
+
     function clearToken() {
       try { localStorage.removeItem(TOKEN_KEY); } catch(e) {}
       document.getElementById('token-input').value = '';
@@ -154,6 +256,7 @@
     }
 
     function renderSnapshot(s) {
+      if (!layerDrivers || !layerPending || !layerIncidents) return;
       layerDrivers.clearLayers();
       layerPending.clearLayers();
       layerIncidents.clearLayers();
@@ -173,7 +276,7 @@
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
         const risk = d.risk_level ? String(d.risk_level).toLowerCase() : '';
         const color = risk === 'high' ? '#ef4444' : (risk === 'medium' ? '#7c3aed' : '#2563eb');
-        const title = `Driver #${d.id} • ${d.name || '--'} • ${d.status || '--'}${risk ? `<br/>Risk: ${risk} • ${d.risk_note || ''}` : ''}`;
+        const title = `Driver #${d.id} • ${d.name || '--'} • ${d.status || '--'}${risk ? `<br/>Risk: ${risk}` : ''}`;
         L.marker([lat, lng], { icon: icon(color) }).addTo(layerDrivers).bindPopup(title);
       }
 
@@ -189,53 +292,15 @@
         const lat = safeNum(i.pickup_lat);
         const lng = safeNum(i.pickup_lng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-        const t = i.title ? String(i.title) : (i.kind || 'incident');
-        const title = `Incident #${i.id} • ${t}<br/>Trip: ${i.trip_id || '--'}<br/>${i.pickup_location || ''}`;
+        const title = `Incident #${i.id} • ${i.kind || 'incident'}`;
         L.marker([lat, lng], { icon: icon('#ef4444') }).addTo(layerIncidents).bindPopup(title);
-      }
-
-      const list = document.getElementById('incidents-list');
-      if (!incidents.length) {
-        list.innerHTML = `<div class="text-center py-6 text-gray-500"><i class="fas fa-circle-check text-2xl mb-2"></i><p class="font-bold">لا توجد Incidents مفتوحة</p></div>`;
-      } else {
-        list.innerHTML = incidents.slice(0, 12).map(i => {
-          const t = i.title ? String(i.title) : (i.kind || 'incident');
-          return `
-            <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50">
-              <p class="font-extrabold text-gray-800">#${i.id} • ${t}</p>
-              <p class="text-xs font-bold text-gray-500 truncate">Trip: ${i.trip_id || '--'} • ${new Date(i.created_at).toLocaleString('ar-EG')}</p>
-            </div>
-          `;
-        }).join('');
-      }
-
-      if (drivers.length || pending.length) {
-        try {
-          const bounds = [];
-          for (const d of drivers) {
-            const lat = safeNum(d.last_lat);
-            const lng = safeNum(d.last_lng);
-            if (Number.isFinite(lat) && Number.isFinite(lng)) bounds.push([lat,lng]);
-          }
-          for (const r of pending) {
-            const lat = safeNum(r.pickup_lat);
-            const lng = safeNum(r.pickup_lng);
-            if (Number.isFinite(lat) && Number.isFinite(lng)) bounds.push([lat,lng]);
-          }
-          if (bounds.length) map.fitBounds(bounds, { padding: [24,24] });
-        } catch(e) {}
       }
     }
 
     async function refreshSnapshot() {
       initMap();
-      try {
-        const data = await ApiService.admin.getOpsSnapshot();
-        renderSnapshot(data.data || {});
-      } catch (e) {
-        console.error(e);
-        alert(`تعذر تحميل Ops Snapshot: ${e.message}`);
-      }
+      const data = await ApiService.admin.getOpsSnapshot();
+      renderSnapshot(data.data || {});
     }
 
     async function refreshCrisis(){
@@ -252,13 +317,126 @@
       }catch(e){}
     }
 
+    async function refreshBriefing(){
+      const data = await ApiService.admin.getExecutiveBriefing();
+      const payload = data.data || {};
+      document.getElementById('briefing-narrative').textContent = payload.narrative_ar || '--';
+      const shocks = Array.isArray(payload.open_shocks) ? payload.open_shocks : [];
+      const box = document.getElementById('open-shocks');
+      if(!shocks.length){
+        box.innerHTML = '<div class="text-xs font-bold text-gray-500">لا توجد صدمات مفتوحة</div>';
+        return;
+      }
+      box.innerHTML = shocks.slice(0,8).map(s => `
+        <div class="p-2 rounded-xl border border-gray-200 bg-gray-50">
+          <p class="text-xs font-extrabold text-gray-800">#${s.id} • ${s.shock_type}</p>
+          <p class="text-[11px] font-bold text-gray-600">${s.zone_key || '--'} • ${s.severity || '--'}</p>
+        </div>
+      `).join('');
+    }
+
+    async function triggerAutopilot(){
+      try{
+        await ApiService.admin.triggerExecutivePlaybook({ playbook_key: 'shock_autopilot', source: 'ops_radar_ui', payload: {} });
+        await refreshBriefing();
+        await refreshCrisis();
+        alert('تم تشغيل Shock Autopilot');
+      }catch(e){
+        alert(`فشل التشغيل: ${e.message}`);
+      }
+    }
+
+    async function runSimulation(){
+      try{
+        const payload = {
+          zone_key: document.getElementById('sim-zone').value || 'citywide',
+          pricing_delta_pct: Number(document.getElementById('sim-pricing').value || 0),
+          driver_supply_delta_pct: Number(document.getElementById('sim-supply').value || 0),
+          scenario_key: document.getElementById('sim-scenario').value || 'generic_scenario'
+        };
+        const data = await ApiService.admin.simulateExecutive(payload);
+        lastSimulation = data.data || null;
+        document.getElementById('simulation-output').textContent = JSON.stringify(lastSimulation, null, 2);
+      }catch(e){
+        document.getElementById('simulation-output').textContent = `Simulation error: ${e.message}`;
+      }
+    }
+
+    async function createDecisionFromSimulation(){
+      try{
+        const title = document.getElementById('decision-title').value;
+        const reason = document.getElementById('decision-reason').value;
+        const hypothesis = document.getElementById('decision-hypothesis').value;
+        const zoneKey = document.getElementById('sim-zone').value || 'citywide';
+
+        if(!title || !reason) return alert('أدخل عنوان وسبب القرار');
+
+        const expected = lastSimulation?.projected ? {
+          avg_wait_minutes: lastSimulation.projected.avg_wait_minutes,
+          cancel_rate: lastSimulation.projected.cancel_rate,
+          incidents_count: lastSimulation.projected.incidents_count,
+          revenue_completed: lastSimulation.projected.revenue_completed
+        } : null;
+
+        const created = await ApiService.admin.createExecutiveDecision({
+          title,
+          reason,
+          hypothesis,
+          decision_type: 'pricing_supply_adjustment',
+          zone_key: zoneKey,
+          expected_impact: expected
+        });
+
+        const id = created?.data?.id;
+        document.getElementById('decision-status').textContent = `تم تسجيل القرار بنجاح #${id}`;
+        if (id) document.getElementById('impact-decision-id').value = id;
+      }catch(e){
+        document.getElementById('decision-status').textContent = `فشل التسجيل: ${e.message}`;
+      }
+    }
+
+    async function loadImpactReplay(){
+      try{
+        const id = Number(document.getElementById('impact-decision-id').value || 0);
+        if(!Number.isFinite(id) || id <= 0) return alert('أدخل Decision ID صحيح');
+        const data = await ApiService.admin.getExecutiveDecisionImpact(id);
+        document.getElementById('impact-output').textContent = JSON.stringify(data.data || {}, null, 2);
+      }catch(e){
+        document.getElementById('impact-output').textContent = `Impact error: ${e.message}`;
+      }
+    }
+
+    async function triggerPlaybook(){
+      try{
+        const key = document.getElementById('playbook-key').value || '';
+        const decisionId = Number(document.getElementById('impact-decision-id').value || 0);
+        const payload = { playbook_key: key, source: 'impact_replay_ui', payload: {}, decision_id: decisionId > 0 ? decisionId : undefined };
+        const data = await ApiService.admin.triggerExecutivePlaybook(payload);
+        document.getElementById('impact-output').textContent = JSON.stringify(data.data || {}, null, 2);
+        await refreshCrisis();
+        await refreshBriefing();
+      }catch(e){
+        document.getElementById('impact-output').textContent = `Playbook error: ${e.message}`;
+      }
+    }
+
+    async function refreshAll(){
+      try{
+        await refreshSnapshot();
+        await refreshBriefing();
+        await refreshCrisis();
+      }catch(e){
+        console.error(e);
+      }
+    }
+
     (function init(){
       const t = getToken();
       if (t) document.getElementById('token-input').value = t;
-      refreshCrisis();
-      initMap();
-      refreshSnapshot();
+      setTab('command');
+      refreshAll();
       setInterval(refreshSnapshot, 10000);
+      setInterval(refreshBriefing, 30000);
     })();
   </script>
 </body>

@@ -37,7 +37,7 @@
       </div>
 
       <div class="bg-white rounded-2xl shadow p-5 border border-gray-100 mb-4">
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
           <div>
             <label class="block text-xs font-extrabold text-gray-600 mb-1">Admin Token</label>
             <input id="token" type="password" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="Bearer token" />
@@ -53,6 +53,10 @@
           <div>
             <label class="block text-xs font-extrabold text-gray-600 mb-1">Entity ID</label>
             <input id="eid" type="text" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري" />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold text-gray-600 mb-1">Decision ID</label>
+            <input id="decision-id" type="number" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="اختياري" />
           </div>
         </div>
         <div class="mt-3 flex gap-2">
@@ -99,9 +103,11 @@
         const actor=document.getElementById('actor').value;
         const etype=document.getElementById('etype').value;
         const eid=document.getElementById('eid').value;
+        const decisionId=document.getElementById('decision-id').value;
         if(actor) params.set('actor_user_id', actor);
         if(etype && etype.trim()) params.set('entity_type', etype.trim());
         if(eid && eid.trim()) params.set('entity_id', eid.trim());
+        if(decisionId) params.set('decision_id', decisionId);
         params.set('limit','100');
         const data = await ApiService.admin.getAudit(Object.fromEntries(params.entries()));
         const rows = Array.isArray(data.data) ? data.data : [];
@@ -117,7 +123,7 @@
                 <p class="font-extrabold text-gray-800">${r.action}</p>
                 <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${fmt(r.created_at)}</span>
               </div>
-              <p class="text-xs font-bold text-gray-500">actor: ${r.actor_user_id || '--'} (${r.actor_role || '--'}) • entity: ${r.entity_type || '--'}:${r.entity_id || '--'}</p>
+              <p class="text-xs font-bold text-gray-500">actor: ${r.actor_user_id || '--'} (${r.actor_role || '--'}) • entity: ${r.entity_type || '--'}:${r.entity_id || '--'} • decision: ${r.decision_id || '--'}</p>
               ${meta ? `<textarea class="mt-2 w-full h-20 px-3 py-2.5 rounded-2xl border border-gray-200 font-mono text-xs" readonly>${meta}</textarea>` : ''}
             </div>
           `;

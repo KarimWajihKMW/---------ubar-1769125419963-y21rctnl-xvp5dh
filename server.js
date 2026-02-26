@@ -92,14 +92,16 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.incidents.write',
         'admin.evidence.read',
         'admin.audio.download',
-        'admin.ops.read'
+        'admin.ops.read',
+        'admin.executive.read'
     ],
     finance_ops: [
         'admin.cases.read',
         'admin.refunds.read',
         'admin.refunds.write',
         'admin.refunds.approve',
-        'admin.wallet.write'
+        'admin.wallet.write',
+        'admin.executive.read'
     ],
     ops_manager: [
         'admin.ops.read',
@@ -108,7 +110,9 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.pending_rides.write',
         'admin.pickuphubs.read',
         'admin.pickuphubs.write',
-        'admin.incidents.read'
+        'admin.incidents.read',
+        'admin.executive.read',
+        'admin.executive.write'
     ]
 });
 
@@ -441,22 +445,25 @@ async function isSensitiveGrantValid(req, { caseType, caseId, grantId }) {
     return { ok: true, data: r.rows[0] };
 }
 
-async function writeAdminAudit(req, { action, entity_type = null, entity_id = null, meta = null } = {}) {
+async function writeAdminAudit(req, { action, entity_type = null, entity_id = null, decision_id = null, meta = null } = {}) {
     try {
         const actorUserId = req?.auth?.uid ? Number(req.auth.uid) : null;
         const actorRole = String(req?.auth?.role || '').toLowerCase();
         if (!actorUserId || !isAdminRole(actorRole)) return;
         const safeAction = String(action || '').slice(0, 120);
         if (!safeAction) return;
+        const decisionIdNum = decision_id !== undefined && decision_id !== null ? Number(decision_id) : null;
+        const safeDecisionId = Number.isFinite(decisionIdNum) && decisionIdNum > 0 ? Math.floor(decisionIdNum) : null;
         await pool.query(
-            `INSERT INTO admin_audit_logs (actor_user_id, actor_role, action, entity_type, entity_id, meta_json)
-             VALUES ($1,$2,$3, NULLIF($4,''), NULLIF($5,''), $6::jsonb)`,
+            `INSERT INTO admin_audit_logs (actor_user_id, actor_role, action, entity_type, entity_id, decision_id, meta_json)
+             VALUES ($1,$2,$3, NULLIF($4,''), NULLIF($5,''), $6, $7::jsonb)`,
             [
                 actorUserId,
                 actorRole,
                 safeAction,
                 entity_type ? String(entity_type).slice(0, 60) : '',
                 entity_id !== null && entity_id !== undefined ? String(entity_id).slice(0, 80) : '',
+                safeDecisionId,
                 meta ? JSON.stringify(meta) : null
             ]
         );
@@ -1500,9 +1507,11 @@ async function ensureAdminAuditTables() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        await pool.query('ALTER TABLE admin_audit_logs ADD COLUMN IF NOT EXISTS decision_id BIGINT;');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_logs(created_at DESC);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_audit_actor ON admin_audit_logs(actor_user_id, created_at DESC);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_audit_entity ON admin_audit_logs(entity_type, entity_id, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_audit_decision ON admin_audit_logs(decision_id, created_at DESC);');
         console.log('✅ Admin audit logs table ensured');
     } catch (err) {
         console.error('❌ Failed to ensure admin audit logs:', err.message);
@@ -1657,6 +1666,425 @@ async function ensureAdminExcellenceTables() {
         console.log('✅ Admin excellence tables ensured');
     } catch (err) {
         console.error('❌ Failed to ensure admin excellence tables:', err.message);
+    }
+}
+
+function executiveZoneExpr(alias = '') {
+    const p = alias ? `${alias}.` : '';
+    return `CASE
+        WHEN ${p}pickup_lat IS NULL OR ${p}pickup_lng IS NULL THEN 'citywide'
+        ELSE CONCAT(ROUND(CAST(${p}pickup_lat AS numeric), 1), ',', ROUND(CAST(${p}pickup_lng AS numeric), 1))
+    END`;
+}
+
+function normalizeExecutiveZoneKey(v) {
+    const raw = v !== undefined && v !== null ? String(v).trim().toLowerCase() : '';
+    if (!raw) return 'citywide';
+    return raw.slice(0, 80);
+}
+
+function execClamp(n, min, max) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return min;
+    return Math.max(min, Math.min(max, v));
+}
+
+function toSafeNumber(n, fallback = 0) {
+    const v = Number(n);
+    return Number.isFinite(v) ? v : fallback;
+}
+
+function computeTrustScores(metrics = {}) {
+    const avgWait = toSafeNumber(metrics.avg_wait_minutes, 0);
+    const cancelRate = toSafeNumber(metrics.cancel_rate, 0);
+    const complaints = toSafeNumber(metrics.complaints_count, 0);
+    const incidents = toSafeNumber(metrics.incidents_count, 0);
+
+    const waitScore = execClamp(100 - avgWait * 4, 0, 100);
+    const cancelScore = execClamp(100 - cancelRate * 100, 0, 100);
+    const complaintsScore = execClamp(100 - complaints * 8, 0, 100);
+    const incidentsScore = execClamp(100 - incidents * 10, 0, 100);
+    const trustTemperature = execClamp((waitScore * 0.35) + (cancelScore * 0.30) + (complaintsScore * 0.2) + (incidentsScore * 0.15), 0, 100);
+
+    return {
+        wait_score: Number(waitScore.toFixed(2)),
+        cancel_score: Number(cancelScore.toFixed(2)),
+        complaints_score: Number(complaintsScore.toFixed(2)),
+        incidents_score: Number(incidentsScore.toFixed(2)),
+        trust_temperature: Number(trustTemperature.toFixed(2))
+    };
+}
+
+async function computeExecutiveMetrics({ zoneKey = 'citywide', hours = 24 } = {}) {
+    const z = normalizeExecutiveZoneKey(zoneKey);
+    const h = execClamp(hours, 1, 168);
+    const byZone = z !== 'citywide';
+
+    const pendingRes = await pool.query(
+        `SELECT COUNT(*)::int AS pending_count,
+                COALESCE(AVG(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0), 0) AS avg_wait_minutes
+         FROM pending_ride_requests
+         WHERE status IN ('waiting','accepted')
+           AND created_at >= NOW() - ($1 * INTERVAL '1 hour')
+           AND ($2::boolean = false OR ${executiveZoneExpr()} = $3)`,
+        [h, byZone, z]
+    );
+
+    const tripsRes = await pool.query(
+        `SELECT COUNT(*)::int AS trips_total,
+                COUNT(*) FILTER (WHERE LOWER(COALESCE(status, '')) IN ('cancelled','canceled'))::int AS trips_cancelled,
+                COALESCE(SUM(CASE WHEN LOWER(COALESCE(status, '')) = 'completed' THEN COALESCE(cost, 0) ELSE 0 END), 0) AS revenue_completed
+         FROM trips
+         WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+           AND ($2::boolean = false OR ${executiveZoneExpr()} = $3)`,
+        [h, byZone, z]
+    );
+
+    const complaintsRes = await pool.query(
+        `SELECT COUNT(*)::int AS complaints_count
+         FROM support_tickets st
+         LEFT JOIN trips t ON t.id = st.trip_id
+         WHERE st.created_at >= NOW() - ($1 * INTERVAL '1 hour')
+           AND ($2::boolean = false OR ${executiveZoneExpr('t')} = $3)`,
+        [h, byZone, z]
+    );
+
+    const incidentsRes = await pool.query(
+        `SELECT COUNT(*)::int AS incidents_count
+         FROM trip_incident_packages ip
+         LEFT JOIN trips t ON t.id = ip.trip_id
+         WHERE ip.created_at >= NOW() - ($1 * INTERVAL '1 hour')
+           AND ($2::boolean = false OR ${executiveZoneExpr('t')} = $3)`,
+        [h, byZone, z]
+    );
+
+    const pendingCount = toSafeNumber(pendingRes.rows?.[0]?.pending_count, 0);
+    const avgWaitMinutes = toSafeNumber(pendingRes.rows?.[0]?.avg_wait_minutes, 0);
+    const tripsTotal = toSafeNumber(tripsRes.rows?.[0]?.trips_total, 0);
+    const tripsCancelled = toSafeNumber(tripsRes.rows?.[0]?.trips_cancelled, 0);
+    const revenueCompleted = toSafeNumber(tripsRes.rows?.[0]?.revenue_completed, 0);
+    const complaintsCount = toSafeNumber(complaintsRes.rows?.[0]?.complaints_count, 0);
+    const incidentsCount = toSafeNumber(incidentsRes.rows?.[0]?.incidents_count, 0);
+    const cancelRate = tripsTotal > 0 ? tripsCancelled / tripsTotal : 0;
+
+    return {
+        zone_key: z,
+        lookback_hours: h,
+        pending_count: pendingCount,
+        avg_wait_minutes: Number(avgWaitMinutes.toFixed(2)),
+        trips_total: tripsTotal,
+        trips_cancelled: tripsCancelled,
+        cancel_rate: Number(cancelRate.toFixed(4)),
+        complaints_count: complaintsCount,
+        incidents_count: incidentsCount,
+        revenue_completed: Number(revenueCompleted.toFixed(2)),
+        measured_at: new Date().toISOString()
+    };
+}
+
+function computeDeltaJson(expected = {}, actual = {}) {
+    const keys = new Set([...Object.keys(expected || {}), ...Object.keys(actual || {})]);
+    const out = {};
+    for (const k of keys) {
+        const ev = Number(expected?.[k]);
+        const av = Number(actual?.[k]);
+        if (Number.isFinite(ev) && Number.isFinite(av)) {
+            out[k] = Number((av - ev).toFixed(4));
+        }
+    }
+    return out;
+}
+
+async function upsertZoneTrustIndex(zoneKey) {
+    const z = normalizeExecutiveZoneKey(zoneKey);
+    const metrics = await computeExecutiveMetrics({ zoneKey: z, hours: 24 });
+    const scores = computeTrustScores(metrics);
+    const raw = { metrics, scores };
+
+    const inserted = await pool.query(
+        `INSERT INTO zone_trust_index (
+            zone_key, hour_bucket, wait_score, cancel_score, complaints_score, incidents_score, trust_temperature, raw_json
+         )
+         VALUES (
+            $1, date_trunc('hour', NOW()), $2, $3, $4, $5, $6, $7::jsonb
+         )
+         ON CONFLICT (zone_key, hour_bucket)
+         DO UPDATE SET
+            wait_score = EXCLUDED.wait_score,
+            cancel_score = EXCLUDED.cancel_score,
+            complaints_score = EXCLUDED.complaints_score,
+            incidents_score = EXCLUDED.incidents_score,
+            trust_temperature = EXCLUDED.trust_temperature,
+            raw_json = EXCLUDED.raw_json,
+            created_at = CURRENT_TIMESTAMP
+         RETURNING *`,
+        [z, scores.wait_score, scores.cancel_score, scores.complaints_score, scores.incidents_score, scores.trust_temperature, JSON.stringify(raw)]
+    );
+    return inserted.rows[0];
+}
+
+async function materializeTrustIndex() {
+    const zonesRes = await pool.query(
+        `SELECT DISTINCT zone_key
+         FROM (
+            SELECT ${executiveZoneExpr()} AS zone_key
+            FROM pending_ride_requests
+            WHERE created_at >= NOW() - INTERVAL '6 hours'
+            UNION ALL
+            SELECT ${executiveZoneExpr()} AS zone_key
+            FROM trips
+            WHERE created_at >= NOW() - INTERVAL '6 hours'
+            UNION ALL
+            SELECT ${executiveZoneExpr('t')} AS zone_key
+            FROM trip_incident_packages ip
+            LEFT JOIN trips t ON t.id = ip.trip_id
+            WHERE ip.created_at >= NOW() - INTERVAL '6 hours'
+         ) z
+         WHERE zone_key IS NOT NULL
+         LIMIT 24`
+    );
+
+    const zones = zonesRes.rows.map(r => normalizeExecutiveZoneKey(r.zone_key)).filter(Boolean);
+    if (!zones.length) zones.push('citywide');
+
+    const rows = [];
+    for (const z of zones) {
+        rows.push(await upsertZoneTrustIndex(z));
+    }
+
+    rows.sort((a, b) => Number(b?.trust_temperature || 0) - Number(a?.trust_temperature || 0));
+    return rows;
+}
+
+async function createOpsShockIfNeeded({ shockType, zoneKey, severity = 'medium', metricName, baselineValue = null, observedValue = null, ratio = null, details = null }) {
+    const sType = String(shockType || '').trim().slice(0, 80);
+    const z = normalizeExecutiveZoneKey(zoneKey);
+    const sev = String(severity || 'medium').trim().toLowerCase().slice(0, 20);
+    if (!sType) return null;
+
+    const dup = await pool.query(
+        `SELECT id
+         FROM ops_shocks
+         WHERE status = 'open'
+           AND shock_type = $1
+           AND zone_key = $2
+           AND detected_at >= NOW() - INTERVAL '2 hours'
+         ORDER BY detected_at DESC
+         LIMIT 1`,
+        [sType, z]
+    );
+    if (dup.rows.length) return null;
+
+    const ins = await pool.query(
+        `INSERT INTO ops_shocks (shock_type, zone_key, severity, metric_name, baseline_value, observed_value, ratio, status, details_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'open',$8::jsonb)
+         RETURNING *`,
+        [
+            sType,
+            z,
+            sev,
+            metricName ? String(metricName).slice(0, 80) : null,
+            Number.isFinite(Number(baselineValue)) ? Number(baselineValue) : null,
+            Number.isFinite(Number(observedValue)) ? Number(observedValue) : null,
+            Number.isFinite(Number(ratio)) ? Number(ratio) : null,
+            details ? JSON.stringify(details) : null
+        ]
+    );
+    return ins.rows[0] || null;
+}
+
+async function detectOperationalShocks(trustRows = []) {
+    const created = [];
+    for (const row of trustRows) {
+        const zoneKey = normalizeExecutiveZoneKey(row?.zone_key);
+        const currentTrust = toSafeNumber(row?.trust_temperature, 0);
+        const baselineRes = await pool.query(
+            `SELECT AVG(trust_temperature)::numeric(10,2) AS baseline
+             FROM zone_trust_index
+             WHERE zone_key = $1
+               AND hour_bucket < date_trunc('hour', NOW())
+               AND hour_bucket >= NOW() - INTERVAL '24 hours'`,
+            [zoneKey]
+        );
+        const baseline = toSafeNumber(baselineRes.rows?.[0]?.baseline, 0);
+        if (baseline > 0) {
+            const drop = baseline - currentTrust;
+            if (drop >= 15) {
+                const ratio = baseline > 0 ? currentTrust / baseline : null;
+                const shock = await createOpsShockIfNeeded({
+                    shockType: 'trust_drop',
+                    zoneKey,
+                    severity: drop >= 25 ? 'high' : 'medium',
+                    metricName: 'trust_temperature',
+                    baselineValue: baseline,
+                    observedValue: currentTrust,
+                    ratio,
+                    details: { drop: Number(drop.toFixed(2)) }
+                });
+                if (shock) created.push(shock);
+            }
+        }
+
+        const waitMin = toSafeNumber(row?.raw_json?.metrics?.avg_wait_minutes, 0);
+        if (waitMin >= 18) {
+            const shock = await createOpsShockIfNeeded({
+                shockType: 'wait_spike',
+                zoneKey,
+                severity: waitMin >= 30 ? 'high' : 'medium',
+                metricName: 'avg_wait_minutes',
+                baselineValue: 10,
+                observedValue: waitMin,
+                ratio: waitMin / 10,
+                details: { threshold_minutes: 18 }
+            });
+            if (shock) created.push(shock);
+        }
+    }
+    return created;
+}
+
+async function runExecutiveAutopilot({ triggeredBy = 'manual' } = {}) {
+    const trustRows = await materializeTrustIndex();
+    const shocks = await detectOperationalShocks(trustRows);
+
+    const highShocks = shocks.filter(s => String(s?.severity || '').toLowerCase() === 'high');
+    let crisisChanged = false;
+    if (highShocks.length >= 2) {
+        await pool.query(
+            `UPDATE admin_crisis_mode
+             SET enabled = true,
+                 title = COALESCE(NULLIF(title, ''), 'Shock Autopilot'),
+                 message = COALESCE(NULLIF(message, ''), 'تم تفعيل وضع الأزمات تلقائيًا نتيجة صدمات تشغيلية'),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = 1`
+        );
+        crisisChanged = true;
+    }
+
+    if (shocks.length) {
+        await pool.query(
+            `INSERT INTO playbook_runs (playbook_key, source, trigger_payload_json, result_json)
+             VALUES ($1,$2,$3::jsonb,$4::jsonb)`,
+            [
+                'shock_autopilot',
+                String(triggeredBy || 'manual').slice(0, 40),
+                JSON.stringify({ shocks_count: shocks.length }),
+                JSON.stringify({ crisis_enabled: crisisChanged })
+            ]
+        );
+    }
+
+    return {
+        trust_rows: trustRows,
+        new_shocks: shocks,
+        crisis_enabled: crisisChanged
+    };
+}
+
+async function ensureExecutiveTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS executive_decisions (
+                id BIGSERIAL PRIMARY KEY,
+                title VARCHAR(160) NOT NULL,
+                reason TEXT NOT NULL,
+                hypothesis TEXT,
+                decision_type VARCHAR(80),
+                zone_key VARCHAR(80) NOT NULL DEFAULT 'citywide',
+                expected_impact_json JSONB,
+                status VARCHAR(30) NOT NULL DEFAULT 'active',
+                decided_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                decided_by_role VARCHAR(40),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_exec_decisions_created ON executive_decisions(created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_exec_decisions_zone ON executive_decisions(zone_key, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS decision_impacts (
+                id BIGSERIAL PRIMARY KEY,
+                decision_id BIGINT NOT NULL REFERENCES executive_decisions(id) ON DELETE CASCADE,
+                checkpoint_hours INTEGER NOT NULL,
+                expected_json JSONB,
+                actual_json JSONB,
+                delta_json JSONB,
+                measured_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (decision_id, checkpoint_hours)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_decision_impacts_decision ON decision_impacts(decision_id, checkpoint_hours);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS zone_trust_index (
+                id BIGSERIAL PRIMARY KEY,
+                zone_key VARCHAR(80) NOT NULL,
+                hour_bucket TIMESTAMP NOT NULL,
+                wait_score NUMERIC(6,2) NOT NULL,
+                cancel_score NUMERIC(6,2) NOT NULL,
+                complaints_score NUMERIC(6,2) NOT NULL,
+                incidents_score NUMERIC(6,2) NOT NULL,
+                trust_temperature NUMERIC(6,2) NOT NULL,
+                raw_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (zone_key, hour_bucket)
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_zone_trust_latest ON zone_trust_index(zone_key, hour_bucket DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS ops_shocks (
+                id BIGSERIAL PRIMARY KEY,
+                shock_type VARCHAR(80) NOT NULL,
+                zone_key VARCHAR(80) NOT NULL DEFAULT 'citywide',
+                severity VARCHAR(20) NOT NULL DEFAULT 'medium',
+                metric_name VARCHAR(80),
+                baseline_value NUMERIC(12,4),
+                observed_value NUMERIC(12,4),
+                ratio NUMERIC(12,4),
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                details_json JSONB,
+                detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_ops_shocks_open ON ops_shocks(status, detected_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS playbook_runs (
+                id BIGSERIAL PRIMARY KEY,
+                playbook_key VARCHAR(120),
+                source VARCHAR(40),
+                trigger_payload_json JSONB,
+                result_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_playbook_runs_created ON playbook_runs(created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS counterfactual_snapshots (
+                id BIGSERIAL PRIMARY KEY,
+                decision_id BIGINT REFERENCES executive_decisions(id) ON DELETE CASCADE,
+                zone_key VARCHAR(80) NOT NULL DEFAULT 'citywide',
+                scenario_key VARCHAR(80),
+                baseline_json JSONB,
+                projected_json JSONB,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_counterfactual_decision ON counterfactual_snapshots(decision_id, created_at DESC);');
+
+        await pool.query('ALTER TABLE admin_audit_logs ADD COLUMN IF NOT EXISTS decision_id BIGINT;');
+        await pool.query('ALTER TABLE admin_audit_logs DROP CONSTRAINT IF EXISTS fk_admin_audit_decision;');
+        await pool.query('ALTER TABLE admin_audit_logs ADD CONSTRAINT fk_admin_audit_decision FOREIGN KEY (decision_id) REFERENCES executive_decisions(id) ON DELETE SET NULL;');
+
+        console.log('✅ Executive suite tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure executive suite tables:', err.message);
     }
 }
 
@@ -1955,6 +2383,7 @@ app.get('/api/admin/audit', requirePermission('admin.audit.read'), async (req, r
         const actorUserId = req.query.actor_user_id !== undefined && req.query.actor_user_id !== null ? Number(req.query.actor_user_id) : null;
         const entityType = req.query.entity_type ? String(req.query.entity_type).slice(0, 60) : null;
         const entityId = req.query.entity_id ? String(req.query.entity_id).slice(0, 80) : null;
+        const decisionId = req.query.decision_id !== undefined && req.query.decision_id !== null ? Number(req.query.decision_id) : null;
 
         const params = [];
         let where = 'WHERE 1=1';
@@ -1970,10 +2399,14 @@ app.get('/api/admin/audit', requirePermission('admin.audit.read'), async (req, r
             params.push(entityId);
             where += ` AND entity_id = $${params.length}`;
         }
+        if (Number.isFinite(decisionId) && decisionId > 0) {
+            params.push(Math.floor(decisionId));
+            where += ` AND decision_id = $${params.length}`;
+        }
         params.push(limit);
 
         const rows = await pool.query(
-            `SELECT id, actor_user_id, actor_role, action, entity_type, entity_id, meta_json, created_at
+            `SELECT id, actor_user_id, actor_role, action, entity_type, entity_id, decision_id, meta_json, created_at
              FROM admin_audit_logs
              ${where}
              ORDER BY created_at DESC
@@ -2039,6 +2472,331 @@ app.patch('/api/admin/crisis-mode', requirePermission('admin.ops.write'), async 
 
         await writeAdminAudit(req, { action: 'crisis_mode.toggle', entity_type: 'crisis_mode', entity_id: '1', meta: { enabled, title: title || null } });
         res.json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- Executive Suite ---
+
+app.post('/api/admin/executive/decisions', requirePermission('admin.executive.write', 'admin.ops.write'), async (req, res) => {
+    try {
+        const title = req.body?.title !== undefined && req.body?.title !== null ? String(req.body.title).trim().slice(0, 160) : '';
+        const reason = req.body?.reason !== undefined && req.body?.reason !== null ? String(req.body.reason).trim().slice(0, 3000) : '';
+        const hypothesis = req.body?.hypothesis !== undefined && req.body?.hypothesis !== null ? String(req.body.hypothesis).trim().slice(0, 3000) : null;
+        const decisionType = req.body?.decision_type !== undefined && req.body?.decision_type !== null ? String(req.body.decision_type).trim().slice(0, 80) : null;
+        const zoneKey = normalizeExecutiveZoneKey(req.body?.zone_key);
+        const expectedImpact = req.body?.expected_impact && typeof req.body.expected_impact === 'object' ? req.body.expected_impact : null;
+        if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+        if (!reason) return res.status(400).json({ success: false, error: 'reason is required' });
+
+        const ins = await pool.query(
+            `INSERT INTO executive_decisions (title, reason, hypothesis, decision_type, zone_key, expected_impact_json, status, decided_by_user_id, decided_by_role)
+             VALUES ($1,$2,$3,$4,$5,$6::jsonb,'active',$7,$8)
+             RETURNING *`,
+            [
+                title,
+                reason,
+                hypothesis,
+                decisionType,
+                zoneKey,
+                expectedImpact ? JSON.stringify(expectedImpact) : null,
+                req.auth?.uid || null,
+                req.auth?.role ? String(req.auth.role).toLowerCase() : null
+            ]
+        );
+        const decision = ins.rows[0];
+
+        await pool.query(
+            `INSERT INTO decision_impacts (decision_id, checkpoint_hours, expected_json)
+             VALUES ($1, 24, $2::jsonb), ($1, 72, $2::jsonb)
+             ON CONFLICT (decision_id, checkpoint_hours) DO NOTHING`,
+            [decision.id, expectedImpact ? JSON.stringify(expectedImpact) : null]
+        );
+
+        await writeAdminAudit(req, {
+            action: 'executive.decision.create',
+            entity_type: 'executive_decision',
+            entity_id: String(decision.id),
+            decision_id: decision.id,
+            meta: { title, zone_key: zoneKey, decision_type: decisionType || null }
+        });
+
+        res.status(201).json({ success: true, data: decision });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/executive/decision-impact/:id', requirePermission('admin.executive.read', 'admin.ops.read'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'invalid decision id' });
+
+        const dRes = await pool.query('SELECT * FROM executive_decisions WHERE id = $1 LIMIT 1', [id]);
+        const decision = dRes.rows[0] || null;
+        if (!decision) return res.status(404).json({ success: false, error: 'decision not found' });
+
+        const nowMetrics = await computeExecutiveMetrics({ zoneKey: decision.zone_key || 'citywide', hours: 24 });
+        const impactsRes = await pool.query(
+            `SELECT id, decision_id, checkpoint_hours, expected_json, actual_json, delta_json, measured_at, created_at
+             FROM decision_impacts
+             WHERE decision_id = $1
+             ORDER BY checkpoint_hours ASC`,
+            [id]
+        );
+
+        const decisionCreatedAt = decision.created_at ? new Date(decision.created_at) : new Date();
+        const ageHours = (Date.now() - decisionCreatedAt.getTime()) / (1000 * 60 * 60);
+        const enriched = [];
+        for (const row of impactsRes.rows) {
+            let current = row;
+            const checkpoint = Number(row.checkpoint_hours);
+            const shouldMeasure = Number.isFinite(checkpoint) && ageHours >= checkpoint;
+            if (shouldMeasure) {
+                const expected = row.expected_json || {};
+                const actual = {
+                    avg_wait_minutes: nowMetrics.avg_wait_minutes,
+                    cancel_rate: nowMetrics.cancel_rate,
+                    incidents_count: nowMetrics.incidents_count,
+                    complaints_count: nowMetrics.complaints_count,
+                    revenue_completed: nowMetrics.revenue_completed
+                };
+                const delta = computeDeltaJson(expected, actual);
+                const up = await pool.query(
+                    `UPDATE decision_impacts
+                     SET actual_json = $2::jsonb,
+                         delta_json = $3::jsonb,
+                         measured_at = CURRENT_TIMESTAMP
+                     WHERE id = $1
+                     RETURNING id, decision_id, checkpoint_hours, expected_json, actual_json, delta_json, measured_at, created_at`,
+                    [row.id, JSON.stringify(actual), JSON.stringify(delta)]
+                );
+                current = up.rows[0] || row;
+            }
+            enriched.push(current);
+        }
+
+        const cf = await pool.query(
+            `SELECT id, scenario_key, baseline_json, projected_json, created_at
+             FROM counterfactual_snapshots
+             WHERE decision_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [id]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                decision,
+                current_metrics_24h: nowMetrics,
+                impacts: enriched,
+                counterfactual_replay: cf.rows[0] || null
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/executive/simulate', requirePermission('admin.executive.write', 'admin.ops.write'), async (req, res) => {
+    try {
+        const zoneKey = normalizeExecutiveZoneKey(req.body?.zone_key);
+        const pricingDeltaPct = execClamp(req.body?.pricing_delta_pct !== undefined ? Number(req.body.pricing_delta_pct) : 0, -50, 100);
+        const driverSupplyDeltaPct = execClamp(req.body?.driver_supply_delta_pct !== undefined ? Number(req.body.driver_supply_delta_pct) : 0, -80, 200);
+        const scenarioKey = req.body?.scenario_key ? String(req.body.scenario_key).trim().slice(0, 80) : 'generic_scenario';
+        const decisionIdNum = req.body?.decision_id !== undefined && req.body?.decision_id !== null ? Number(req.body.decision_id) : null;
+        const decisionId = Number.isFinite(decisionIdNum) && decisionIdNum > 0 ? Math.floor(decisionIdNum) : null;
+
+        const baseline = await computeExecutiveMetrics({ zoneKey, hours: 24 });
+        const waitProjected = Math.max(1, baseline.avg_wait_minutes * (1 - (driverSupplyDeltaPct / 100) + (pricingDeltaPct / 200)));
+        const cancelProjected = execClamp(baseline.cancel_rate * (1 + (pricingDeltaPct / 300) - (driverSupplyDeltaPct / 200)), 0, 1);
+        const incidentsProjected = Math.max(0, baseline.incidents_count * (1 + (pricingDeltaPct / 250) - (driverSupplyDeltaPct / 250)));
+        const revenueProjected = Math.max(0, baseline.revenue_completed * (1 + (pricingDeltaPct / 100)) * (1 - cancelProjected * 0.2));
+
+        const projected = {
+            avg_wait_minutes: Number(waitProjected.toFixed(2)),
+            cancel_rate: Number(cancelProjected.toFixed(4)),
+            incidents_count: Number(incidentsProjected.toFixed(2)),
+            revenue_completed: Number(revenueProjected.toFixed(2)),
+            trust_scores: computeTrustScores({
+                avg_wait_minutes: waitProjected,
+                cancel_rate: cancelProjected,
+                complaints_count: baseline.complaints_count,
+                incidents_count: incidentsProjected
+            })
+        };
+
+        const cf = await pool.query(
+            `INSERT INTO counterfactual_snapshots (decision_id, zone_key, scenario_key, baseline_json, projected_json, created_by_user_id)
+             VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6)
+             RETURNING *`,
+            [
+                decisionId,
+                zoneKey,
+                scenarioKey,
+                JSON.stringify(baseline),
+                JSON.stringify(projected),
+                req.auth?.uid || null
+            ]
+        );
+
+        await writeAdminAudit(req, {
+            action: 'executive.simulate',
+            entity_type: 'counterfactual_snapshot',
+            entity_id: String(cf.rows?.[0]?.id || ''),
+            decision_id: decisionId,
+            meta: { zone_key: zoneKey, scenario_key: scenarioKey, pricing_delta_pct: pricingDeltaPct, driver_supply_delta_pct: driverSupplyDeltaPct }
+        });
+
+        res.json({ success: true, data: { snapshot: cf.rows[0], baseline, projected } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/executive/trust-index', requirePermission('admin.executive.read', 'admin.ops.read'), async (req, res) => {
+    try {
+        const refresh = String(req.query.refresh || '').toLowerCase() === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
+        if (refresh) {
+            await materializeTrustIndex();
+        }
+        const limit = Number.isFinite(Number(req.query.limit)) ? Math.min(Math.max(Number(req.query.limit), 1), 80) : 30;
+        const rows = await pool.query(
+            `SELECT z.*
+             FROM zone_trust_index z
+             INNER JOIN (
+                SELECT zone_key, MAX(hour_bucket) AS mx
+                FROM zone_trust_index
+                GROUP BY zone_key
+             ) m ON m.zone_key = z.zone_key AND m.mx = z.hour_bucket
+             ORDER BY z.trust_temperature ASC
+             LIMIT $1`,
+            [limit]
+        );
+
+        const openShocks = await pool.query(
+            `SELECT id, shock_type, zone_key, severity, metric_name, baseline_value, observed_value, ratio, detected_at
+             FROM ops_shocks
+             WHERE status = 'open'
+             ORDER BY detected_at DESC
+             LIMIT 40`
+        );
+
+        res.json({
+            success: true,
+            data: {
+                trust_index: rows.rows,
+                open_shocks: openShocks.rows
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/executive/playbook/trigger', requirePermission('admin.executive.write', 'admin.ops.write'), async (req, res) => {
+    try {
+        const key = req.body?.playbook_key ? String(req.body.playbook_key).trim().slice(0, 120) : '';
+        const source = req.body?.source ? String(req.body.source).trim().slice(0, 40) : 'manual';
+        const decisionIdNum = req.body?.decision_id !== undefined && req.body?.decision_id !== null ? Number(req.body.decision_id) : null;
+        const decisionId = Number.isFinite(decisionIdNum) && decisionIdNum > 0 ? Math.floor(decisionIdNum) : null;
+        const payload = req.body?.payload && typeof req.body.payload === 'object' ? req.body.payload : {};
+        if (!key) return res.status(400).json({ success: false, error: 'playbook_key is required' });
+
+        let result = { ok: true, action: 'record_only' };
+
+        if (key === 'shock_autopilot') {
+            result = await runExecutiveAutopilot({ triggeredBy: source });
+        } else if (key === 'crisis_mode_on') {
+            const up = await pool.query(
+                `UPDATE admin_crisis_mode
+                 SET enabled = true,
+                     title = COALESCE(NULLIF($1, ''), title),
+                     message = COALESCE(NULLIF($2, ''), message),
+                     updated_by_user_id = $3,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = 1
+                 RETURNING enabled, title, message, updated_at`,
+                [
+                    payload?.title ? String(payload.title).slice(0, 120) : '',
+                    payload?.message ? String(payload.message).slice(0, 2000) : '',
+                    req.auth?.uid || null
+                ]
+            );
+            result = { ok: true, crisis_mode: up.rows[0] || null };
+        }
+
+        const run = await pool.query(
+            `INSERT INTO playbook_runs (playbook_key, source, trigger_payload_json, result_json)
+             VALUES ($1,$2,$3::jsonb,$4::jsonb)
+             RETURNING *`,
+            [key, source, JSON.stringify(payload || {}), JSON.stringify(result || {})]
+        );
+
+        await writeAdminAudit(req, {
+            action: 'executive.playbook.trigger',
+            entity_type: 'playbook_runs',
+            entity_id: String(run.rows?.[0]?.id || ''),
+            decision_id: decisionId,
+            meta: { playbook_key: key, source }
+        });
+
+        res.json({ success: true, data: { run: run.rows[0], result } });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/executive/briefing', requirePermission('admin.executive.read', 'admin.ops.read'), async (req, res) => {
+    try {
+        const autopilot = await runExecutiveAutopilot({ triggeredBy: 'briefing' });
+        const trustSorted = Array.isArray(autopilot?.trust_rows) ? autopilot.trust_rows.slice() : [];
+        trustSorted.sort((a, b) => Number(a?.trust_temperature || 0) - Number(b?.trust_temperature || 0));
+
+        const weakest = trustSorted[0] || null;
+        const strongest = trustSorted[trustSorted.length - 1] || null;
+
+        const decisions = await pool.query(
+            `SELECT id, title, zone_key, status, created_at
+             FROM executive_decisions
+             ORDER BY created_at DESC
+             LIMIT 5`
+        );
+
+        const shocks = await pool.query(
+            `SELECT id, shock_type, zone_key, severity, detected_at
+             FROM ops_shocks
+             WHERE status = 'open'
+             ORDER BY detected_at DESC
+             LIMIT 10`
+        );
+
+        const crisis = await pool.query('SELECT enabled, title, message, updated_at FROM admin_crisis_mode WHERE id = 1 LIMIT 1');
+        const crisisRow = crisis.rows[0] || { enabled: false };
+
+        const narrative = [
+            `ملخص تنفيذي ${new Date().toLocaleString('ar-EG')}:`,
+            weakest ? `- أقل منطقة ثقة الآن: ${weakest.zone_key} بمؤشر ${Number(weakest.trust_temperature).toFixed(1)}.` : '- لا توجد بيانات ثقة كافية حتى الآن.',
+            strongest ? `- أعلى منطقة ثقة: ${strongest.zone_key} بمؤشر ${Number(strongest.trust_temperature).toFixed(1)}.` : '',
+            `- الصدمات التشغيلية المفتوحة: ${shocks.rows.length}.`,
+            crisisRow?.enabled ? `- وضع الأزمات مفعل: ${crisisRow.title || 'Crisis Mode'}.` : '- وضع الأزمات غير مفعل حالياً.',
+            decisions.rows.length ? `- آخر قرار تنفيذي: ${decisions.rows[0].title} (قرار #${decisions.rows[0].id}).` : '- لا توجد قرارات تنفيذية مسجلة بعد.',
+            '- التوصية الآن: راجع المناطق ذات الثقة المنخفضة ونفّذ Playbook مناسب فوراً.'
+        ].filter(Boolean).join('\n');
+
+        res.json({
+            success: true,
+            data: {
+                generated_at: new Date().toISOString(),
+                trust_index: trustSorted,
+                open_shocks: shocks.rows,
+                recent_decisions: decisions.rows,
+                crisis_mode: crisisRow,
+                narrative_ar: narrative
+            }
+        });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -18025,6 +18783,26 @@ function startGuardianCron() {
     }
 }
 
+function startExecutiveAutopilotCron() {
+    const disabled = String(process.env.DISABLE_EXECUTIVE_AUTOPILOT_CRON || '').toLowerCase() === 'true';
+    const env = String(process.env.NODE_ENV || '').toLowerCase();
+    if (disabled) return;
+    if (env === 'test') return;
+
+    try {
+        cron.schedule('*/5 * * * *', async () => {
+            try {
+                await runExecutiveAutopilot({ triggeredBy: 'cron' });
+            } catch (e) {
+                console.error('⚠️  Executive autopilot cron error:', e.message);
+            }
+        });
+        console.log('⏱️  Executive autopilot cron enabled (every 5 minutes)');
+    } catch (e) {
+        console.error('⚠️  Executive autopilot cron setup failed:', e.message);
+    }
+}
+
 // Start server
 ensureCoreSchema()
     .then(() => ensureDefaultAdmins())
@@ -18033,6 +18811,7 @@ ensureCoreSchema()
     .then(() => ensureAdminAuditTables())
     .then(() => ensureAdminPlaybooksTables())
     .then(() => ensureAdminExcellenceTables())
+    .then(() => ensureExecutiveTables())
     .then(() => ensureDefaultAdminPlaybooks())
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
@@ -18064,5 +18843,6 @@ ensureCoreSchema()
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📍 API available at http://localhost:${PORT}/api`);
             startGuardianCron();
+            startExecutiveAutopilotCron();
         });
     });

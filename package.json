@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "test": "node test-runner.js",
     "test:admin-excellence": "node test-admin-excellence.js",
+    "test:admin-executive": "node test-admin-executive.js",
     "build": "node -e \"console.log('No build step for this project')\""
   },
   "keywords": [
