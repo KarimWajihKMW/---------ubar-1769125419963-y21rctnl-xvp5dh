@@ -1100,9 +1100,196 @@ const ApiService = {
             return ApiService.request('/admin/dashboard/stats');
         },
 
+        async getAudit(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/audit${qs ? `?${qs}` : ''}`);
+        },
+
+        // U9: Crisis mode
+        async getCrisisMode() {
+            return ApiService.request('/admin/crisis-mode');
+        },
+
+        async updateCrisisMode(payload = {}) {
+            return ApiService.request('/admin/crisis-mode', {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // U7: Sensitive access
+        async createSensitiveAccessGrant(payload = {}) {
+            return ApiService.request('/admin/sensitive-access/grant', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getCaseSensitive(caseType, caseId, grantId) {
+            return ApiService.request(`/admin/cases/${encodeURIComponent(caseType)}/${encodeURIComponent(caseId)}/sensitive`, {
+                headers: grantId ? { 'X-Sensitive-Access-Grant': String(grantId) } : {}
+            });
+        },
+
+        // Unified admin case inbox
+        async getCases(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/cases${qs ? `?${qs}` : ''}`);
+        },
+
+        // U1: Case Time-Machine
+        async getCaseTimeline(caseType, caseId) {
+            return ApiService.request(`/admin/cases/${encodeURIComponent(caseType)}/${encodeURIComponent(caseId)}/timeline`);
+        },
+
+        async addCaseNote(caseType, caseId, note) {
+            return ApiService.request(`/admin/cases/${encodeURIComponent(caseType)}/${encodeURIComponent(caseId)}/notes`, {
+                method: 'POST',
+                body: JSON.stringify({ note })
+            });
+        },
+
+        // U2: Remedy packs
+        async getRemedyPacks(caseType) {
+            const qs = caseType ? `?case_type=${encodeURIComponent(caseType)}` : '';
+            return ApiService.request(`/admin/remedy-packs${qs}`);
+        },
+
+        async previewRemedyPack(payload = {}) {
+            return ApiService.request('/admin/remedy-packs/preview', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async executeRemedyPack(payload = {}) {
+            return ApiService.request('/admin/remedy-packs/execute', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // U3: Payment truth ledger
+        async getTripPaymentLedger(tripId) {
+            return ApiService.request(`/admin/trips/${encodeURIComponent(tripId)}/payment-ledger`);
+        },
+
+        async getTripEvidenceBundle(tripId, params = {}, grantId = null) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/trips/${encodeURIComponent(tripId)}/evidence-bundle${qs ? `?${qs}` : ''}`, {
+                headers: grantId ? { 'X-Sensitive-Access-Grant': String(grantId) } : {}
+            });
+        },
+
+        // U4: Reconciliation
+        async getDailyReconciliation(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/reconciliation/daily${qs ? `?${qs}` : ''}`);
+        },
+
+        async openReconciliationCase(payload = {}) {
+            return ApiService.request('/admin/reconciliation/open-case', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // U5: Dispute mediation
+        async getDisputeSession(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/disputes/session${qs ? `?${qs}` : ''}`);
+        },
+
+        async upsertDisputeSession(payload = {}) {
+            return ApiService.request('/admin/disputes/session', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async closeDisputeSession(payload = {}) {
+            return ApiService.request('/admin/disputes/session/close', {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // U6: QA sampling + reviews
+        async getQaReviews(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/qa/reviews${qs ? `?${qs}` : ''}`);
+        },
+
+        async createQaReview(payload = {}) {
+            return ApiService.request('/admin/qa/reviews', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getQaSample(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/qa/sample${qs ? `?${qs}` : ''}`);
+        },
+
+        // U8: Policy sandbox
+        async runPolicySandboxRefundCap(payload = {}) {
+            return ApiService.request('/admin/policy-sandbox/refund-cap', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        // U10: Root cause reporting
+        async getRootCausesTop(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/root-causes/top${qs ? `?${qs}` : ''}`);
+        },
+
+        // Ops / existing admin modules
+        async getOpsSnapshot() {
+            return ApiService.request('/admin/ops/snapshot');
+        },
+
         async createWalletTransaction(payload) {
             return ApiService.request('/admin/wallet/transaction', {
                 method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async listSupportTickets(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/support/tickets${qs ? `?${qs}` : ''}`);
+        },
+
+        async updateSupportTicket(id, payload = {}) {
+            return ApiService.request(`/admin/support/tickets/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async listLostItems(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/lost-items${qs ? `?${qs}` : ''}`);
+        },
+
+        async updateLostItem(id, payload = {}) {
+            return ApiService.request(`/admin/lost-items/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async listRefundRequests(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/refund-requests${qs ? `?${qs}` : ''}`);
+        },
+
+        async updateRefundRequest(id, payload = {}) {
+            return ApiService.request(`/admin/refund-requests/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
                 body: JSON.stringify(payload)
             });
         },
