@@ -71,7 +71,7 @@
   <script>
         async function refreshCrisis(){
           try{
-            const data = await ApiService.request('/admin/crisis-mode');
+            const data = await ApiService.admin.getCrisisMode();
             const c = data.data || {};
             const enabled = !!c.enabled;
             const banner = document.getElementById('crisis-banner');
@@ -103,7 +103,7 @@
         if(etype && etype.trim()) params.set('entity_type', etype.trim());
         if(eid && eid.trim()) params.set('entity_id', eid.trim());
         params.set('limit','100');
-        const data = await ApiService.request(`/admin/audit?${params.toString()}`);
+        const data = await ApiService.admin.getAudit(Object.fromEntries(params.entries()));
         const rows = Array.isArray(data.data) ? data.data : [];
         if(!rows.length){
           el.innerHTML = '<div class="text-center py-10 text-gray-500"><i class="fas fa-circle-check text-3xl mb-3"></i><p class="font-bold">لا توجد سجلات</p></div>';

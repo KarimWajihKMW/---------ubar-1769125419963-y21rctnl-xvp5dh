@@ -1251,6 +1251,30 @@ const ApiService = {
             return ApiService.request('/admin/ops/snapshot');
         },
 
+        async listPickupHubs(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/pickup-hubs${qs ? `?${qs}` : ''}`);
+        },
+
+        async createPickupHub(payload = {}) {
+            return ApiService.request('/admin/pickup-hubs', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async updatePickupHub(id, payload = {}) {
+            return ApiService.request(`/admin/pickup-hubs/${encodeURIComponent(id)}`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        },
+
+        async getPickupHubMetrics(params = {}) {
+            const qs = new URLSearchParams(params).toString();
+            return ApiService.request(`/admin/pickup-hubs/metrics${qs ? `?${qs}` : ''}`);
+        },
+
         async createWalletTransaction(payload) {
             return ApiService.request('/admin/wallet/transaction', {
                 method: 'POST',

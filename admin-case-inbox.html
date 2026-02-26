@@ -462,7 +462,7 @@
 
     async function refreshCrisis() {
       try {
-        const data = await ApiService.request('/admin/crisis-mode');
+        const data = await ApiService.admin.getCrisisMode();
         const c = data.data || {};
         const enabled = !!c.enabled;
         const banner = document.getElementById('crisis-banner');
@@ -478,12 +478,12 @@
 
     async function toggleCrisis(){
       try{
-        const cur = await ApiService.request('/admin/crisis-mode');
+        const cur = await ApiService.admin.getCrisisMode();
         const c = cur.data || {};
         const enabledNow = !!c.enabled;
         if(enabledNow){
           if(!confirm('إلغاء Crisis Mode؟')) return;
-          await ApiService.request('/admin/crisis-mode', { method: 'PATCH', body: JSON.stringify({ enabled: false }) });
+          await ApiService.admin.updateCrisisMode({ enabled: false });
           await refreshCrisis();
           alert('تم إلغاء Crisis Mode');
           return;
@@ -494,10 +494,7 @@
         if(!String(title).trim() && !String(message).trim()){
           if(!confirm('تفعيل بدون عنوان/رسالة؟')) return;
         }
-        await ApiService.request('/admin/crisis-mode', {
-          method: 'PATCH',
-          body: JSON.stringify({ enabled: true, title: String(title).trim() || null, message: String(message).trim() || null })
-        });
+        await ApiService.admin.updateCrisisMode({ enabled: true, title: String(title).trim() || null, message: String(message).trim() || null });
         await refreshCrisis();
         alert('تم تفعيل Crisis Mode');
       }catch(e){
@@ -512,10 +509,7 @@
       if (!reason || !String(reason).trim()) throw new Error('reason_required');
       const ttl = prompt('مدة الصلاحية بالدقائق (مثال 30):', '30');
       const ttlMinutes = ttl ? Number(ttl) : 30;
-      const resp = await ApiService.request('/admin/sensitive-access/grant', {
-        method: 'POST',
-        body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id), reason: String(reason).trim(), ttl_minutes: ttlMinutes })
-      });
+      const resp = await ApiService.admin.createSensitiveAccessGrant({ case_type: selected.case_type, case_id: String(selected.case_id), reason: String(reason).trim(), ttl_minutes: ttlMinutes });
       sensitiveGrant = resp.data;
       return sensitiveGrant;
     }
@@ -524,9 +518,7 @@
       if (!selected) return;
       try {
         const g = await ensureSensitiveGrant();
-        const data = await ApiService.request(`/admin/cases/${encodeURIComponent(selected.case_type)}/${encodeURIComponent(String(selected.case_id))}/sensitive`, {
-          headers: { 'X-Sensitive-Access-Grant': String(g.id) }
-        });
+        const data = await ApiService.admin.getCaseSensitive(selected.case_type, String(selected.case_id), String(g.id));
         const u = data.data?.user;
         const d = data.data?.driver;
         const up = document.getElementById('sens-user');
@@ -560,7 +552,7 @@
         if (status && status !== 'all') params.set('status', status);
         if (Number.isFinite(limit)) params.set('limit', String(limit));
 
-        const data = await ApiService.request(`/admin/cases?${params.toString()}`);
+        const data = await ApiService.admin.getCases(Object.fromEntries(params.entries()));
         const items = Array.isArray(data.data) ? data.data : [];
         renderList(items);
       } catch (e) {
@@ -659,16 +651,16 @@
 
         let details = null;
         if (caseType === 'incident') {
-          const data = await ApiService.request(`/admin/incidents/${encodeURIComponent(caseId)}`);
+          const data = await ApiService.admin.getIncident(caseId);
           details = data.data;
         } else if (caseType === 'support_ticket') {
-          const data = await ApiService.request(`/admin/support/tickets`);
+          const data = await ApiService.admin.listSupportTickets();
           details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
         } else if (caseType === 'lost_item') {
-          const data = await ApiService.request(`/admin/lost-items`);
+          const data = await ApiService.admin.listLostItems();
           details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
         } else if (caseType === 'refund_request') {
-          const data = await ApiService.request(`/admin/refund-requests`);
+          const data = await ApiService.admin.listRefundRequests();
           details = (Array.isArray(data.data) ? data.data : []).find(r => Number(r.id) === Number(caseId)) || null;
         }
 
@@ -686,7 +678,7 @@
 
         // Remedy packs list
         try {
-          const packs = await ApiService.request(`/admin/remedy-packs?case_type=${encodeURIComponent(selected.case_type)}`);
+          const packs = await ApiService.admin.getRemedyPacks(selected.case_type);
           const list = Array.isArray(packs.data) ? packs.data : [];
           const sel = document.getElementById('pack-select');
           sel.innerHTML = list.length
@@ -758,16 +750,16 @@
         }
 
         if (selected.case_type === 'support_ticket') {
-          await ApiService.request(`/admin/support/tickets/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status, ...rc }) });
+          await ApiService.admin.updateSupportTicket(selected.case_id, { status, ...rc });
         } else if (selected.case_type === 'lost_item') {
-          await ApiService.request(`/admin/lost-items/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify({ status, ...rc }) });
+          await ApiService.admin.updateLostItem(selected.case_id, { status, ...rc });
         } else if (selected.case_type === 'refund_request') {
           const payload = { status, resolution_note: note || null };
           Object.assign(payload, rc);
           if (amount && String(amount).trim()) payload.amount_approved = Number(amount);
-          await ApiService.request(`/admin/refund-requests/${encodeURIComponent(selected.case_id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
+          await ApiService.admin.updateRefundRequest(selected.case_id, payload);
         } else if (selected.case_type === 'incident') {
-          await ApiService.request(`/admin/incidents/${encodeURIComponent(selected.case_id)}/resolve`, { method: 'PATCH', body: JSON.stringify({ status, resolution_note: note || null, ...rc }) });
+          await ApiService.admin.resolveIncident(selected.case_id, { status, resolution_note: note || null, ...rc });
         }
 
         alert('تم تنفيذ الإجراء');
@@ -834,17 +826,14 @@
         if (!Number.isFinite(owner_id) || owner_id <= 0) return alert('owner_id غير صحيح');
         if (!Number.isFinite(amount) || amount === 0) return alert('amount لازم يكون رقم غير صفر');
 
-        await ApiService.request('/admin/wallet/transaction', {
-          method: 'POST',
-          body: JSON.stringify({
-            owner_type,
-            owner_id,
-            amount,
-            currency: 'SAR',
-            reason: reason || null,
-            reference_type: selected.case_type,
-            reference_id: String(selected.case_id)
-          })
+        await ApiService.admin.createWalletTransaction({
+          owner_type,
+          owner_id,
+          amount,
+          currency: 'SAR',
+          reason: reason || null,
+          reference_type: selected.case_type,
+          reference_id: String(selected.case_id)
         });
 
         alert('تم إنشاء Wallet Transaction');
@@ -893,7 +882,10 @@
         try {
           if (sensitiveGrant && sensitiveGrant.id) headers['X-Sensitive-Access-Grant'] = String(sensitiveGrant.id);
         } catch (e) {}
-        const data = await ApiService.request(`/admin/trips/${encodeURIComponent(selected.trip_id)}/evidence-bundle?case_type=${encodeURIComponent(selected.case_type)}&case_id=${encodeURIComponent(String(selected.case_id))}`, { headers });
+        const data = await ApiService.admin.getTripEvidenceBundle(selected.trip_id, {
+          case_type: selected.case_type,
+          case_id: String(selected.case_id)
+        }, headers['X-Sensitive-Access-Grant'] || null);
         const b = data.data;
 
         const audio = Array.isArray(b.driver_audio) ? b.driver_audio : [];
@@ -936,10 +928,7 @@
       if (!selected) return;
       const v = String(document.getElementById('timeline-note').value || '').trim();
       if (!v) return alert('اكتب ملاحظة');
-      await ApiService.request(`/admin/cases/${encodeURIComponent(selected.case_type)}/${encodeURIComponent(String(selected.case_id))}/notes`, {
-        method: 'POST',
-        body: JSON.stringify({ note: v })
-      });
+      await ApiService.admin.addCaseNote(selected.case_type, String(selected.case_id), v);
       document.getElementById('timeline-note').value = '';
       await loadTimeline();
     }
@@ -948,7 +937,7 @@
       if (!selected) return;
       const el = document.getElementById('timeline');
       el.innerHTML = '<div class="text-center py-6 text-gray-500"><i class="fas fa-spinner fa-spin text-2xl mb-2"></i><p class="font-bold">جاري التحميل...</p></div>';
-      const data = await ApiService.request(`/admin/cases/${encodeURIComponent(selected.case_type)}/${encodeURIComponent(String(selected.case_id))}/timeline`);
+      const data = await ApiService.admin.getCaseTimeline(selected.case_type, String(selected.case_id));
       cachedTimeline = data.data;
       const ev = Array.isArray(cachedTimeline?.events) ? cachedTimeline.events : [];
       if (!ev.length) {
@@ -1013,10 +1002,7 @@
 
       const amount = document.getElementById('pack-amount').value;
       try {
-        const data = await ApiService.request('/admin/remedy-packs/preview', {
-          method: 'POST',
-          body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id), pack_key: packKey, amount: amount ? Number(amount) : null })
-        });
+        const data = await ApiService.admin.previewRemedyPack({ case_type: selected.case_type, case_id: String(selected.case_id), pack_key: packKey, amount: amount ? Number(amount) : null });
         const steps = data.data?.preview?.steps || [];
         const needsAmt = (steps || []).some(s => s.kind === 'wallet_credit' || s.kind === 'refund_approve');
         document.getElementById('pack-amount-wrap').classList.toggle('hidden', !needsAmt);
@@ -1037,16 +1023,13 @@
         if (!confirm('Remedy Pack قد يحتاج Root‑Cause/Prevention (U10). تكمل؟')) return;
       }
       try {
-        await ApiService.request('/admin/remedy-packs/execute', {
-          method: 'POST',
-          body: JSON.stringify({
-            case_type: selected.case_type,
-            case_id: String(selected.case_id),
-            pack_key: packKey,
-            amount: amount ? Number(amount) : null,
-            note: note || null,
-            ...rc
-          })
+        await ApiService.admin.executeRemedyPack({
+          case_type: selected.case_type,
+          case_id: String(selected.case_id),
+          pack_key: packKey,
+          amount: amount ? Number(amount) : null,
+          note: note || null,
+          ...rc
         });
         alert('تم تنفيذ Remedy Pack');
         await refreshAll();
@@ -1062,7 +1045,7 @@
       const el = document.getElementById('ledger');
       el.innerHTML = '<div class="text-center py-6 text-gray-500"><i class="fas fa-spinner fa-spin text-2xl mb-2"></i><p class="font-bold">جاري التحميل...</p></div>';
       try {
-        const data = await ApiService.request(`/admin/trips/${encodeURIComponent(selected.trip_id)}/payment-ledger`);
+        const data = await ApiService.admin.getTripPaymentLedger(selected.trip_id);
         const items = Array.isArray(data.data?.items) ? data.data.items : [];
         const net = data.data?.net || {};
         el.innerHTML = `
@@ -1100,7 +1083,7 @@
       try {
         const days = Number(document.getElementById('qa-sample-days')?.value || 7);
         const limit = Number(document.getElementById('qa-sample-limit')?.value || 20);
-        const data = await ApiService.request(`/admin/qa/sample?days=${encodeURIComponent(String(days))}&limit=${encodeURIComponent(String(limit))}`);
+        const data = await ApiService.admin.getQaSample({ days: String(days), limit: String(limit) });
         const rows = Array.isArray(data.data) ? data.data : [];
         if (!rows.length) { el.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد Sample في الفترة دي</p>'; return; }
         el.innerHTML = rows.map(r => {
@@ -1129,7 +1112,7 @@
       el.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin"></i></div>';
       try {
         const days = Number(document.getElementById('rc-days')?.value || 7);
-        const data = await ApiService.request(`/admin/root-causes/top?days=${encodeURIComponent(String(days))}`);
+        const data = await ApiService.admin.getRootCausesTop({ days: String(days) });
         const rows = Array.isArray(data.data) ? data.data : [];
         if (!rows.length) { el.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد بيانات</p>'; return; }
         el.innerHTML = rows.map(r => `
@@ -1148,7 +1131,7 @@
 
     async function loadDispute() {
       if (!selected) return;
-      const data = await ApiService.request(`/admin/disputes/session?case_type=${encodeURIComponent(selected.case_type)}&case_id=${encodeURIComponent(String(selected.case_id))}`);
+      const data = await ApiService.admin.getDisputeSession({ case_type: selected.case_type, case_id: String(selected.case_id) });
       const s = data.data || {};
       document.getElementById('d-claim').value = s.claim || '';
       document.getElementById('d-evidence').value = s.evidence || '';
@@ -1159,27 +1142,21 @@
 
     async function saveDispute() {
       if (!selected) return;
-      await ApiService.request('/admin/disputes/session', {
-        method: 'POST',
-        body: JSON.stringify({
-          case_type: selected.case_type,
-          case_id: String(selected.case_id),
-          claim: document.getElementById('d-claim').value,
-          evidence: document.getElementById('d-evidence').value,
-          response: document.getElementById('d-response').value,
-          settlement_offer: document.getElementById('d-offer').value,
-          decision: document.getElementById('d-decision').value
-        })
+      await ApiService.admin.upsertDisputeSession({
+        case_type: selected.case_type,
+        case_id: String(selected.case_id),
+        claim: document.getElementById('d-claim').value,
+        evidence: document.getElementById('d-evidence').value,
+        response: document.getElementById('d-response').value,
+        settlement_offer: document.getElementById('d-offer').value,
+        decision: document.getElementById('d-decision').value
       });
       alert('تم حفظ جلسة النزاع');
     }
 
     async function closeDispute() {
       if (!selected) return;
-      await ApiService.request('/admin/disputes/session/close', {
-        method: 'PATCH',
-        body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id) })
-      });
+      await ApiService.admin.closeDisputeSession({ case_type: selected.case_type, case_id: String(selected.case_id) });
       alert('تم قفل جلسة النزاع');
     }
 
@@ -1187,7 +1164,7 @@
       if (!selected) return;
       const el = document.getElementById('qa-list');
       el.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin"></i></div>';
-      const data = await ApiService.request(`/admin/qa/reviews?limit=50&case_type=${encodeURIComponent(selected.case_type)}&case_id=${encodeURIComponent(String(selected.case_id))}`);
+      const data = await ApiService.admin.getQaReviews({ limit: '50', case_type: selected.case_type, case_id: String(selected.case_id) });
       const rows = Array.isArray(data.data) ? data.data : [];
       if (!rows.length) { el.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد QA Reviews</p>'; return; }
       el.innerHTML = rows.map(r => `
@@ -1207,10 +1184,7 @@
       const score = Number(document.getElementById('qa-score').value);
       const reason = String(document.getElementById('qa-reason').value || '').trim();
       const notes = String(document.getElementById('qa-notes').value || '').trim();
-      await ApiService.request('/admin/qa/reviews', {
-        method: 'POST',
-        body: JSON.stringify({ case_type: selected.case_type, case_id: String(selected.case_id), score, reason: reason || null, notes: notes || null })
-      });
+      await ApiService.admin.createQaReview({ case_type: selected.case_type, case_id: String(selected.case_id), score, reason: reason || null, notes: notes || null });
       document.getElementById('qa-reason').value = '';
       document.getElementById('qa-notes').value = '';
       await loadQaReviews();
@@ -1223,10 +1197,7 @@
       const out = document.getElementById('ps-out');
       out.textContent = '...';
       try {
-        const data = await ApiService.request('/admin/policy-sandbox/refund-cap', {
-          method: 'POST',
-          body: JSON.stringify({ cap, days })
-        });
+        const data = await ApiService.admin.runPolicySandboxRefundCap({ cap, days });
         out.textContent = JSON.stringify(data.data, null, 2);
       } catch (e) {
         out.textContent = `Error: ${e.message}`;
@@ -1239,7 +1210,7 @@
       const out = document.getElementById('rec-out');
       out.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin"></i></div>';
       try {
-        const data = await ApiService.request(`/admin/reconciliation/daily?date=${encodeURIComponent(date)}`);
+        const data = await ApiService.admin.getDailyReconciliation({ date });
         const rows = Array.isArray(data.data) ? data.data : [];
         if (!rows.length) { out.innerHTML = '<p class="text-xs font-bold text-gray-500">لا يوجد بيانات</p>'; return; }
         out.innerHTML = rows.slice(0, 50).map(r => `
@@ -1259,10 +1230,7 @@
 
     async function openReconciliationCase(driverId, date, delta) {
       try {
-        await ApiService.request('/admin/reconciliation/open-case', {
-          method: 'POST',
-          body: JSON.stringify({ driver_id: driverId, date, delta })
-        });
+        await ApiService.admin.openReconciliationCase({ driver_id: driverId, date, delta });
         alert('تم فتح Case');
         await refreshAll();
       } catch (e) {

@@ -230,7 +230,7 @@
     async function refreshSnapshot() {
       initMap();
       try {
-        const data = await ApiService.request('/admin/ops/snapshot');
+        const data = await ApiService.admin.getOpsSnapshot();
         renderSnapshot(data.data || {});
       } catch (e) {
         console.error(e);
@@ -240,7 +240,7 @@
 
     async function refreshCrisis(){
       try{
-        const data = await ApiService.request('/admin/crisis-mode');
+        const data = await ApiService.admin.getCrisisMode();
         const c = data.data || {};
         const enabled = !!c.enabled;
         const banner = document.getElementById('crisis-banner');

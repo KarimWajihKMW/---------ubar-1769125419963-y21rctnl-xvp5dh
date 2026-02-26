@@ -114,7 +114,7 @@
   <script>
         async function refreshCrisis(){
           try{
-            const data = await ApiService.request('/admin/crisis-mode');
+            const data = await ApiService.admin.getCrisisMode();
             const c = data.data || {};
             const enabled = !!c.enabled;
             const banner = document.getElementById('crisis-banner');
@@ -151,10 +151,6 @@
       alert('تم مسح التوكن');
     }
 
-    async function api(path, options = {}) {
-      return ApiService.request(path, options);
-    }
-
     function fmtDate(v) {
       if (!v) return '--';
       const d = new Date(v);
@@ -189,7 +185,7 @@
       try {
         const status = document.getElementById('status-select').value;
         const limit = Number(document.getElementById('limit-input').value || 50);
-        const data = await api(`/admin/incidents?status=${encodeURIComponent(status)}&limit=${encodeURIComponent(limit)}`);
+        const data = await ApiService.admin.listIncidents({ status, limit });
         renderList(Array.isArray(data.data) ? data.data : []);
       } catch (e) {
         console.error(e);
@@ -205,7 +201,7 @@
       sub.textContent = `Incident #${id}`;
 
       try {
-        const data = await api(`/admin/incidents/${encodeURIComponent(id)}`);
+        const data = await ApiService.admin.getIncident(id);
         const row = data.data;
 
         const pkg = row.package_json ? JSON.stringify(row.package_json, null, 2) : '';
@@ -267,14 +263,11 @@
           return alert('لا يمكن إغلاق/حسم Incident بدون Root‑Cause + Prevention (U10)');
         }
 
-        await api(`/admin/incidents/${encodeURIComponent(selectedIncidentId)}/resolve`, {
-          method: 'PATCH',
-          body: JSON.stringify({
+        await ApiService.admin.resolveIncident(selectedIncidentId, {
             status,
             resolution_note: note.trim() ? note.trim() : null,
             root_cause_key: String(root_cause_key).trim(),
             prevention_key: String(prevention_key).trim()
-          })
         });
         alert('تم تحديث الحالة');
         await refreshList();
