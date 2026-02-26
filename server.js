@@ -5028,7 +5028,9 @@ app.get('/api/pickup-hubs/suggest', async (req, res) => {
 app.get('/api/passengers/me/accessibility', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : Number(req.query.user_id) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const result = await pool.query(
@@ -5066,7 +5068,9 @@ app.get('/api/passengers/me/accessibility', requireRole('passenger', 'admin'), a
 app.put('/api/passengers/me/accessibility', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : Number(req.body?.user_id) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const payload = req.body || {};
@@ -5110,7 +5114,9 @@ app.put('/api/passengers/me/accessibility', requireRole('passenger', 'admin'), a
 app.get('/api/passengers/me/emergency-profile', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.query.user_id);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : Number(req.query.user_id) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const result = await pool.query(
@@ -5145,7 +5151,9 @@ app.get('/api/passengers/me/emergency-profile', requireRole('passenger', 'admin'
 app.put('/api/passengers/me/emergency-profile', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : Number(req.body?.user_id);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : Number(req.body?.user_id) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const payload = req.body || {};
