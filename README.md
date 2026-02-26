@@ -54,6 +54,7 @@ Main pages you’ll commonly use:
 - [passengers.html](passengers.html): passenger management UI (admin)
 - [admin-driver-earnings.html](admin-driver-earnings.html): admin edit driver earnings
 - [admin-risk-command.html](admin-risk-command.html): admin fraud/risk command center
+- [admin-innovations.html](admin-innovations.html): admin innovations lab (10 approved exclusive features)
 - [settings.html](settings.html), [support.html](support.html), [egypt-map.html](egypt-map.html)
 
 Client-side API calls are centralized in [api-service.js](api-service.js).
@@ -140,6 +141,20 @@ Common endpoints:
 - `GET /api/admin/risk/alerts`
 - `POST /api/admin/risk/alerts/:id/decision`
 
+Admin Innovations endpoints (exclusive features):
+
+- `POST /api/admin/innovations/policy-twin/simulate`
+- `GET /api/admin/innovations/city-pulse/genome?refresh=1`
+- `POST /api/admin/innovations/trust-route/rebuild`
+- `POST /api/admin/innovations/outcome-market/decision`
+- `GET /api/admin/innovations/silent-crisis/predict`
+- `POST /api/admin/innovations/recovery-composer/compose`
+- `PATCH /api/admin/innovations/ethical-dial`
+- `POST /api/admin/innovations/narrative-audit/build`
+- `POST /api/admin/innovations/copilot-arena/session`
+- `POST /api/admin/innovations/hub-rebalancer/rebalance`
+- `GET /api/admin/innovations/kpis/summary`
+
 ## Realtime + live updates
 
 The backend runs Socket.IO on the same server (see [server.js](server.js)).
@@ -177,3 +192,9 @@ This runs:
 
 - `node test-api.js`
 - `node test-passenger-features.js`
+
+For the exclusive admin innovations suite:
+
+```bash
+npm run test:admin-innovations
+```

@@ -63,6 +63,11 @@ const {
     requireAuth,
     requireRole
 } = require('./auth');
+const {
+    ensureAdminInnovationTables,
+    ensureDefaultAdminInnovationFeatures,
+    registerAdminInnovationRoutes
+} = require('./admin-innovations');
 
 // ------------------------------
 // Admin RBAC (roles + permissions)
@@ -96,7 +101,9 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.executive.read',
         'admin.risk.read',
         'admin.risk.scan',
-        'admin.risk.decide'
+        'admin.risk.decide',
+        'admin.innovations.read',
+        'admin.innovations.simulate'
     ],
     finance_ops: [
         'admin.cases.read',
@@ -106,7 +113,10 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.wallet.write',
         'admin.executive.read',
         'admin.risk.read',
-        'admin.risk.decide'
+        'admin.risk.decide',
+        'admin.innovations.read',
+        'admin.innovations.decide',
+        'admin.innovations.write'
     ],
     ops_manager: [
         'admin.ops.read',
@@ -121,7 +131,11 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.risk.read',
         'admin.risk.scan',
         'admin.risk.decide',
-        'admin.risk.config'
+        'admin.risk.config',
+        'admin.innovations.read',
+        'admin.innovations.write',
+        'admin.innovations.simulate',
+        'admin.innovations.decide'
     ]
 });
 
@@ -1177,6 +1191,8 @@ app.use((req, res, next) => {
 
 // Attach decoded JWT (if present) to req.auth for all routes (including static file guards)
 app.use(authMiddleware);
+
+registerAdminInnovationRoutes(app, { pool, requirePermission, writeAdminAudit });
 
 app.use(express.static('.'));
 
@@ -19954,9 +19970,11 @@ ensureCoreSchema()
     .then(() => ensureAdminPlaybooksTables())
     .then(() => ensureAdminExcellenceTables())
     .then(() => ensureAdminRiskTables())
+    .then(() => ensureAdminInnovationTables(pool))
     .then(() => ensureExecutiveTables())
     .then(() => ensureDefaultAdminPlaybooks())
     .then(() => ensureDefaultAdminRiskFeatures())
+    .then(() => ensureDefaultAdminInnovationFeatures(pool))
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
