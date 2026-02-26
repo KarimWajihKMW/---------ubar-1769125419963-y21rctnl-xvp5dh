@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Risk Command - Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>body{font-family:'Cairo',sans-serif}</style>
+</head>
+<body class="bg-gray-50">
+  <div class="min-h-screen p-6">
+    <div class="max-w-7xl mx-auto space-y-6">
+      <div class="bg-gradient-to-r from-rose-600 to-indigo-700 rounded-2xl shadow-lg p-6 text-white">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 class="text-2xl md:text-3xl font-extrabold"><i class="fas fa-shield-halved ml-2"></i>Risk Command Center</h1>
+            <p class="text-rose-100 text-sm mt-1">Fraud & Risk Pipeline: Trigger → Decision → Auto Action → Measurable Impact</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="runScan()" class="bg-white text-rose-700 px-5 py-2.5 rounded-xl font-extrabold hover:bg-rose-50"><i class="fas fa-play ml-2"></i>تشغيل مسح شامل</button>
+            <button onclick="refreshAll()" class="bg-indigo-50 text-indigo-900 px-5 py-2.5 rounded-xl font-extrabold hover:bg-white"><i class="fas fa-sync-alt ml-2"></i>تحديث</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow p-5">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
+          <div class="lg:col-span-2">
+            <label class="block text-xs font-extrabold text-gray-600 mb-1">Admin Token (Bearer)</label>
+            <input id="token-input" type="password" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="الصق التوكن هنا" />
+          </div>
+          <div>
+            <label class="block text-xs font-extrabold text-gray-600 mb-1">Scan Feature Key (اختياري)</label>
+            <input id="scan-feature" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" placeholder="refund_burst_chain" />
+          </div>
+          <div class="flex items-end gap-2">
+            <button onclick="saveToken()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">حفظ</button>
+            <button onclick="clearToken()" class="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl font-extrabold hover:bg-gray-200">مسح</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="stats-cards">
+        <div class="bg-white rounded-2xl border border-gray-100 p-4 shadow">
+          <p class="text-xs font-extrabold text-gray-500">Open Alerts</p>
+          <p id="open-alerts" class="text-2xl font-extrabold text-red-700">0</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 p-4 shadow">
+          <p class="text-xs font-extrabold text-gray-500">Resolved Alerts</p>
+          <p id="resolved-alerts" class="text-2xl font-extrabold text-emerald-700">0</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 p-4 shadow">
+          <p class="text-xs font-extrabold text-gray-500">Active Locks</p>
+          <p id="active-locks" class="text-2xl font-extrabold text-amber-700">0</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 p-4 shadow">
+          <p class="text-xs font-extrabold text-gray-500">Last Scan Alerts</p>
+          <p id="last-scan-alerts" class="text-2xl font-extrabold text-indigo-700">0</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow p-5">
+        <div class="flex items-center justify-between gap-2 mb-4">
+          <h2 class="text-sm font-extrabold text-gray-800">الميزات المعتمدة (7 ميزات)</h2>
+          <span class="text-xs font-bold text-gray-500">Pilot / Expand / General</span>
+        </div>
+        <div id="features-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow p-5">
+        <div class="flex items-center justify-between gap-2 mb-4 flex-wrap">
+          <h2 class="text-sm font-extrabold text-gray-800">Risk Alerts Queue</h2>
+          <div class="flex gap-2">
+            <select id="alert-status" onchange="loadAlerts()" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold">
+              <option value="">الكل</option>
+              <option value="open">open</option>
+              <option value="under_review">under_review</option>
+              <option value="resolved">resolved</option>
+              <option value="dismissed">dismissed</option>
+            </select>
+            <input id="alert-feature" onkeydown="if(event.key==='Enter'){loadAlerts()}" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold" placeholder="feature_key" />
+          </div>
+        </div>
+        <div id="alerts-list" class="space-y-3"></div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow p-5">
+        <div class="flex items-center justify-between gap-2 mb-4">
+          <h2 class="text-sm font-extrabold text-gray-800">Active/Recent Locks</h2>
+          <button onclick="loadLocks()" class="text-xs bg-gray-100 px-3 py-1.5 rounded-lg font-extrabold hover:bg-gray-200">تحديث</button>
+        </div>
+        <div id="locks-list" class="space-y-2"></div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow p-5">
+        <h2 class="text-sm font-extrabold text-gray-800 mb-3">Operational Metrics</h2>
+        <pre id="metrics-box" class="bg-gray-50 border border-gray-100 rounded-xl p-4 text-xs font-bold text-gray-700 whitespace-pre-wrap">--</pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="api-service.js"></script>
+  <script>
+    const TOKEN_KEY = 'akwadra_token';
+    let latestScanSummary = null;
+
+    function token() {
+      try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; }
+    }
+
+    function setToken(v) {
+      try { localStorage.setItem(TOKEN_KEY, String(v || '').trim()); } catch(e) {}
+    }
+
+    function saveToken() {
+      const t = document.getElementById('token-input').value;
+      if (!t || !t.trim()) return alert('أدخل التوكن');
+      setToken(t);
+      alert('تم حفظ التوكن');
+    }
+
+    function clearToken() {
+      try { localStorage.removeItem(TOKEN_KEY); } catch(e) {}
+      document.getElementById('token-input').value = '';
+      alert('تم مسح التوكن');
+    }
+
+    async function req(path, options = {}) {
+      const t = token();
+      const res = await fetch(`/api${path}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(t ? { Authorization: `Bearer ${t}` } : {}),
+          ...(options.headers || {})
+        },
+        ...options
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      return data;
+    }
+
+    function stageClass(stage) {
+      const s = String(stage || '').toLowerCase();
+      if (s === 'general') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+      if (s === 'expand') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+      return 'bg-amber-50 text-amber-700 border-amber-100';
+    }
+
+    function sevClass(sev) {
+      const s = String(sev || '').toLowerCase();
+      if (s === 'critical') return 'bg-rose-100 text-rose-700';
+      if (s === 'high') return 'bg-red-100 text-red-700';
+      if (s === 'medium') return 'bg-amber-100 text-amber-700';
+      return 'bg-gray-100 text-gray-700';
+    }
+
+    async function loadFeatures() {
+      const data = await req('/admin/risk/features');
+      const features = Array.isArray(data.data) ? data.data : [];
+      const root = document.getElementById('features-grid');
+      if (!features.length) {
+        root.innerHTML = '<div class="text-sm text-gray-500 font-bold">لا توجد ميزات حالياً</div>';
+        return;
+      }
+
+      root.innerHTML = features.map(f => `
+        <div class="rounded-2xl border border-gray-100 p-4 bg-gray-50">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <p class="font-extrabold text-gray-900">${f.title}</p>
+              <p class="text-[11px] font-bold text-gray-500 mt-1">${f.key}</p>
+            </div>
+            <span class="text-[11px] font-extrabold px-2 py-1 rounded-full border ${stageClass(f.stage)}">${f.stage || 'pilot'}</span>
+          </div>
+          <div class="mt-3 text-xs font-bold text-gray-700 space-y-1">
+            <p><span class="text-gray-500">Trigger:</span> ${f.trigger_desc || '--'}</p>
+            <p><span class="text-gray-500">Decision:</span> ${f.decision_desc || '--'}</p>
+            <p><span class="text-gray-500">Auto:</span> ${f.auto_action_desc || '--'}</p>
+            <p><span class="text-gray-500">Impact KPI:</span> ${f.measurable_desc || '--'}</p>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button onclick="toggleFeature('${f.key}', ${f.enabled ? 'false' : 'true'})" class="px-3 py-1.5 rounded-lg text-xs font-extrabold ${f.enabled ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}">${f.enabled ? 'Disable' : 'Enable'}</button>
+            <button onclick="setStage('${f.key}','pilot')" class="px-3 py-1.5 rounded-lg text-xs font-extrabold bg-amber-100 text-amber-700">Pilot</button>
+            <button onclick="setStage('${f.key}','expand')" class="px-3 py-1.5 rounded-lg text-xs font-extrabold bg-indigo-100 text-indigo-700">Expand</button>
+            <button onclick="setStage('${f.key}','general')" class="px-3 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-100 text-emerald-700">General</button>
+            <button onclick="runScan('${f.key}')" class="px-3 py-1.5 rounded-lg text-xs font-extrabold bg-gray-100 text-gray-700">Scan</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function toggleFeature(key, enabled) {
+      try {
+        await req(`/admin/risk/features/${encodeURIComponent(key)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled })
+        });
+        await loadFeatures();
+      } catch (e) {
+        alert(e.message || 'Failed');
+      }
+    }
+
+    async function setStage(key, stage) {
+      try {
+        await req(`/admin/risk/features/${encodeURIComponent(key)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ stage })
+        });
+        await loadFeatures();
+      } catch (e) {
+        alert(e.message || 'Failed');
+      }
+    }
+
+    async function runScan(featureKey = null) {
+      try {
+        const fallbackFeature = document.getElementById('scan-feature').value.trim();
+        const selected = featureKey || fallbackFeature || null;
+        const data = await req('/admin/risk/scan', {
+          method: 'POST',
+          body: JSON.stringify({ feature_key: selected })
+        });
+        latestScanSummary = data.data?.summary || null;
+        document.getElementById('last-scan-alerts').textContent = String(latestScanSummary?.created_alerts || 0);
+        await Promise.all([loadAlerts(), loadLocks(), loadMetrics()]);
+        alert('تم تشغيل المسح بنجاح');
+      } catch (e) {
+        alert(e.message || 'Failed');
+      }
+    }
+
+    async function loadAlerts() {
+      const status = document.getElementById('alert-status').value;
+      const featureKey = document.getElementById('alert-feature').value.trim();
+      const qs = new URLSearchParams({ limit: '80' });
+      if (status) qs.set('status', status);
+      if (featureKey) qs.set('feature_key', featureKey);
+
+      const data = await req(`/admin/risk/alerts?${qs.toString()}`);
+      const alerts = Array.isArray(data.data) ? data.data : [];
+      const root = document.getElementById('alerts-list');
+
+      const openCount = alerts.filter(a => String(a.status) === 'open').length;
+      const resolvedCount = alerts.filter(a => String(a.status) === 'resolved').length;
+      document.getElementById('open-alerts').textContent = String(openCount);
+      document.getElementById('resolved-alerts').textContent = String(resolvedCount);
+
+      if (!alerts.length) {
+        root.innerHTML = '<div class="text-sm font-bold text-gray-500">لا توجد Alerts</div>';
+        return;
+      }
+
+      root.innerHTML = alerts.map(a => `
+        <div class="border border-gray-100 rounded-xl p-3 bg-gray-50">
+          <div class="flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <p class="font-extrabold text-gray-900">#${a.id} • ${a.feature_title || a.feature_key || '--'}</p>
+              <p class="text-xs text-gray-500 font-bold mt-1">${a.entity_type}:${a.entity_id} • ${a.status} • ${new Date(a.created_at).toLocaleString('ar-EG')}</p>
+            </div>
+            <span class="px-2 py-1 rounded-full text-xs font-extrabold ${sevClass(a.severity)}">${a.severity}</span>
+          </div>
+          <pre class="mt-2 text-[11px] font-bold text-gray-700 whitespace-pre-wrap">Trigger: ${JSON.stringify(a.trigger_json || {}, null, 2)}</pre>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button onclick="decideAlert(${a.id},'confirm_fraud')" class="px-2.5 py-1.5 rounded-lg text-xs font-extrabold bg-red-100 text-red-700">Confirm Fraud</button>
+            <button onclick="decideAlert(${a.id},'monitor')" class="px-2.5 py-1.5 rounded-lg text-xs font-extrabold bg-indigo-100 text-indigo-700">Monitor</button>
+            <button onclick="decideAlert(${a.id},'false_positive')" class="px-2.5 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-100 text-emerald-700">False Positive</button>
+            <button onclick="decideAlert(${a.id},'dismiss')" class="px-2.5 py-1.5 rounded-lg text-xs font-extrabold bg-gray-200 text-gray-700">Dismiss</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function decideAlert(id, decision) {
+      const note = prompt('ملاحظة القرار (اختياري):') || '';
+      try {
+        await req(`/admin/risk/alerts/${id}/decision`, {
+          method: 'POST',
+          body: JSON.stringify({ decision, note })
+        });
+        await Promise.all([loadAlerts(), loadLocks(), loadMetrics()]);
+      } catch (e) {
+        alert(e.message || 'Failed');
+      }
+    }
+
+    async function loadLocks() {
+      const data = await req('/admin/risk/locks?active_only=0&limit=60');
+      const locks = Array.isArray(data.data) ? data.data : [];
+      document.getElementById('active-locks').textContent = String(locks.filter(l => !!l.active).length);
+
+      const root = document.getElementById('locks-list');
+      if (!locks.length) {
+        root.innerHTML = '<div class="text-sm font-bold text-gray-500">لا توجد Locks</div>';
+        return;
+      }
+
+      root.innerHTML = locks.map(l => `
+        <div class="rounded-xl border border-gray-100 px-3 py-2 bg-gray-50 flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <p class="text-sm font-extrabold text-gray-800">${l.lock_type} • ${l.entity_type}:${l.entity_id}</p>
+            <p class="text-xs font-bold text-gray-500">${l.feature_title || l.feature_key || '--'} • ${l.active ? 'active' : 'released'} • ${new Date(l.created_at).toLocaleString('ar-EG')}</p>
+          </div>
+          ${l.active ? `<button onclick="releaseLock(${l.id})" class="px-3 py-1.5 text-xs rounded-lg font-extrabold bg-amber-100 text-amber-700">Release</button>` : ''}
+        </div>
+      `).join('');
+    }
+
+    async function releaseLock(lockId) {
+      try {
+        await req('/admin/risk/locks/release', {
+          method: 'POST',
+          body: JSON.stringify({ lock_id: lockId })
+        });
+        await loadLocks();
+      } catch (e) {
+        alert(e.message || 'Failed');
+      }
+    }
+
+    async function loadMetrics() {
+      const data = await req('/admin/risk/metrics?hours=168');
+      const box = document.getElementById('metrics-box');
+      box.textContent = JSON.stringify(data.data || {}, null, 2);
+    }
+
+    async function refreshAll() {
+      try {
+        await Promise.all([loadFeatures(), loadAlerts(), loadLocks(), loadMetrics()]);
+      } catch (e) {
+        alert(e.message || 'فشل تحميل البيانات. تأكد من التوكن والصلاحيات.');
+      }
+    }
+
+    (function init() {
+      document.getElementById('token-input').value = token() || '';
+      refreshAll();
+    })();
+  </script>
+</body>
+</html>

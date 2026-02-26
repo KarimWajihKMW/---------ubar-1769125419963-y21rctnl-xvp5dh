@@ -53,6 +53,7 @@ Main pages you’ll commonly use:
 - [pending-rides.html](pending-rides.html): pending ride requests UI (mainly admin)
 - [passengers.html](passengers.html): passenger management UI (admin)
 - [admin-driver-earnings.html](admin-driver-earnings.html): admin edit driver earnings
+- [admin-risk-command.html](admin-risk-command.html): admin fraud/risk command center
 - [settings.html](settings.html), [support.html](support.html), [egypt-map.html](egypt-map.html)
 
 Client-side API calls are centralized in [api-service.js](api-service.js).
@@ -124,6 +125,7 @@ Admins can:
 - Approve driver registrations
 - Edit driver earnings
 - Manage wallet ledger credits/debits
+- Operate fraud/risk features, alerts, locks, and scans
 
 Common endpoints:
 
@@ -133,6 +135,10 @@ Common endpoints:
 - `GET /api/drivers/pending` + `PATCH /api/drivers/:id/approval`
 - `PUT /api/drivers/:id/earnings/update`
 - `POST /api/admin/wallet/transaction`
+- `GET /api/admin/risk/features`
+- `POST /api/admin/risk/scan`
+- `GET /api/admin/risk/alerts`
+- `POST /api/admin/risk/alerts/:id/decision`
 
 ## Realtime + live updates
 

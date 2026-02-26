@@ -93,7 +93,10 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.evidence.read',
         'admin.audio.download',
         'admin.ops.read',
-        'admin.executive.read'
+        'admin.executive.read',
+        'admin.risk.read',
+        'admin.risk.scan',
+        'admin.risk.decide'
     ],
     finance_ops: [
         'admin.cases.read',
@@ -101,7 +104,9 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.refunds.write',
         'admin.refunds.approve',
         'admin.wallet.write',
-        'admin.executive.read'
+        'admin.executive.read',
+        'admin.risk.read',
+        'admin.risk.decide'
     ],
     ops_manager: [
         'admin.ops.read',
@@ -112,7 +117,11 @@ const ADMIN_ROLE_PERMISSIONS = Object.freeze({
         'admin.pickuphubs.write',
         'admin.incidents.read',
         'admin.executive.read',
-        'admin.executive.write'
+        'admin.executive.write',
+        'admin.risk.read',
+        'admin.risk.scan',
+        'admin.risk.decide',
+        'admin.risk.config'
     ]
 });
 
@@ -1669,6 +1678,236 @@ async function ensureAdminExcellenceTables() {
     }
 }
 
+async function ensureAdminRiskTables() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_risk_features (
+                key VARCHAR(120) PRIMARY KEY,
+                title VARCHAR(180) NOT NULL,
+                trigger_desc TEXT,
+                decision_desc TEXT,
+                auto_action_desc TEXT,
+                measurable_desc TEXT,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                stage VARCHAR(20) NOT NULL DEFAULT 'pilot',
+                impact_score SMALLINT NOT NULL DEFAULT 3,
+                cost_score SMALLINT NOT NULL DEFAULT 3,
+                risk_score SMALLINT NOT NULL DEFAULT 3,
+                roi_speed_score SMALLINT NOT NULL DEFAULT 3,
+                config_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_risk_features_stage ON admin_risk_features(stage, enabled, updated_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_risk_alerts (
+                id BIGSERIAL PRIMARY KEY,
+                feature_key VARCHAR(120) REFERENCES admin_risk_features(key) ON DELETE SET NULL,
+                severity VARCHAR(20) NOT NULL DEFAULT 'medium',
+                entity_type VARCHAR(40) NOT NULL,
+                entity_id VARCHAR(80) NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'open',
+                trigger_json JSONB,
+                decision_json JSONB,
+                auto_action_json JSONB,
+                measurable_json JSONB,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                decided_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_risk_alerts_status ON admin_risk_alerts(status, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_risk_alerts_feature ON admin_risk_alerts(feature_key, status, created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_risk_alerts_entity ON admin_risk_alerts(entity_type, entity_id, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_risk_entity_locks (
+                id BIGSERIAL PRIMARY KEY,
+                feature_key VARCHAR(120) REFERENCES admin_risk_features(key) ON DELETE SET NULL,
+                entity_type VARCHAR(40) NOT NULL,
+                entity_id VARCHAR(80) NOT NULL,
+                lock_type VARCHAR(40) NOT NULL,
+                reason TEXT,
+                source_alert_id BIGINT REFERENCES admin_risk_alerts(id) ON DELETE SET NULL,
+                active BOOLEAN NOT NULL DEFAULT true,
+                expires_at TIMESTAMP,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                released_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                released_at TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_risk_locks_active ON admin_risk_entity_locks(active, entity_type, entity_id, created_at DESC);');
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_risk_scan_runs (
+                id BIGSERIAL PRIMARY KEY,
+                feature_key VARCHAR(120),
+                triggered_by VARCHAR(40) NOT NULL DEFAULT 'manual',
+                triggered_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'done',
+                summary_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_risk_scan_runs_created ON admin_risk_scan_runs(created_at DESC);');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_admin_risk_scan_runs_feature ON admin_risk_scan_runs(feature_key, created_at DESC);');
+
+        console.log('✅ Admin risk tables ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure admin risk tables:', err.message);
+    }
+}
+
+async function ensureDefaultAdminRiskFeatures() {
+    try {
+        const features = [
+            {
+                key: 'refund_burst_chain',
+                title: 'Refund Burst Chain Guard',
+                trigger_desc: 'تكرار طلبات Refund من نفس الراكب خلال فترة قصيرة وبقيمة تراكمية مرتفعة',
+                decision_desc: 'تحويل الحالة لمراجعة Risk Ops + تصعيد فوري لفريق Finance',
+                auto_action_desc: 'تجميد مؤقت لطلبات الاسترداد الجديدة للمستخدم لمدة زمنية محدودة',
+                measurable_desc: 'خفض معدل Refund Fraud/اليوم ووقت اكتشاف الاحتيال',
+                stage: 'pilot',
+                impact_score: 5,
+                cost_score: 2,
+                risk_score: 2,
+                roi_speed_score: 5,
+                config_json: { window_hours: 6, min_count: 3, min_total_amount: 250, lock_hours: 12 }
+            },
+            {
+                key: 'driver_passenger_collusion_ring',
+                title: 'Driver-Passenger Collusion Ring Detector',
+                trigger_desc: 'تكرار غير طبيعي لنفس زوج (كابتن/راكب) مع أنماط رحلات قصيرة ومتكررة',
+                decision_desc: 'فتح تنبيه تحقيق Collusion مع درجة خطورة تلقائية',
+                auto_action_desc: 'وضع علامة Risk على الكابتن وتفعيل متابعة يدوية قبل أي حوافز',
+                measurable_desc: 'انخفاض تكرار الرحلات المصطنعة ونزيف الحوافز',
+                stage: 'pilot',
+                impact_score: 5,
+                cost_score: 3,
+                risk_score: 3,
+                roi_speed_score: 4,
+                config_json: { window_days: 14, min_pair_trips: 8, short_trip_km: 5 }
+            },
+            {
+                key: 'impossible_trip_velocity',
+                title: 'Impossible Trip Velocity Sentinel',
+                trigger_desc: 'رحلة مكتملة بسرعة غير منطقية مقارنة بالمسافة والزمن',
+                decision_desc: 'تعليق التقييم المالي للرحلة لحين مراجعة الأدلة',
+                auto_action_desc: 'رفع Incident داخلي تلقائي مع تصنيف Safety/Fraud',
+                measurable_desc: 'تقليل الرحلات الوهمية ورفع دقة التسوية',
+                stage: 'pilot',
+                impact_score: 4,
+                cost_score: 2,
+                risk_score: 2,
+                roi_speed_score: 4,
+                config_json: { window_hours: 24, min_distance_km: 5, max_speed_kmh: 140 }
+            },
+            {
+                key: 'wallet_churn_abuse',
+                title: 'Wallet Churn Abuse Shield',
+                trigger_desc: 'حركة دائريّة في المحفظة (Credit/Debit) بكثافة عالية وصافي منخفض',
+                decision_desc: 'تحديد المعاملة/المالك كمشتبه مع طلب تدقيق مالي',
+                auto_action_desc: 'قفل عمليات wallet الإدارية للمستخدم مؤقتًا',
+                measurable_desc: 'تقليل إساءة استخدام رصيد المحافظ وتقليص خسائر التشغيل',
+                stage: 'expand',
+                impact_score: 4,
+                cost_score: 2,
+                risk_score: 3,
+                roi_speed_score: 4,
+                config_json: { window_hours: 1, min_tx_count: 6, max_net_abs: 15, lock_hours: 6 }
+            },
+            {
+                key: 'verification_doc_reuse',
+                title: 'Verification Document Reuse Watch',
+                trigger_desc: 'استخدام نفس ملف التحقق أو الصورة عبر أكثر من حساب',
+                decision_desc: 'إيقاف معالجة طلبات التحقق المرتبطة حتى مراجعة أمنية',
+                auto_action_desc: 'إنشاء Lock على حسابات التحقق المتداخلة + تصعيد Safety Ops',
+                measurable_desc: 'خفض حسابات الهوية المصطنعة ومعدل انتحال الهوية',
+                stage: 'pilot',
+                impact_score: 5,
+                cost_score: 2,
+                risk_score: 3,
+                roi_speed_score: 4,
+                config_json: { min_distinct_users: 2, lock_hours: 24 }
+            },
+            {
+                key: 'pending_rejection_sniping',
+                title: 'Pending Ride Rejection Sniping Monitor',
+                trigger_desc: 'تجاوز رفض الطلبات من كابتن واحد بمعدل غير طبيعي خلال ساعة',
+                decision_desc: 'تخفيض أولوية الكابتن تلقائياً وتحويله لمراجعة تشغيلية',
+                auto_action_desc: 'قفل قبول الطلبات الجديدة لفترة قصيرة',
+                measurable_desc: 'تحسين زمن التخصيص وتقليل churn في قائمة الانتظار',
+                stage: 'expand',
+                impact_score: 4,
+                cost_score: 3,
+                risk_score: 2,
+                roi_speed_score: 5,
+                config_json: { window_hours: 1, min_rejections: 10, lock_hours: 2 }
+            },
+            {
+                key: 'incident_recurrence_heat',
+                title: 'Incident Recurrence Heatmap Actioner',
+                trigger_desc: 'تكرار Incident من نفس المنطقة/الكابتن خلال نافذة زمنية قصيرة',
+                decision_desc: 'تشغيل Playbook وقائي (Crisis/Warning) حسب الشدة',
+                auto_action_desc: 'إنشاء تنبيه Ops Radar + توصية قرار تنفيذي تلقائية',
+                measurable_desc: 'خفض الحوادث المتكررة في المناطق الساخنة',
+                stage: 'pilot',
+                impact_score: 5,
+                cost_score: 3,
+                risk_score: 3,
+                roi_speed_score: 4,
+                config_json: { window_hours: 12, min_incidents: 3 }
+            }
+        ];
+
+        for (const f of features) {
+            await pool.query(
+                `INSERT INTO admin_risk_features
+                    (key, title, trigger_desc, decision_desc, auto_action_desc, measurable_desc, enabled, stage, impact_score, cost_score, risk_score, roi_speed_score, config_json)
+                 VALUES
+                    ($1,$2,$3,$4,$5,$6,true,$7,$8,$9,$10,$11,$12::jsonb)
+                 ON CONFLICT (key) DO UPDATE
+                 SET title = EXCLUDED.title,
+                     trigger_desc = EXCLUDED.trigger_desc,
+                     decision_desc = EXCLUDED.decision_desc,
+                     auto_action_desc = EXCLUDED.auto_action_desc,
+                     measurable_desc = EXCLUDED.measurable_desc,
+                     stage = EXCLUDED.stage,
+                     impact_score = EXCLUDED.impact_score,
+                     cost_score = EXCLUDED.cost_score,
+                     risk_score = EXCLUDED.risk_score,
+                     roi_speed_score = EXCLUDED.roi_speed_score,
+                     config_json = COALESCE(admin_risk_features.config_json, EXCLUDED.config_json),
+                     updated_at = CURRENT_TIMESTAMP`,
+                [
+                    f.key,
+                    f.title,
+                    f.trigger_desc,
+                    f.decision_desc,
+                    f.auto_action_desc,
+                    f.measurable_desc,
+                    f.stage,
+                    f.impact_score,
+                    f.cost_score,
+                    f.risk_score,
+                    f.roi_speed_score,
+                    JSON.stringify(f.config_json || {})
+                ]
+            );
+        }
+
+        console.log('✅ Default admin risk features ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure admin risk features:', err.message);
+    }
+}
+
 function executiveZoneExpr(alias = '') {
     const p = alias ? `${alias}.` : '';
     return `CASE
@@ -2492,6 +2731,811 @@ app.get('/api/admin/audit', requirePermission('admin.audit.read'), async (req, r
             params
         );
         res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+const EARTH_RADIUS_KM = 6371;
+
+function toFiniteNumber(v, fallback = null) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function radians(v) {
+    return (Number(v) * Math.PI) / 180;
+}
+
+function distanceKmBetween(aLat, aLng, bLat, bLng) {
+    const lat1 = toFiniteNumber(aLat, null);
+    const lng1 = toFiniteNumber(aLng, null);
+    const lat2 = toFiniteNumber(bLat, null);
+    const lng2 = toFiniteNumber(bLng, null);
+    if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return null;
+    const dLat = radians(lat2 - lat1);
+    const dLng = radians(lng2 - lng1);
+    const sLat1 = radians(lat1);
+    const sLat2 = radians(lat2);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(sLat1) * Math.cos(sLat2) * Math.sin(dLng / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return EARTH_RADIUS_KM * c;
+}
+
+function boundedInt(v, min, max, fallback) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function boundedNum(v, min, max, fallback) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+}
+
+async function createRiskAlert({ req, featureKey, severity, entityType, entityId, triggerData, autoActionData, measurableData }) {
+    const existing = await pool.query(
+        `SELECT id
+         FROM admin_risk_alerts
+         WHERE feature_key = $1
+           AND entity_type = $2
+           AND entity_id = $3
+           AND status IN ('open', 'under_review')
+           AND created_at >= NOW() - INTERVAL '12 hours'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [featureKey, entityType, String(entityId)]
+    );
+
+    if (existing.rows.length) {
+        return { created: false, id: existing.rows[0].id };
+    }
+
+    const inserted = await pool.query(
+        `INSERT INTO admin_risk_alerts
+            (feature_key, severity, entity_type, entity_id, status, trigger_json, auto_action_json, measurable_json, created_by_user_id)
+         VALUES
+            ($1,$2,$3,$4,'open',$5::jsonb,$6::jsonb,$7::jsonb,$8)
+         RETURNING id, feature_key, severity, entity_type, entity_id, status, trigger_json, auto_action_json, measurable_json, created_at`,
+        [
+            featureKey,
+            String(severity || 'medium').slice(0, 20),
+            String(entityType || 'unknown').slice(0, 40),
+            String(entityId || '').slice(0, 80),
+            JSON.stringify(triggerData || {}),
+            JSON.stringify(autoActionData || {}),
+            JSON.stringify(measurableData || {}),
+            req?.auth?.uid || null
+        ]
+    );
+
+    return { created: true, alert: inserted.rows[0] };
+}
+
+async function createRiskLock({ req, featureKey, entityType, entityId, lockType, reason, sourceAlertId = null, hours = null }) {
+    const h = Number.isFinite(Number(hours)) ? Math.max(1, Math.min(168, Number(hours))) : null;
+    const existing = await pool.query(
+        `SELECT id
+         FROM admin_risk_entity_locks
+         WHERE active = true
+           AND entity_type = $1
+           AND entity_id = $2
+           AND lock_type = $3
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [String(entityType || '').slice(0, 40), String(entityId || '').slice(0, 80), String(lockType || '').slice(0, 40)]
+    );
+    if (existing.rows.length) return { created: false, id: existing.rows[0].id };
+
+    const inserted = await pool.query(
+        `INSERT INTO admin_risk_entity_locks
+            (feature_key, entity_type, entity_id, lock_type, reason, source_alert_id, active, expires_at, created_by_user_id)
+         VALUES
+            ($1,$2,$3,$4,$5,$6,true,CASE WHEN $7::int IS NULL THEN NULL ELSE NOW() + ($7 * INTERVAL '1 hour') END,$8)
+         RETURNING *`,
+        [
+            featureKey || null,
+            String(entityType || '').slice(0, 40),
+            String(entityId || '').slice(0, 80),
+            String(lockType || '').slice(0, 40),
+            reason ? String(reason).slice(0, 600) : null,
+            sourceAlertId,
+            h,
+            req?.auth?.uid || null
+        ]
+    );
+    return { created: true, lock: inserted.rows[0] };
+}
+
+async function maybeMarkDriverRisk(driverId, note, level = 'high') {
+    const idNum = Number(driverId);
+    if (!Number.isFinite(idNum) || idNum <= 0) return;
+    await pool.query(
+        `UPDATE drivers
+         SET risk_level = $2,
+             risk_note = $3,
+             risk_updated_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [idNum, String(level || 'high').slice(0, 20), String(note || '').slice(0, 500)]
+    );
+}
+
+async function detectRefundBurstChain(feature) {
+    const cfg = feature?.config_json || {};
+    const windowHours = boundedInt(cfg.window_hours, 1, 72, 6);
+    const minCount = boundedInt(cfg.min_count, 2, 20, 3);
+    const minTotal = boundedNum(cfg.min_total_amount, 50, 5000, 250);
+    const lockHours = boundedInt(cfg.lock_hours, 1, 72, 12);
+
+    const rows = await pool.query(
+        `SELECT user_id,
+                COUNT(*)::int AS refunds_count,
+                COALESCE(SUM(amount_requested), 0)::numeric AS total_amount,
+                MAX(created_at) AS last_request_at
+         FROM refund_requests
+         WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+           AND user_id IS NOT NULL
+         GROUP BY user_id
+         HAVING COUNT(*) >= $2
+            AND COALESCE(SUM(amount_requested), 0) >= $3
+         ORDER BY total_amount DESC
+         LIMIT 40`,
+        [windowHours, minCount, minTotal]
+    );
+
+    return rows.rows.map(r => ({
+        feature_key: feature.key,
+        severity: Number(r.refunds_count) >= minCount + 2 ? 'high' : 'medium',
+        entity_type: 'user',
+        entity_id: String(r.user_id),
+        trigger: { window_hours: windowHours, refunds_count: Number(r.refunds_count), total_amount: Number(r.total_amount), last_request_at: r.last_request_at },
+        auto_action: { lock_type: 'refund_hold', lock_hours: lockHours, reason: 'burst_refund_chain' },
+        measurable: { kpi: 'refund_fraud_rate_daily', baseline_window: '7d', expected_change_pct: -25 }
+    }));
+}
+
+async function detectDriverPassengerCollusion(feature) {
+    const cfg = feature?.config_json || {};
+    const windowDays = boundedInt(cfg.window_days, 3, 60, 14);
+    const minPairTrips = boundedInt(cfg.min_pair_trips, 4, 50, 8);
+
+    const rows = await pool.query(
+        `SELECT t.driver_id,
+                t.user_id,
+                COUNT(*)::int AS pair_trips,
+                ROUND(AVG(COALESCE(t.distance_km, t.distance, 0))::numeric, 2) AS avg_km,
+                ROUND(AVG(COALESCE(t.cost, t.price, 0))::numeric, 2) AS avg_cost
+         FROM trips t
+         WHERE t.status = 'completed'
+           AND t.created_at >= NOW() - ($1 * INTERVAL '1 day')
+           AND t.driver_id IS NOT NULL
+           AND t.user_id IS NOT NULL
+         GROUP BY t.driver_id, t.user_id
+         HAVING COUNT(*) >= $2
+         ORDER BY pair_trips DESC
+         LIMIT 40`,
+        [windowDays, minPairTrips]
+    );
+
+    return rows.rows.map(r => ({
+        feature_key: feature.key,
+        severity: Number(r.pair_trips) >= minPairTrips + 4 ? 'critical' : 'high',
+        entity_type: 'driver',
+        entity_id: String(r.driver_id),
+        trigger: {
+            window_days: windowDays,
+            pair_trips: Number(r.pair_trips),
+            rider_id: Number(r.user_id),
+            avg_km: Number(r.avg_km || 0),
+            avg_cost: Number(r.avg_cost || 0)
+        },
+        auto_action: { lock_type: 'incentive_hold', lock_hours: 24, reason: 'collusion_ring_pattern' },
+        measurable: { kpi: 'synthetic_trip_ratio', baseline_window: '14d', expected_change_pct: -20 }
+    }));
+}
+
+async function detectImpossibleTripVelocity(feature) {
+    const cfg = feature?.config_json || {};
+    const windowHours = boundedInt(cfg.window_hours, 1, 72, 24);
+    const minDistanceKm = boundedNum(cfg.min_distance_km, 1, 100, 5);
+    const maxSpeedKmh = boundedNum(cfg.max_speed_kmh, 80, 300, 140);
+
+    const trips = await pool.query(
+        `SELECT id, driver_id, user_id, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+                distance_km, distance, duration_minutes,
+                started_at, completed_at, updated_at
+         FROM trips
+         WHERE status = 'completed'
+           AND created_at >= NOW() - ($1 * INTERVAL '1 hour')
+           AND pickup_lat IS NOT NULL AND pickup_lng IS NOT NULL
+           AND dropoff_lat IS NOT NULL AND dropoff_lng IS NOT NULL
+         ORDER BY created_at DESC
+         LIMIT 200`,
+        [windowHours]
+    );
+
+    const output = [];
+    for (const t of trips.rows) {
+        const geoKm = distanceKmBetween(t.pickup_lat, t.pickup_lng, t.dropoff_lat, t.dropoff_lng);
+        const storedKm = toFiniteNumber(t.distance_km, toFiniteNumber(t.distance, null));
+        const km = Number.isFinite(storedKm) && storedKm > 0 ? storedKm : geoKm;
+        if (!Number.isFinite(km) || km < minDistanceKm) continue;
+
+        let minutes = toFiniteNumber(t.duration_minutes, null);
+        if (!Number.isFinite(minutes) || minutes <= 0) {
+            const start = t.started_at ? new Date(t.started_at).getTime() : null;
+            const end = t.completed_at ? new Date(t.completed_at).getTime() : (t.updated_at ? new Date(t.updated_at).getTime() : null);
+            if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                minutes = (end - start) / (1000 * 60);
+            }
+        }
+        if (!Number.isFinite(minutes) || minutes <= 0.5) continue;
+
+        const speed = km / (minutes / 60);
+        if (speed < maxSpeedKmh) continue;
+
+        output.push({
+            feature_key: feature.key,
+            severity: speed > maxSpeedKmh * 1.3 ? 'critical' : 'high',
+            entity_type: 'trip',
+            entity_id: String(t.id),
+            trigger: {
+                computed_speed_kmh: Number(speed.toFixed(2)),
+                distance_km: Number(km.toFixed(2)),
+                duration_minutes: Number(minutes.toFixed(2)),
+                driver_id: t.driver_id || null,
+                user_id: t.user_id || null
+            },
+            auto_action: { lock_type: 'payout_review', lock_hours: 12, reason: 'impossible_velocity' },
+            measurable: { kpi: 'ghost_trip_rate', baseline_window: '24h', expected_change_pct: -30 }
+        });
+    }
+
+    return output;
+}
+
+async function detectWalletChurn(feature) {
+    const cfg = feature?.config_json || {};
+    const windowHours = boundedInt(cfg.window_hours, 1, 24, 1);
+    const minTxCount = boundedInt(cfg.min_tx_count, 4, 100, 6);
+    const maxNetAbs = boundedNum(cfg.max_net_abs, 1, 200, 15);
+    const lockHours = boundedInt(cfg.lock_hours, 1, 48, 6);
+
+    const rows = await pool.query(
+        `SELECT owner_type,
+                owner_id,
+                COUNT(*)::int AS tx_count,
+                ROUND(SUM(amount)::numeric, 2) AS net_amount,
+                ROUND(SUM(ABS(amount))::numeric, 2) AS gross_amount
+         FROM wallet_transactions
+         WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+         GROUP BY owner_type, owner_id
+         HAVING COUNT(*) >= $2
+            AND ABS(SUM(amount)) <= $3
+         ORDER BY gross_amount DESC
+         LIMIT 40`,
+        [windowHours, minTxCount, maxNetAbs]
+    );
+
+    return rows.rows.map(r => ({
+        feature_key: feature.key,
+        severity: Number(r.tx_count) >= minTxCount + 4 ? 'high' : 'medium',
+        entity_type: String(r.owner_type || 'user'),
+        entity_id: String(r.owner_id),
+        trigger: {
+            window_hours: windowHours,
+            tx_count: Number(r.tx_count),
+            net_amount: Number(r.net_amount || 0),
+            gross_amount: Number(r.gross_amount || 0)
+        },
+        auto_action: { lock_type: 'wallet_admin_lock', lock_hours: lockHours, reason: 'wallet_churn_abuse' },
+        measurable: { kpi: 'wallet_abuse_loss', baseline_window: '7d', expected_change_pct: -18 }
+    }));
+}
+
+async function detectVerificationDocReuse(feature) {
+    const cfg = feature?.config_json || {};
+    const minUsers = boundedInt(cfg.min_distinct_users, 2, 8, 2);
+    const lockHours = boundedInt(cfg.lock_hours, 1, 72, 24);
+
+    const rows = await pool.query(
+        `SELECT id_document_path,
+                COUNT(*)::int AS verif_count,
+                COUNT(DISTINCT user_id)::int AS users_count,
+                ARRAY_AGG(DISTINCT user_id) AS user_ids
+         FROM passenger_verifications
+         WHERE id_document_path IS NOT NULL
+           AND TRIM(id_document_path) <> ''
+           AND submitted_at >= NOW() - INTERVAL '30 days'
+         GROUP BY id_document_path
+         HAVING COUNT(DISTINCT user_id) >= $1
+         ORDER BY users_count DESC, verif_count DESC
+         LIMIT 20`,
+        [minUsers]
+    );
+
+    const output = [];
+    for (const r of rows.rows) {
+        const userIds = Array.isArray(r.user_ids) ? r.user_ids : [];
+        for (const userId of userIds) {
+            output.push({
+                feature_key: feature.key,
+                severity: Number(r.users_count) >= minUsers + 1 ? 'critical' : 'high',
+                entity_type: 'user',
+                entity_id: String(userId),
+                trigger: {
+                    shared_document: true,
+                    users_count: Number(r.users_count || 0),
+                    verif_count: Number(r.verif_count || 0),
+                    evidence_ref: String(r.id_document_path || '').slice(-120)
+                },
+                auto_action: { lock_type: 'verification_hold', lock_hours: lockHours, reason: 'verification_document_reuse' },
+                measurable: { kpi: 'synthetic_identity_rate', baseline_window: '30d', expected_change_pct: -35 }
+            });
+        }
+    }
+    return output;
+}
+
+async function detectPendingRejectionSniping(feature) {
+    const cfg = feature?.config_json || {};
+    const windowHours = boundedInt(cfg.window_hours, 1, 24, 1);
+    const minRejections = boundedInt(cfg.min_rejections, 4, 60, 10);
+    const lockHours = boundedInt(cfg.lock_hours, 1, 24, 2);
+
+    const rows = await pool.query(
+        `SELECT rej.driver_id::int AS driver_id,
+                COUNT(*)::int AS rejection_count
+         FROM pending_ride_requests p,
+              UNNEST(COALESCE(p.rejected_by, ARRAY[]::INTEGER[])) AS rej(driver_id)
+         WHERE p.created_at >= NOW() - ($1 * INTERVAL '1 hour')
+         GROUP BY rej.driver_id
+         HAVING COUNT(*) >= $2
+         ORDER BY rejection_count DESC
+         LIMIT 40`,
+        [windowHours, minRejections]
+    );
+
+    return rows.rows.map(r => ({
+        feature_key: feature.key,
+        severity: Number(r.rejection_count) >= minRejections + 5 ? 'high' : 'medium',
+        entity_type: 'driver',
+        entity_id: String(r.driver_id),
+        trigger: { window_hours: windowHours, rejection_count: Number(r.rejection_count) },
+        auto_action: { lock_type: 'dispatch_pause', lock_hours: lockHours, reason: 'rejection_sniping' },
+        measurable: { kpi: 'pending_assignment_time', baseline_window: '24h', expected_change_pct: -12 }
+    }));
+}
+
+async function detectIncidentRecurrence(feature) {
+    const cfg = feature?.config_json || {};
+    const windowHours = boundedInt(cfg.window_hours, 1, 48, 12);
+    const minIncidents = boundedInt(cfg.min_incidents, 2, 20, 3);
+
+    const rows = await pool.query(
+        `SELECT created_by_driver_id AS driver_id,
+                COUNT(*)::int AS incidents_count,
+                MAX(created_at) AS last_incident_at
+         FROM trip_incident_packages
+         WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+           AND created_by_driver_id IS NOT NULL
+         GROUP BY created_by_driver_id
+         HAVING COUNT(*) >= $2
+         ORDER BY incidents_count DESC
+         LIMIT 30`,
+        [windowHours, minIncidents]
+    );
+
+    return rows.rows.map(r => ({
+        feature_key: feature.key,
+        severity: Number(r.incidents_count) >= minIncidents + 2 ? 'critical' : 'high',
+        entity_type: 'driver',
+        entity_id: String(r.driver_id),
+        trigger: { window_hours: windowHours, incidents_count: Number(r.incidents_count), last_incident_at: r.last_incident_at },
+        auto_action: { lock_type: 'safety_watch', lock_hours: 12, reason: 'incident_recurrence' },
+        measurable: { kpi: 'repeat_incident_rate', baseline_window: '7d', expected_change_pct: -20 }
+    }));
+}
+
+async function runAdminRiskFeature(feature) {
+    const key = String(feature?.key || '');
+    if (!key) return [];
+    if (key === 'refund_burst_chain') return detectRefundBurstChain(feature);
+    if (key === 'driver_passenger_collusion_ring') return detectDriverPassengerCollusion(feature);
+    if (key === 'impossible_trip_velocity') return detectImpossibleTripVelocity(feature);
+    if (key === 'wallet_churn_abuse') return detectWalletChurn(feature);
+    if (key === 'verification_doc_reuse') return detectVerificationDocReuse(feature);
+    if (key === 'pending_rejection_sniping') return detectPendingRejectionSniping(feature);
+    if (key === 'incident_recurrence_heat') return detectIncidentRecurrence(feature);
+    return [];
+}
+
+async function runAdminRiskScan(req, { featureKey = null, triggeredBy = 'manual' } = {}) {
+    const params = [];
+    let where = 'WHERE enabled = true';
+    if (featureKey) {
+        params.push(String(featureKey).trim());
+        where += ` AND key = $${params.length}`;
+    }
+
+    const featuresRes = await pool.query(
+        `SELECT key, title, stage, config_json, trigger_desc, decision_desc, auto_action_desc, measurable_desc
+         FROM admin_risk_features
+         ${where}
+         ORDER BY impact_score DESC, roi_speed_score DESC, key ASC`,
+        params
+    );
+
+    const features = featuresRes.rows || [];
+    const summary = { scanned_features: features.length, created_alerts: 0, created_locks: 0, by_feature: {} };
+
+    for (const feature of features) {
+        const detections = await runAdminRiskFeature(feature);
+        let featureAlerts = 0;
+        let featureLocks = 0;
+
+        for (const d of detections) {
+            const created = await createRiskAlert({
+                req,
+                featureKey: feature.key,
+                severity: d.severity,
+                entityType: d.entity_type,
+                entityId: d.entity_id,
+                triggerData: d.trigger,
+                autoActionData: d.auto_action,
+                measurableData: d.measurable
+            });
+
+            if (!created.created) continue;
+            featureAlerts += 1;
+            summary.created_alerts += 1;
+
+            const lockType = d.auto_action?.lock_type ? String(d.auto_action.lock_type) : null;
+            const lockHours = toFiniteNumber(d.auto_action?.lock_hours, null);
+            if (lockType) {
+                const lock = await createRiskLock({
+                    req,
+                    featureKey: feature.key,
+                    entityType: d.entity_type,
+                    entityId: d.entity_id,
+                    lockType,
+                    reason: d.auto_action?.reason || feature.key,
+                    sourceAlertId: created.alert?.id || null,
+                    hours: lockHours
+                });
+
+                if (lock.created) {
+                    featureLocks += 1;
+                    summary.created_locks += 1;
+                }
+            }
+
+            if (d.entity_type === 'driver') {
+                await maybeMarkDriverRisk(d.entity_id, `[${feature.key}] auto-risk lock`, d.severity === 'critical' ? 'critical' : 'high');
+            }
+
+            await writeAdminAudit(req, {
+                action: 'admin.risk.alert.create',
+                entity_type: d.entity_type,
+                entity_id: String(d.entity_id),
+                meta: {
+                    feature_key: feature.key,
+                    alert_id: created.alert?.id || null,
+                    severity: d.severity,
+                    trigger: d.trigger || null,
+                    auto_action: d.auto_action || null
+                }
+            });
+        }
+
+        summary.by_feature[feature.key] = {
+            title: feature.title,
+            detections: detections.length,
+            created_alerts: featureAlerts,
+            created_locks: featureLocks
+        };
+    }
+
+    const run = await pool.query(
+        `INSERT INTO admin_risk_scan_runs (feature_key, triggered_by, triggered_by_user_id, status, summary_json)
+         VALUES ($1,$2,$3,'done',$4::jsonb)
+         RETURNING *`,
+        [featureKey ? String(featureKey) : null, String(triggeredBy || 'manual').slice(0, 40), req?.auth?.uid || null, JSON.stringify(summary)]
+    );
+
+    return { run: run.rows[0], summary };
+}
+
+app.get('/api/admin/risk/features', requirePermission('admin.risk.read'), async (req, res) => {
+    try {
+        const rows = await pool.query(
+            `SELECT key, title, trigger_desc, decision_desc, auto_action_desc, measurable_desc,
+                    enabled, stage, impact_score, cost_score, risk_score, roi_speed_score,
+                    config_json, created_at, updated_at
+             FROM admin_risk_features
+             ORDER BY impact_score DESC, roi_speed_score DESC, key ASC`
+        );
+        res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.patch('/api/admin/risk/features/:key', requirePermission('admin.risk.config'), async (req, res) => {
+    try {
+        const key = String(req.params.key || '').trim();
+        if (!key) return res.status(400).json({ success: false, error: 'invalid feature key' });
+
+        const enabled = req.body?.enabled;
+        const stageRaw = req.body?.stage;
+        const stage = stageRaw !== undefined && stageRaw !== null ? String(stageRaw).trim().toLowerCase() : null;
+        const config = req.body?.config_json && typeof req.body.config_json === 'object' ? req.body.config_json : null;
+
+        if (enabled !== undefined && typeof enabled !== 'boolean') {
+            return res.status(400).json({ success: false, error: 'enabled must be boolean' });
+        }
+        if (stage && !['pilot', 'expand', 'general'].includes(stage)) {
+            return res.status(400).json({ success: false, error: 'invalid stage' });
+        }
+
+        const oldRes = await pool.query('SELECT * FROM admin_risk_features WHERE key = $1 LIMIT 1', [key]);
+        const oldRow = oldRes.rows[0] || null;
+        if (!oldRow) return res.status(404).json({ success: false, error: 'feature_not_found' });
+
+        const up = await pool.query(
+            `UPDATE admin_risk_features
+             SET enabled = COALESCE($2, enabled),
+                 stage = COALESCE($3, stage),
+                 config_json = COALESCE($4::jsonb, config_json),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE key = $1
+             RETURNING *`,
+            [
+                key,
+                enabled !== undefined ? enabled : null,
+                stage || null,
+                config ? JSON.stringify(config) : null
+            ]
+        );
+
+        await writeAdminAudit(req, {
+            action: 'admin.risk.feature.update',
+            entity_type: 'risk_feature',
+            entity_id: key,
+            meta: {
+                before: { enabled: oldRow.enabled, stage: oldRow.stage, config_json: oldRow.config_json || null },
+                after: { enabled: up.rows[0].enabled, stage: up.rows[0].stage, config_json: up.rows[0].config_json || null }
+            }
+        });
+
+        res.json({ success: true, data: up.rows[0] });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/risk/scan', requirePermission('admin.risk.scan'), async (req, res) => {
+    try {
+        const featureKey = req.body?.feature_key ? String(req.body.feature_key).trim() : null;
+        const result = await runAdminRiskScan(req, { featureKey, triggeredBy: 'manual' });
+        res.json({ success: true, data: result });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/risk/alerts', requirePermission('admin.risk.read'), async (req, res) => {
+    try {
+        const limit = boundedInt(req.query.limit, 1, 200, 60);
+        const status = req.query.status ? String(req.query.status).trim().toLowerCase() : null;
+        const featureKey = req.query.feature_key ? String(req.query.feature_key).trim() : null;
+
+        const params = [];
+        let where = 'WHERE 1=1';
+        if (status) {
+            params.push(status);
+            where += ` AND a.status = $${params.length}`;
+        }
+        if (featureKey) {
+            params.push(featureKey);
+            where += ` AND a.feature_key = $${params.length}`;
+        }
+        params.push(limit);
+
+        const rows = await pool.query(
+            `SELECT a.id, a.feature_key, f.title AS feature_title, a.severity, a.entity_type, a.entity_id,
+                    a.status, a.trigger_json, a.decision_json, a.auto_action_json, a.measurable_json,
+                    a.created_by_user_id, a.decided_by_user_id, a.created_at, a.updated_at, a.resolved_at
+             FROM admin_risk_alerts a
+             LEFT JOIN admin_risk_features f ON f.key = a.feature_key
+             ${where}
+             ORDER BY a.created_at DESC
+             LIMIT $${params.length}`,
+            params
+        );
+
+        res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/risk/alerts/:id/decision', requirePermission('admin.risk.decide'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ success: false, error: 'invalid_alert_id' });
+
+        const decision = req.body?.decision ? String(req.body.decision).trim().toLowerCase() : '';
+        const note = req.body?.note ? String(req.body.note).trim().slice(0, 1200) : null;
+        if (!['confirm_fraud', 'monitor', 'false_positive', 'dismiss'].includes(decision)) {
+            return res.status(400).json({ success: false, error: 'invalid_decision' });
+        }
+
+        const oldRes = await pool.query('SELECT * FROM admin_risk_alerts WHERE id = $1 LIMIT 1', [id]);
+        const oldRow = oldRes.rows[0] || null;
+        if (!oldRow) return res.status(404).json({ success: false, error: 'alert_not_found' });
+
+        const nextStatus = decision === 'dismiss' ? 'dismissed' : (decision === 'monitor' ? 'under_review' : 'resolved');
+        const currentDecision = oldRow.decision_json && typeof oldRow.decision_json === 'object' ? oldRow.decision_json : {};
+        const decisionJson = {
+            ...currentDecision,
+            decision,
+            note,
+            at: new Date().toISOString(),
+            decided_by_user_id: req.auth?.uid || null,
+            decided_by_role: req.auth?.role || null
+        };
+
+        const up = await pool.query(
+            `UPDATE admin_risk_alerts
+             SET status = $2,
+                 decision_json = $3::jsonb,
+                 decided_by_user_id = $4,
+                 updated_at = CURRENT_TIMESTAMP,
+                 resolved_at = CASE WHEN $2 IN ('resolved','dismissed') THEN CURRENT_TIMESTAMP ELSE resolved_at END
+             WHERE id = $1
+             RETURNING *`,
+            [id, nextStatus, JSON.stringify(decisionJson), req.auth?.uid || null]
+        );
+        const updated = up.rows[0];
+
+        if (decision === 'false_positive') {
+            await pool.query(
+                `UPDATE admin_risk_entity_locks
+                 SET active = false,
+                     released_at = CURRENT_TIMESTAMP,
+                     released_by_user_id = $2
+                 WHERE source_alert_id = $1
+                   AND active = true`,
+                [id, req.auth?.uid || null]
+            );
+        }
+
+        await writeAdminAudit(req, {
+            action: 'admin.risk.alert.decision',
+            entity_type: oldRow.entity_type,
+            entity_id: oldRow.entity_id,
+            meta: {
+                alert_id: id,
+                feature_key: oldRow.feature_key,
+                decision,
+                next_status: nextStatus,
+                note: note || null
+            }
+        });
+
+        res.json({ success: true, data: updated });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/risk/locks', requirePermission('admin.risk.read'), async (req, res) => {
+    try {
+        const activeOnly = String(req.query.active_only || '1').toLowerCase() !== '0';
+        const limit = boundedInt(req.query.limit, 1, 200, 60);
+        const params = [];
+        let where = 'WHERE 1=1';
+        if (activeOnly) {
+            where += ' AND l.active = true';
+        }
+        params.push(limit);
+
+        const rows = await pool.query(
+            `SELECT l.*, f.title AS feature_title
+             FROM admin_risk_entity_locks l
+             LEFT JOIN admin_risk_features f ON f.key = l.feature_key
+             ${where}
+             ORDER BY l.created_at DESC
+             LIMIT $${params.length}`,
+            params
+        );
+
+        res.json({ success: true, data: rows.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/admin/risk/locks/release', requirePermission('admin.risk.decide'), async (req, res) => {
+    try {
+        const lockId = Number(req.body?.lock_id);
+        if (!Number.isFinite(lockId) || lockId <= 0) return res.status(400).json({ success: false, error: 'invalid_lock_id' });
+
+        const up = await pool.query(
+            `UPDATE admin_risk_entity_locks
+             SET active = false,
+                 released_at = CURRENT_TIMESTAMP,
+                 released_by_user_id = $2
+             WHERE id = $1
+               AND active = true
+             RETURNING *`,
+            [lockId, req.auth?.uid || null]
+        );
+        const lock = up.rows[0] || null;
+        if (!lock) return res.status(404).json({ success: false, error: 'active_lock_not_found' });
+
+        await writeAdminAudit(req, {
+            action: 'admin.risk.lock.release',
+            entity_type: lock.entity_type,
+            entity_id: lock.entity_id,
+            meta: { lock_id: lock.id, lock_type: lock.lock_type, feature_key: lock.feature_key }
+        });
+
+        res.json({ success: true, data: lock });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/admin/risk/metrics', requirePermission('admin.risk.read'), async (req, res) => {
+    try {
+        const horizonHours = boundedInt(req.query.hours, 1, 720, 72);
+
+        const agg = await pool.query(
+            `SELECT feature_key,
+                    COUNT(*)::int AS total_alerts,
+                    COUNT(*) FILTER (WHERE status = 'open')::int AS open_alerts,
+                    COUNT(*) FILTER (WHERE status = 'under_review')::int AS under_review_alerts,
+                    COUNT(*) FILTER (WHERE status = 'resolved')::int AS resolved_alerts,
+                    COUNT(*) FILTER (WHERE status = 'dismissed')::int AS dismissed_alerts,
+                    ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(resolved_at, NOW()) - created_at)) / 60.0)::numeric, 2) AS avg_lifecycle_min
+             FROM admin_risk_alerts
+             WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+             GROUP BY feature_key
+             ORDER BY total_alerts DESC`,
+            [horizonHours]
+        );
+
+        const locks = await pool.query(
+            `SELECT feature_key,
+                    COUNT(*)::int AS total_locks,
+                    COUNT(*) FILTER (WHERE active = true)::int AS active_locks
+             FROM admin_risk_entity_locks
+             WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+             GROUP BY feature_key
+             ORDER BY total_locks DESC`,
+            [horizonHours]
+        );
+
+        const latestRuns = await pool.query(
+            `SELECT id, feature_key, triggered_by, triggered_by_user_id, status, summary_json, created_at
+             FROM admin_risk_scan_runs
+             ORDER BY created_at DESC
+             LIMIT 20`
+        );
+
+        res.json({
+            success: true,
+            data: {
+                horizon_hours: horizonHours,
+                alerts: agg.rows,
+                locks: locks.rows,
+                latest_runs: latestRuns.rows
+            }
+        });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -18909,8 +19953,10 @@ ensureCoreSchema()
     .then(() => ensureAdminAuditTables())
     .then(() => ensureAdminPlaybooksTables())
     .then(() => ensureAdminExcellenceTables())
+    .then(() => ensureAdminRiskTables())
     .then(() => ensureExecutiveTables())
     .then(() => ensureDefaultAdminPlaybooks())
+    .then(() => ensureDefaultAdminRiskFeatures())
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
     .then(() => ensureTripTimeColumns())
