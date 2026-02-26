@@ -1163,8 +1163,29 @@
 
     async function closeDispute() {
       if (!selected) return;
-      await ApiService.admin.closeDisputeSession({ case_type: selected.case_type, case_id: String(selected.case_id) });
-      alert('تم قفل جلسة النزاع');
+      const nextStatus = prompt('الحالة النهائية للقضية عند القفل (مثال: resolved / closed / approved / rejected):', 'resolved');
+      if (!nextStatus || !String(nextStatus).trim()) return alert('لازم تحدد الحالة النهائية');
+
+      const root_cause_key = prompt('Root‑Cause Key (إجباري للإغلاق النهائي):', 'other') || '';
+      const prevention_key = prompt('Prevention Key (إجباري للإغلاق النهائي):', 'other') || '';
+      if (!String(root_cause_key).trim() || !String(prevention_key).trim()) {
+        return alert('لا يمكن قفل القضية بدون Root‑Cause + Prevention');
+      }
+
+      await ApiService.admin.closeDisputeSession({
+        case_type: selected.case_type,
+        case_id: String(selected.case_id),
+        close_case: true,
+        next_status: String(nextStatus).trim().toLowerCase(),
+        decision: String(document.getElementById('d-decision')?.value || '').trim() || null,
+        root_cause_key: String(root_cause_key).trim(),
+        prevention_key: String(prevention_key).trim(),
+        root_cause_note: null,
+        prevention_note: null
+      });
+      alert('تم قفل جلسة النزاع والقضية');
+      await refreshAll();
+      await selectCase(selected.case_type, selected.case_id, selected.trip_id || '');
     }
 
     async function loadQaReviews() {

@@ -3116,6 +3116,15 @@ app.patch('/api/admin/disputes/session/close', requirePermission('admin.cases.re
         const ref = assertCaseRef(req.body?.case_type, req.body?.case_id);
         if (!ref.ok) return res.status(400).json({ success: false, error: ref.error });
 
+        const closeCase = !!req.body?.close_case;
+        const nextStatus = req.body?.next_status !== undefined && req.body.next_status !== null
+            ? String(req.body.next_status).trim().toLowerCase()
+            : null;
+
+        if (closeCase && !nextStatus) {
+            return res.status(400).json({ success: false, error: 'next_status_required_when_close_case_true' });
+        }
+
         const up = await pool.query(
             `UPDATE admin_dispute_sessions
              SET status = 'closed',
@@ -3127,10 +3136,68 @@ app.patch('/api/admin/disputes/session/close', requirePermission('admin.cases.re
         );
         if (!up.rows.length) return res.status(404).json({ success: false, error: 'session_not_found' });
 
-        await writeAdminAudit(req, { action: 'dispute.session_close', entity_type: ref.case_type, entity_id: ref.case_id });
+        if (closeCase) {
+            await requireRootCauseOnFinal(req, {
+                caseType: ref.case_type,
+                caseId: ref.case_id,
+                nextStatus,
+                payload: req.body,
+                suppressAudit: true
+            });
+
+            if (ref.case_type === 'support_ticket') {
+                await pool.query(
+                    `UPDATE support_tickets
+                     SET status = $2,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $1`,
+                    [Number(ref.case_id), nextStatus]
+                );
+            } else if (ref.case_type === 'lost_item') {
+                await pool.query(
+                    `UPDATE lost_items
+                     SET status = $2,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $1`,
+                    [Number(ref.case_id), nextStatus]
+                );
+            } else if (ref.case_type === 'refund_request') {
+                await pool.query(
+                    `UPDATE refund_requests
+                     SET status = $2,
+                         resolution_note = COALESCE(NULLIF($3,''), resolution_note),
+                         reviewed_by = $4,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $1`,
+                    [Number(ref.case_id), nextStatus, String(req.body?.decision || ''), req.auth?.uid || null]
+                );
+            } else if (ref.case_type === 'incident') {
+                await pool.query(
+                    `UPDATE trip_incident_packages
+                     SET status = $2,
+                         resolution_note = COALESCE(NULLIF($3,''), resolution_note),
+                         resolved_at = CASE WHEN $2 IN ('resolved','rejected') THEN CURRENT_TIMESTAMP ELSE resolved_at END,
+                         resolved_by_admin_id = CASE WHEN $2 IN ('resolved','rejected') THEN $4 ELSE resolved_by_admin_id END,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $1`,
+                    [Number(ref.case_id), nextStatus, String(req.body?.decision || ''), req.auth?.uid || null]
+                );
+            }
+        }
+
+        await writeAdminAudit(req, {
+            action: 'dispute.session_close',
+            entity_type: ref.case_type,
+            entity_id: ref.case_id,
+            meta: {
+                close_case: closeCase,
+                next_status: closeCase ? nextStatus : null
+            }
+        });
         res.json({ success: true, data: up.rows[0] });
     } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
+        const sc = e?.statusCode && Number.isFinite(Number(e.statusCode)) ? Number(e.statusCode) : 500;
+        res.status(sc).json({ success: false, error: e.message });
     }
 });
 

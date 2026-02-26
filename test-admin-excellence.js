@@ -178,7 +178,16 @@ async function testAdminExcellence() {
 
     const get = await jsonFetch(`${baseURL}/admin/disputes/session?case_type=${encodeURIComponent(caseType)}&case_id=${encodeURIComponent(caseId)}`, { headers });
     assertOk('U5 dispute get', get.res, get.data);
+
+    const close = await jsonFetch(`${baseURL}/admin/disputes/session/close`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ case_type: caseType, case_id: caseId, close_case: false })
+    });
+    assertOk('U5 dispute close', close.res, close.data);
+
     console.log('✅ U5 dispute session save/get');
+    console.log('✅ U5 dispute close');
   }
 
   // U6 QA review create/list
