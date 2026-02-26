@@ -111,6 +111,17 @@ async function run() {
   if (!briefing.data?.data?.narrative_ar) throw new Error('briefing returned empty narrative');
   console.log('✅ GET /admin/executive/briefing');
 
+  const audit = await jsonFetch(`${baseURL}/admin/audit?decision_id=${encodeURIComponent(decisionId)}&limit=10`, { headers });
+  assertOk('audit decision link', audit.res, audit.data);
+  const firstAudit = Array.isArray(audit.data?.data) ? audit.data.data[0] : null;
+  if (!firstAudit || Number(firstAudit.decision_id) !== Number(decisionId)) {
+    throw new Error('audit did not return decision-linked rows');
+  }
+  if (!firstAudit.decision_title || !firstAudit.decision_reason) {
+    throw new Error('audit missing decision context fields');
+  }
+  console.log('✅ GET /admin/audit with decision context');
+
   console.log('🎉 Executive Admin Suite smoke tests passed');
 }
 

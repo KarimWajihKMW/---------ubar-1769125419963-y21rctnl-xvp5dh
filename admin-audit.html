@@ -117,6 +117,11 @@
         }
         el.innerHTML = rows.map(r => {
           const meta = r.meta_json ? JSON.stringify(r.meta_json) : '';
+          const expected = r.decision_expected_impact ? JSON.stringify(r.decision_expected_impact) : '';
+          const actual24 = r.decision_actual_24h ? JSON.stringify(r.decision_actual_24h) : '';
+          const delta24 = r.decision_delta_24h ? JSON.stringify(r.decision_delta_24h) : '';
+          const actual72 = r.decision_actual_72h ? JSON.stringify(r.decision_actual_72h) : '';
+          const delta72 = r.decision_delta_72h ? JSON.stringify(r.decision_delta_72h) : '';
           return `
             <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50">
               <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -124,6 +129,18 @@
                 <span class="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">${fmt(r.created_at)}</span>
               </div>
               <p class="text-xs font-bold text-gray-500">actor: ${r.actor_user_id || '--'} (${r.actor_role || '--'}) • entity: ${r.entity_type || '--'}:${r.entity_id || '--'} • decision: ${r.decision_id || '--'}</p>
+              ${r.decision_id ? `<div class="mt-2 p-2 rounded-xl border border-indigo-100 bg-indigo-50">
+                <p class="text-xs font-extrabold text-indigo-800">Decision: ${r.decision_title || '--'}</p>
+                <p class="text-[11px] font-bold text-indigo-700 mt-1">Reason: ${r.decision_reason || '--'}</p>
+                <p class="text-[11px] font-bold text-indigo-700">Hypothesis: ${r.decision_hypothesis || '--'}</p>
+                ${expected ? `<textarea class="mt-2 w-full h-16 px-2 py-1 rounded-xl border border-indigo-200 font-mono text-[11px]" readonly>${expected}</textarea>` : ''}
+                ${(actual24 || delta24) ? `<p class="text-[11px] font-extrabold text-indigo-800 mt-2">Impact 24h (${r.decision_measured_24h_at ? fmt(r.decision_measured_24h_at) : 'pending'})</p>` : ''}
+                ${actual24 ? `<textarea class="mt-1 w-full h-14 px-2 py-1 rounded-xl border border-indigo-200 font-mono text-[11px]" readonly>${actual24}</textarea>` : ''}
+                ${delta24 ? `<textarea class="mt-1 w-full h-12 px-2 py-1 rounded-xl border border-indigo-200 font-mono text-[11px]" readonly>${delta24}</textarea>` : ''}
+                ${(actual72 || delta72) ? `<p class="text-[11px] font-extrabold text-indigo-800 mt-2">Impact 72h (${r.decision_measured_72h_at ? fmt(r.decision_measured_72h_at) : 'pending'})</p>` : ''}
+                ${actual72 ? `<textarea class="mt-1 w-full h-14 px-2 py-1 rounded-xl border border-indigo-200 font-mono text-[11px]" readonly>${actual72}</textarea>` : ''}
+                ${delta72 ? `<textarea class="mt-1 w-full h-12 px-2 py-1 rounded-xl border border-indigo-200 font-mono text-[11px]" readonly>${delta72}</textarea>` : ''}
+              </div>` : ''}
               ${meta ? `<textarea class="mt-2 w-full h-20 px-3 py-2.5 rounded-2xl border border-gray-200 font-mono text-xs" readonly>${meta}</textarea>` : ''}
             </div>
           `;

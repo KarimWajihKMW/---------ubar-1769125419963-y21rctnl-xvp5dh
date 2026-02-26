@@ -1981,6 +1981,62 @@ async function runExecutiveAutopilot({ triggeredBy = 'manual' } = {}) {
     };
 }
 
+async function measureDueExecutiveDecisionImpacts({ limit = 60 } = {}) {
+    const maxRows = Number.isFinite(Number(limit)) ? Math.min(Math.max(Number(limit), 1), 300) : 60;
+    const due = await pool.query(
+        `SELECT di.id, di.decision_id, di.checkpoint_hours, di.expected_json,
+                ed.zone_key
+         FROM decision_impacts di
+         INNER JOIN executive_decisions ed ON ed.id = di.decision_id
+         WHERE (di.actual_json IS NULL OR di.measured_at IS NULL)
+           AND ed.created_at <= NOW() - (di.checkpoint_hours * INTERVAL '1 hour')
+         ORDER BY ed.created_at ASC, di.checkpoint_hours ASC
+         LIMIT $1`,
+        [maxRows]
+    );
+
+    let measured = 0;
+    for (const row of due.rows || []) {
+        const metrics = await computeExecutiveMetrics({ zoneKey: row.zone_key || 'citywide', hours: 24 });
+        const actual = {
+            avg_wait_minutes: metrics.avg_wait_minutes,
+            cancel_rate: metrics.cancel_rate,
+            incidents_count: metrics.incidents_count,
+            complaints_count: metrics.complaints_count,
+            revenue_completed: metrics.revenue_completed
+        };
+        const expected = row.expected_json || {};
+        const delta = computeDeltaJson(expected, actual);
+
+        const up = await pool.query(
+            `UPDATE decision_impacts
+             SET actual_json = $2::jsonb,
+                 delta_json = $3::jsonb,
+                 measured_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+               AND (actual_json IS NULL OR measured_at IS NULL)
+             RETURNING id`,
+            [row.id, JSON.stringify(actual), JSON.stringify(delta)]
+        );
+
+        if (up.rows.length) {
+            measured += 1;
+            await pool.query(
+                `INSERT INTO playbook_runs (playbook_key, source, trigger_payload_json, result_json)
+                 VALUES ($1,$2,$3::jsonb,$4::jsonb)`,
+                [
+                    'decision_impact_checkpoint',
+                    'cron',
+                    JSON.stringify({ decision_id: row.decision_id, checkpoint_hours: row.checkpoint_hours }),
+                    JSON.stringify({ impact_row_id: row.id })
+                ]
+            );
+        }
+    }
+
+    return { ok: true, measured };
+}
+
 async function ensureExecutiveTables() {
     try {
         await pool.query(`
@@ -2406,10 +2462,32 @@ app.get('/api/admin/audit', requirePermission('admin.audit.read'), async (req, r
         params.push(limit);
 
         const rows = await pool.query(
-            `SELECT id, actor_user_id, actor_role, action, entity_type, entity_id, decision_id, meta_json, created_at
-             FROM admin_audit_logs
-             ${where}
-             ORDER BY created_at DESC
+            `SELECT a.id,
+                    a.actor_user_id,
+                    a.actor_role,
+                    a.action,
+                    a.entity_type,
+                    a.entity_id,
+                    a.decision_id,
+                    a.meta_json,
+                    a.created_at,
+                    ed.title AS decision_title,
+                    ed.reason AS decision_reason,
+                    ed.hypothesis AS decision_hypothesis,
+                    ed.expected_impact_json AS decision_expected_impact,
+                    ed.status AS decision_status,
+                    d24.actual_json AS decision_actual_24h,
+                    d24.delta_json AS decision_delta_24h,
+                    d24.measured_at AS decision_measured_24h_at,
+                    d72.actual_json AS decision_actual_72h,
+                    d72.delta_json AS decision_delta_72h,
+                    d72.measured_at AS decision_measured_72h_at
+             FROM admin_audit_logs a
+             LEFT JOIN executive_decisions ed ON ed.id = a.decision_id
+             LEFT JOIN decision_impacts d24 ON d24.decision_id = a.decision_id AND d24.checkpoint_hours = 24
+             LEFT JOIN decision_impacts d72 ON d72.decision_id = a.decision_id AND d72.checkpoint_hours = 72
+             ${where.replace(/actor_user_id/g, 'a.actor_user_id').replace(/entity_type/g, 'a.entity_type').replace(/entity_id/g, 'a.entity_id').replace(/decision_id/g, 'a.decision_id')}
+             ORDER BY a.created_at DESC
              LIMIT $${params.length}`,
             params
         );
@@ -18803,6 +18881,26 @@ function startExecutiveAutopilotCron() {
     }
 }
 
+function startExecutiveImpactCron() {
+    const disabled = String(process.env.DISABLE_EXECUTIVE_IMPACT_CRON || '').toLowerCase() === 'true';
+    const env = String(process.env.NODE_ENV || '').toLowerCase();
+    if (disabled) return;
+    if (env === 'test') return;
+
+    try {
+        cron.schedule('*/30 * * * *', async () => {
+            try {
+                await measureDueExecutiveDecisionImpacts({ limit: 120 });
+            } catch (e) {
+                console.error('⚠️  Executive impact cron error:', e.message);
+            }
+        });
+        console.log('⏱️  Executive impact cron enabled (every 30 minutes)');
+    } catch (e) {
+        console.error('⚠️  Executive impact cron setup failed:', e.message);
+    }
+}
+
 // Start server
 ensureCoreSchema()
     .then(() => ensureDefaultAdmins())
@@ -18844,5 +18942,6 @@ ensureCoreSchema()
             console.log(`📍 API available at http://localhost:${PORT}/api`);
             startGuardianCron();
             startExecutiveAutopilotCron();
+            startExecutiveImpactCron();
         });
     });
