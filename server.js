@@ -8975,7 +8975,9 @@ app.delete('/api/passengers/me/trip-templates/:id', requireRole('passenger', 'ad
 app.get('/api/passengers/me/passes', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : (req.query.user_id ? Number(req.query.user_id) : null);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : (req.query.user_id ? Number(req.query.user_id) : null) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const includeInactive = String(req.query.include_inactive || '').toLowerCase() === '1' || String(req.query.include_inactive || '').toLowerCase() === 'true';
@@ -9002,7 +9004,9 @@ app.get('/api/passengers/me/passes', requireRole('passenger', 'admin'), async (r
 app.post('/api/passengers/me/passes', requireRole('passenger', 'admin'), async (req, res) => {
     try {
         const authRole = String(req.auth?.role || '').toLowerCase();
-        const userId = authRole === 'passenger' ? req.auth?.uid : (req.body?.user_id ? Number(req.body.user_id) : null);
+        const userId = authRole === 'passenger'
+            ? req.auth?.uid
+            : (req.body?.user_id ? Number(req.body.user_id) : null) || req.auth?.uid;
         if (!userId) return res.status(400).json({ success: false, error: 'user_id is required' });
 
         const type = req.body?.type ? String(req.body.type).trim() : null;
