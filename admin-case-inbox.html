@@ -387,6 +387,7 @@
     let caseIndex = new Map(); // key => row from /admin/cases
     let sensitiveGrant = null; // { id, expires_at }
     let cachedTimeline = null;
+    let remedyPreviewToken = null;
 
     function caseKey(caseType, caseId) {
       return `${String(caseType || '')}#${String(caseId || '')}`;
@@ -633,6 +634,7 @@
       document.getElementById('reveal-btn').classList.remove('hidden');
       sensitiveGrant = null;
       cachedTimeline = null;
+      remedyPreviewToken = null;
       document.getElementById('timeline').innerHTML = '';
       document.getElementById('ledger').innerHTML = '';
       document.getElementById('pack-preview').innerHTML = '';
@@ -994,6 +996,7 @@
       if (!selected) return;
       const packKey = String(document.getElementById('pack-select').value || '').trim();
       const out = document.getElementById('pack-preview');
+      remedyPreviewToken = null;
       if (!packKey) { out.innerHTML = '<p>لا يوجد باكدج</p>'; return; }
 
       // determine if pack needs amount from option list
@@ -1006,8 +1009,10 @@
         const steps = data.data?.preview?.steps || [];
         const needsAmt = (steps || []).some(s => s.kind === 'wallet_credit' || s.kind === 'refund_approve');
         document.getElementById('pack-amount-wrap').classList.toggle('hidden', !needsAmt);
+        remedyPreviewToken = data.data?.preview_token ? String(data.data.preview_token) : null;
         out.innerHTML = `<p class="font-extrabold">${title}</p><pre class="mt-2 p-3 rounded-2xl border border-gray-200 bg-white text-xs overflow-auto">${JSON.stringify(steps, null, 2)}</pre>`;
       } catch (e) {
+        remedyPreviewToken = null;
         out.innerHTML = `<p class="text-red-600 font-extrabold">Preview failed: ${e.message}</p>`;
       }
     }
@@ -1018,6 +1023,7 @@
       const amount = document.getElementById('pack-amount').value;
       const note = String(document.getElementById('pack-note').value || '').trim();
       const rc = getRootCausePayload();
+      if (!remedyPreviewToken) return alert('اعمل Preview أولًا قبل Execute');
       // Packs غالبًا بتقفل، فخلّي المستخدم يجهز Root‑Cause
       if (!rc.root_cause_key || !rc.prevention_key) {
         if (!confirm('Remedy Pack قد يحتاج Root‑Cause/Prevention (U10). تكمل؟')) return;
@@ -1029,6 +1035,7 @@
           pack_key: packKey,
           amount: amount ? Number(amount) : null,
           note: note || null,
+            preview_token: remedyPreviewToken,
           ...rc
         });
         alert('تم تنفيذ Remedy Pack');

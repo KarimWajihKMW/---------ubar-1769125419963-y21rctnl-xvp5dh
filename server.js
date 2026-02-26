@@ -200,6 +200,78 @@ function isFinalCaseStatus(caseType, status) {
     return false;
 }
 
+const REMEDY_PREVIEW_TTL_SECONDS = 10 * 60;
+
+function remedyPreviewSecret() {
+    return String(process.env.REMEDY_PREVIEW_SECRET || process.env.JWT_SECRET || 'dev-remedy-preview-secret');
+}
+
+function normalizeRemedyAmount(amount) {
+    const n = Number(amount);
+    return Number.isFinite(n) ? Math.abs(n) : null;
+}
+
+function signRemedyPreviewToken(payload) {
+    const exp = Math.floor(Date.now() / 1000) + REMEDY_PREVIEW_TTL_SECONDS;
+    const body = {
+        case_type: String(payload?.case_type || '').trim(),
+        case_id: String(payload?.case_id || '').trim(),
+        pack_key: String(payload?.pack_key || '').trim(),
+        amount: normalizeRemedyAmount(payload?.amount),
+        exp
+    };
+    const raw = Buffer.from(JSON.stringify(body), 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', remedyPreviewSecret()).update(raw).digest('base64url');
+    return `${raw}.${sig}`;
+}
+
+function verifyRemedyPreviewToken(token, expected) {
+    const t = token !== undefined && token !== null ? String(token).trim() : '';
+    if (!t || !t.includes('.')) return { ok: false, error: 'preview_required' };
+
+    const parts = t.split('.');
+    if (parts.length !== 2) return { ok: false, error: 'invalid_preview_token' };
+    const [raw, sig] = parts;
+
+    let expectedSig = '';
+    try {
+        expectedSig = crypto.createHmac('sha256', remedyPreviewSecret()).update(raw).digest('base64url');
+    } catch (e) {
+        return { ok: false, error: 'invalid_preview_token' };
+    }
+
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expectedSig);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        return { ok: false, error: 'invalid_preview_token' };
+    }
+
+    let payload = null;
+    try {
+        payload = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    } catch (e) {
+        return { ok: false, error: 'invalid_preview_token' };
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const exp = Number(payload?.exp);
+    if (!Number.isFinite(exp) || exp <= now) {
+        return { ok: false, error: 'preview_token_expired' };
+    }
+
+    const wantCaseType = String(expected?.case_type || '').trim();
+    const wantCaseId = String(expected?.case_id || '').trim();
+    const wantPackKey = String(expected?.pack_key || '').trim();
+    const wantAmount = normalizeRemedyAmount(expected?.amount);
+
+    if (String(payload?.case_type || '') !== wantCaseType) return { ok: false, error: 'preview_mismatch_case' };
+    if (String(payload?.case_id || '') !== wantCaseId) return { ok: false, error: 'preview_mismatch_case' };
+    if (String(payload?.pack_key || '') !== wantPackKey) return { ok: false, error: 'preview_mismatch_pack' };
+    if (normalizeRemedyAmount(payload?.amount) !== wantAmount) return { ok: false, error: 'preview_mismatch_amount' };
+
+    return { ok: true, payload };
+}
+
 function maskPhone(v) {
     const s = v === undefined || v === null ? '' : String(v);
     const digits = s.replace(/\D/g, '');
@@ -2443,11 +2515,11 @@ app.post('/api/admin/remedy-packs/preview', requirePermission('admin.cases.read'
         const ctx = await loadCaseContext({ caseType: ref.case_type, caseId: ref.case_id });
         if (!ctx.ok) return res.status(ctx.statusCode || 400).json({ success: false, error: ctx.error });
 
-        const amount = req.body?.amount !== undefined && req.body.amount !== null ? Number(req.body.amount) : null;
+        const amount = normalizeRemedyAmount(req.body?.amount);
         const steps = [];
         if (pack.key === 'delay_apology_credit') {
             steps.push({ kind: 'case_status', next_status: pack.close_status[ref.case_type] || 'resolved' });
-            steps.push({ kind: 'wallet_credit', owner_type: 'user', owner_id: ctx.data.user_id || null, amount: Number.isFinite(amount) ? Math.abs(amount) : null });
+            steps.push({ kind: 'wallet_credit', owner_type: 'user', owner_id: ctx.data.user_id || null, amount: amount });
         }
         if (pack.key === 'cancel_rebook') {
             steps.push({ kind: 'rebook_trip', trip_id: ctx.data.trip_id || null });
@@ -2457,12 +2529,19 @@ app.post('/api/admin/remedy-packs/preview', requirePermission('admin.cases.read'
             steps.push({ kind: 'refund_approve', amount: ctx.data.amount_requested !== undefined ? Number(ctx.data.amount_requested) : null });
         }
         if (pack.key === 'refund_partial_wallet') {
-            steps.push({ kind: 'refund_approve', amount: Number.isFinite(amount) ? Math.abs(amount) : null });
+            steps.push({ kind: 'refund_approve', amount: amount });
         }
         if (pack.key === 'lost_followup') {
             steps.push({ kind: 'case_status', next_status: 'pending' });
             steps.push({ kind: 'note', template: 'متابعة مفقودات: تم فتح متابعة منظمة مع السائق/الراكب' });
         }
+
+        const previewToken = signRemedyPreviewToken({
+            case_type: ref.case_type,
+            case_id: ref.case_id,
+            pack_key: pack.key,
+            amount
+        });
 
         res.json({
             success: true,
@@ -2470,6 +2549,8 @@ app.post('/api/admin/remedy-packs/preview', requirePermission('admin.cases.read'
                 case_type: ref.case_type,
                 case_id: ref.case_id,
                 pack: { key: pack.key, title: pack.title, needs_amount: !!pack.needs_amount },
+                preview_token: previewToken,
+                preview_expires_in_seconds: REMEDY_PREVIEW_TTL_SECONDS,
                 preview: {
                     trip_id: ctx.data.trip_id || null,
                     user_id: ctx.data.user_id || null,
@@ -2496,7 +2577,16 @@ app.post('/api/admin/remedy-packs/execute', requirePermission('admin.cases.read'
         const ctx = await loadCaseContext({ caseType: ref.case_type, caseId: ref.case_id });
         if (!ctx.ok) return res.status(ctx.statusCode || 400).json({ success: false, error: ctx.error });
 
-        const amount = req.body?.amount !== undefined && req.body.amount !== null ? Number(req.body.amount) : null;
+        const amount = normalizeRemedyAmount(req.body?.amount);
+        const previewCheck = verifyRemedyPreviewToken(req.body?.preview_token, {
+            case_type: ref.case_type,
+            case_id: ref.case_id,
+            pack_key: pack.key,
+            amount
+        });
+        if (!previewCheck.ok) {
+            return res.status(409).json({ success: false, error: previewCheck.error || 'preview_required' });
+        }
         const note = req.body?.note !== undefined && req.body.note !== null ? String(req.body.note).trim().slice(0, 2000) : null;
 
         const steps = [];

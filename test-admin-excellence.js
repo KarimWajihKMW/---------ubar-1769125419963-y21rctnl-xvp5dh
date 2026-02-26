@@ -143,7 +143,17 @@ async function testAdminExcellence() {
         body: JSON.stringify({ case_type: caseType, case_id: caseId, pack_key: firstPack.key })
       });
       assertOk('U2 remedy preview', preview.res, preview.data);
+
+      const blockedExecute = await jsonFetch(`${baseURL}/admin/remedy-packs/execute`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ case_type: caseType, case_id: caseId, pack_key: firstPack.key })
+      });
+      if (blockedExecute.res.ok || blockedExecute.res.status !== 409) {
+        throw new Error(`U2 execute without preview token should fail with 409, got HTTP ${blockedExecute.res.status}`);
+      }
       console.log('✅ U2 remedy preview');
+      console.log('✅ U2 execute blocked without preview token');
     } else {
       console.log('⚠️ U2 no remedy packs for this case type');
     }
