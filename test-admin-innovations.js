@@ -58,6 +58,18 @@ async function testAdminInnovations() {
   }
 
   {
+    const { res, data } = await jsonFetch(`${baseURL}/admin/innovations/roadmap`, { headers });
+    assertOk('innovations roadmap', res, data);
+    console.log('✅ Roadmap coverage');
+  }
+
+  {
+    const { res, data } = await jsonFetch(`${baseURL}/admin/innovations/compliance-report`, { headers });
+    assertOk('innovations compliance report', res, data);
+    console.log('✅ Governance compliance report');
+  }
+
+  {
     const { res, data } = await jsonFetch(`${baseURL}/admin/innovations/policy-twin/simulate`, {
       method: 'POST',
       headers,

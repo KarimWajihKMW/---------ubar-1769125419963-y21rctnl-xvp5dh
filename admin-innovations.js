@@ -28,6 +28,45 @@ function routeKeyFromRow(row) {
     return `${pickup}->${dropoff}`;
 }
 
+const APPROVED_INNOVATION_FEATURES = Object.freeze([
+    { key: 'policy_twin_simulator', title: 'Policy Twin Simulator', phase: 'phase_1', objective: 'محاكاة أثر السياسات قبل الإطلاق', kpis: ['decision_accuracy_vs_actual', 'mttr_minutes'] },
+    { key: 'city_pulse_genome', title: 'City Pulse Genome', phase: 'phase_3', objective: 'بصمة تشغيلية لكل منطقة واكتشاف الانحرافات', kpis: ['silent_crisis_prevent_rate', 'false_alert_rate'] },
+    { key: 'trust_by_route_index', title: 'Trust-by-Route Index', phase: 'phase_2', objective: 'مؤشر ثقة لكل مسار لتحسين المطابقة', kpis: ['route_incident_rate', 'route_cancel_rate'] },
+    { key: 'outcome_market', title: 'Outcome Market', phase: 'phase_3', objective: 'منافسة فرضيات الإدارة وقياس الدقة', kpis: ['decision_accuracy_vs_actual'] },
+    { key: 'silent_crisis_predictor', title: 'Silent Crisis Predictor', phase: 'phase_1', objective: 'استباق الأزمات قبل الشكاوى العلنية', kpis: ['silent_crisis_prevent_rate', 'false_alert_rate'] },
+    { key: 'recovery_composer', title: 'Recovery Composer', phase: 'phase_1', objective: 'توليد خطة تعويض مخصصة لكل حالة', kpis: ['dispute_reopen_rate'] },
+    { key: 'ethical_risk_dial', title: 'Ethical Risk Dial', phase: 'phase_2', objective: 'موازنة الربحية والعدالة والسلامة', kpis: ['fairness_index', 'safety_incident_rate'] },
+    { key: 'narrative_audit_lens', title: 'Narrative Audit Lens', phase: 'phase_3', objective: 'سرد سببي واضح لقرارات الإدارة', kpis: ['audit_trace_completeness'] },
+    { key: 'admin_copilot_arena', title: 'Admin Copilot Arena', phase: 'phase_3', objective: 'تدريب الإدارة على سيناريوهات تشغيلية', kpis: ['training_readiness_score'] },
+    { key: 'autonomous_hub_rebalancer', title: 'Autonomous Hub Rebalancer', phase: 'phase_2', objective: 'إعادة توزيع ديناميكية لنقاط الالتقاط', kpis: ['pending_assignment_time', 'pickup_coverage_score'] }
+]);
+
+const INNOVATION_PERMISSION_MATRIX = Object.freeze({
+    policy_twin_simulator: ['admin.innovations.simulate', 'admin.innovations.read'],
+    city_pulse_genome: ['admin.innovations.read'],
+    trust_by_route_index: ['admin.innovations.simulate', 'admin.innovations.read'],
+    outcome_market: ['admin.innovations.decide', 'admin.innovations.read'],
+    silent_crisis_predictor: ['admin.innovations.read'],
+    recovery_composer: ['admin.innovations.write', 'admin.innovations.read'],
+    ethical_risk_dial: ['admin.innovations.decide', 'admin.innovations.read'],
+    narrative_audit_lens: ['admin.innovations.read'],
+    admin_copilot_arena: ['admin.innovations.write', 'admin.innovations.decide', 'admin.innovations.read'],
+    autonomous_hub_rebalancer: ['admin.innovations.simulate', 'admin.innovations.read']
+});
+
+const INNOVATION_AUDIT_ACTIONS = Object.freeze({
+    policy_twin_simulator: ['innovations.policy_twin.simulate'],
+    city_pulse_genome: ['innovations.city_pulse.refresh'],
+    trust_by_route_index: ['innovations.trust_route.rebuild'],
+    outcome_market: ['innovations.outcome_market.create', 'innovations.outcome_market.settle'],
+    silent_crisis_predictor: ['innovations.silent_crisis.predict'],
+    recovery_composer: ['innovations.recovery_composer.compose'],
+    ethical_risk_dial: ['innovations.ethical_dial.update'],
+    narrative_audit_lens: ['innovations.narrative_audit.build'],
+    admin_copilot_arena: ['innovations.copilot_arena.session_create', 'innovations.copilot_arena.score'],
+    autonomous_hub_rebalancer: ['innovations.hub_rebalancer.rebalance']
+});
+
 async function ensureAdminInnovationTables(pool) {
     try {
         await pool.query(`
@@ -193,18 +232,7 @@ async function ensureAdminInnovationTables(pool) {
 }
 
 async function ensureDefaultAdminInnovationFeatures(pool) {
-    const features = [
-        { key: 'policy_twin_simulator', title: 'Policy Twin Simulator', phase: 'phase_1', objective: 'محاكاة أثر السياسات قبل الإطلاق', kpis: ['decision_accuracy_vs_actual', 'mttr_minutes'] },
-        { key: 'city_pulse_genome', title: 'City Pulse Genome', phase: 'phase_3', objective: 'بصمة تشغيلية لكل منطقة واكتشاف الانحرافات', kpis: ['silent_crisis_prevent_rate', 'false_alert_rate'] },
-        { key: 'trust_by_route_index', title: 'Trust-by-Route Index', phase: 'phase_2', objective: 'مؤشر ثقة لكل مسار لتحسين المطابقة', kpis: ['route_incident_rate', 'route_cancel_rate'] },
-        { key: 'outcome_market', title: 'Outcome Market', phase: 'phase_3', objective: 'منافسة فرضيات الإدارة وقياس الدقة', kpis: ['decision_accuracy_vs_actual'] },
-        { key: 'silent_crisis_predictor', title: 'Silent Crisis Predictor', phase: 'phase_1', objective: 'استباق الأزمات قبل الشكاوى العلنية', kpis: ['silent_crisis_prevent_rate', 'false_alert_rate'] },
-        { key: 'recovery_composer', title: 'Recovery Composer', phase: 'phase_1', objective: 'توليد خطة تعويض مخصصة لكل حالة', kpis: ['dispute_reopen_rate'] },
-        { key: 'ethical_risk_dial', title: 'Ethical Risk Dial', phase: 'phase_2', objective: 'موازنة الربحية والعدالة والسلامة', kpis: ['fairness_index', 'safety_incident_rate'] },
-        { key: 'narrative_audit_lens', title: 'Narrative Audit Lens', phase: 'phase_3', objective: 'سرد سببي واضح لقرارات الإدارة', kpis: ['audit_trace_completeness'] },
-        { key: 'admin_copilot_arena', title: 'Admin Copilot Arena', phase: 'phase_3', objective: 'تدريب الإدارة على سيناريوهات تشغيلية', kpis: ['training_readiness_score'] },
-        { key: 'autonomous_hub_rebalancer', title: 'Autonomous Hub Rebalancer', phase: 'phase_2', objective: 'إعادة توزيع ديناميكية لنقاط الالتقاط', kpis: ['pending_assignment_time', 'pickup_coverage_score'] }
-    ];
+    const features = APPROVED_INNOVATION_FEATURES;
 
     try {
         for (const f of features) {
@@ -271,6 +299,109 @@ function registerAdminInnovationRoutes(app, { pool, requirePermission, writeAdmi
                  ORDER BY key ASC`
             );
             res.json({ success: true, data: rows.rows });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    app.get('/api/admin/innovations/roadmap', requirePermission('admin.innovations.read'), async (req, res) => {
+        try {
+            const rows = await pool.query(
+                `SELECT key, title, objective, phase, enabled, kpis_json, updated_at
+                 FROM admin_innovation_features
+                 ORDER BY phase ASC, key ASC`
+            );
+
+            const phaseOrder = ['phase_1', 'phase_2', 'phase_3'];
+            const grouped = {
+                phase_1: [],
+                phase_2: [],
+                phase_3: []
+            };
+
+            for (const row of rows.rows || []) {
+                const phase = phaseOrder.includes(String(row.phase || '')) ? String(row.phase) : 'phase_3';
+                grouped[phase].push(row);
+            }
+
+            const completion = {};
+            for (const phase of phaseOrder) {
+                const list = grouped[phase] || [];
+                const enabledCount = list.filter(x => x.enabled === true).length;
+                completion[phase] = {
+                    total: list.length,
+                    enabled: enabledCount,
+                    completion_pct: list.length > 0 ? Number(((enabledCount / list.length) * 100).toFixed(2)) : 0
+                };
+            }
+
+            res.json({
+                success: true,
+                data: {
+                    phases: grouped,
+                    completion,
+                    approved_feature_count: APPROVED_INNOVATION_FEATURES.length
+                }
+            });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    app.get('/api/admin/innovations/compliance-report', requirePermission('admin.innovations.read'), async (req, res) => {
+        try {
+            const featureRows = await pool.query(
+                `SELECT key, title, phase, enabled, kpis_json
+                 FROM admin_innovation_features
+                 ORDER BY key ASC`
+            );
+
+            const auditRows = await pool.query(
+                `SELECT action, COUNT(*)::int AS cnt
+                 FROM admin_audit_logs
+                 WHERE created_at >= NOW() - INTERVAL '180 days'
+                   AND action LIKE 'innovations.%'
+                 GROUP BY action`
+            );
+            const auditMap = new Map((auditRows.rows || []).map(r => [String(r.action), Number(r.cnt || 0)]));
+
+            const byKey = new Map((featureRows.rows || []).map(r => [String(r.key), r]));
+            const report = APPROVED_INNOVATION_FEATURES.map((approved) => {
+                const row = byKey.get(approved.key) || null;
+                const configuredKpis = Array.isArray(row?.kpis_json) ? row.kpis_json : [];
+                const requiredActions = INNOVATION_AUDIT_ACTIONS[approved.key] || [];
+                const perms = INNOVATION_PERMISSION_MATRIX[approved.key] || [];
+                const auditHits = requiredActions.reduce((sum, a) => sum + (auditMap.get(a) || 0), 0);
+
+                return {
+                    key: approved.key,
+                    title: row?.title || approved.title,
+                    phase: row?.phase || approved.phase,
+                    enabled: row?.enabled === true,
+                    rbac: {
+                        required_permissions: perms,
+                        ok: perms.length > 0
+                    },
+                    audit: {
+                        required_actions: requiredActions,
+                        recent_events_180d: auditHits,
+                        ok: requiredActions.length > 0
+                    },
+                    kpi: {
+                        configured: configuredKpis,
+                        ok: configuredKpis.length > 0
+                    },
+                    governance_ok: perms.length > 0 && requiredActions.length > 0 && configuredKpis.length > 0
+                };
+            });
+
+            const summary = {
+                approved_total: APPROVED_INNOVATION_FEATURES.length,
+                present_in_db: report.filter(x => x.enabled || byKey.has(x.key)).length,
+                governance_ready: report.filter(x => x.governance_ok).length
+            };
+
+            res.json({ success: true, data: { summary, report } });
         } catch (e) {
             res.status(500).json({ success: false, error: e.message });
         }

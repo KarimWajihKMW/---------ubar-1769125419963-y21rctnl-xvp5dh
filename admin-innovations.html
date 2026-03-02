@@ -165,6 +165,16 @@
       setOutput(data);
     }
 
+    async function runRoadmap() {
+      const data = await api('/admin/innovations/roadmap');
+      setOutput(data);
+    }
+
+    async function runComplianceReport() {
+      const data = await api('/admin/innovations/compliance-report');
+      setOutput(data);
+    }
+
     async function loadEthicalDial() {
       const data = await api('/admin/innovations/ethical-dial');
       document.getElementById('dial-profit').value = data.profit_weight;
@@ -204,7 +214,9 @@
         ['Ethical Risk Dial', loadEthicalDial],
         ['Narrative Audit Lens', runNarrativeAudit],
         ['Admin Copilot Arena', runCopilotArena],
-        ['Autonomous Hub Rebalancer', runHubRebalancer]
+        ['Autonomous Hub Rebalancer', runHubRebalancer],
+        ['Phase Roadmap', runRoadmap],
+        ['Governance Compliance Report', runComplianceReport]
       ];
 
       const root = document.getElementById('features');

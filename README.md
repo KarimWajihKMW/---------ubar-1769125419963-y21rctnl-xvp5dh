@@ -154,6 +154,8 @@ Admin Innovations endpoints (exclusive features):
 - `POST /api/admin/innovations/copilot-arena/session`
 - `POST /api/admin/innovations/hub-rebalancer/rebalance`
 - `GET /api/admin/innovations/kpis/summary`
+- `GET /api/admin/innovations/roadmap`
+- `GET /api/admin/innovations/compliance-report`
 
 Approved reference for these 10 features:
 
