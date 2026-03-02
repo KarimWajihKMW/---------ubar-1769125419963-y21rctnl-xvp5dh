@@ -10,7 +10,8 @@
     "test:admin-excellence": "node test-admin-excellence.js",
     "test:admin-innovations": "node test-admin-innovations.js",
     "test:admin-executive": "node test-admin-executive.js",
-    "build": "node -e \"console.log('No build step for this project')\""
+    "build": "node -e \"console.log('No build step for this project')\"",
+    "verify:admin-innovations": "npm run test:admin-innovations && npm run build"
   },
   "keywords": [
     "taxi",

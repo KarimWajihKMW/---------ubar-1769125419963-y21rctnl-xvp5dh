@@ -155,6 +155,21 @@ Admin Innovations endpoints (exclusive features):
 - `POST /api/admin/innovations/hub-rebalancer/rebalance`
 - `GET /api/admin/innovations/kpis/summary`
 
+Approved reference for these 10 features:
+
+- [Mlf_ala8tra7at_administration_haged_ubar4](Mlf_ala8tra7at_administration_haged_ubar4)
+
+Pre-commit verification for the approved admin innovations set:
+
+```bash
+npm run verify:admin-innovations
+```
+
+This command runs:
+
+- `npm run test:admin-innovations` (API smoke test for all 10 approved features)
+- `npm run build`
+
 ## Realtime + live updates
 
 The backend runs Socket.IO on the same server (see [server.js](server.js)).
