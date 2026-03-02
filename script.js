@@ -2100,10 +2100,11 @@ function handleDriverLiveLocationRealtime(tripId, coords) {
     if (target && Number.isFinite(target.lat) && Number.isFinite(target.lng)) {
         updatePassengerDriverRoute(coords, target);
 
-        const distanceMeters = calculateDistance(coords.lat, coords.lng, target.lat, target.lng);
-        updateDriverDistance(distanceMeters);
         const speedMps = passengerLastTripStatus === 'ongoing' ? 10 : 9;
-        const etaSecondsLive = Math.round(distanceMeters / speedMps);
+        const metrics = getLiveRouteMetrics(coords, target, speedMps);
+        const distanceMeters = metrics.distanceMeters;
+        updateDriverDistance(distanceMeters);
+        const etaSecondsLive = metrics.etaSeconds;
         if (passengerLastTripStatus === 'ongoing') {
             updatePassengerEtaUI(etaSecondsLive, 'ride');
         } else {
@@ -2580,10 +2581,10 @@ function decodePolyline6(encoded) {
 }
 
 function getRoadRouteCacheKey(start, end) {
-    const sLat = Number(start.lat).toFixed(5);
-    const sLng = Number(start.lng).toFixed(5);
-    const eLat = Number(end.lat).toFixed(5);
-    const eLng = Number(end.lng).toFixed(5);
+    const sLat = Number(start.lat).toFixed(4);
+    const sLng = Number(start.lng).toFixed(4);
+    const eLat = Number(end.lat).toFixed(4);
+    const eLng = Number(end.lng).toFixed(4);
     return `${sLat},${sLng}->${eLat},${eLng}`;
 }
 
@@ -2616,10 +2617,56 @@ async function fetchRoadRoute(start, end) {
     const payload = {
         points,
         distance: Number(route.distance),
-        duration: Number(route.duration)
+        duration: Number(route.duration),
+        start: { lat: Number(start.lat), lng: Number(start.lng) },
+        end: { lat: Number(end.lat), lng: Number(end.lng) }
     };
     rememberRoadRoute(key, payload);
     return payload;
+}
+
+function findCachedRoadRoute(start, end) {
+    if (!isValidLatLngPoint(start) || !isValidLatLngPoint(end)) return null;
+
+    const exact = roadRouteCache.get(getRoadRouteCacheKey(start, end));
+    if (exact) return exact;
+
+    let best = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const route of roadRouteCache.values()) {
+        if (!route?.start || !route?.end) continue;
+        const endGap = calculateDistance(end.lat, end.lng, route.end.lat, route.end.lng);
+        if (!Number.isFinite(endGap) || endGap > 180) continue;
+        const startGap = calculateDistance(start.lat, start.lng, route.start.lat, route.start.lng);
+        if (!Number.isFinite(startGap) || startGap > 220) continue;
+        const score = (endGap * 1.5) + startGap;
+        if (score < bestScore) {
+            bestScore = score;
+            best = route;
+        }
+    }
+    return best;
+}
+
+function getLiveRouteMetrics(start, end, fallbackSpeedMps) {
+    const speed = Number.isFinite(Number(fallbackSpeedMps)) && Number(fallbackSpeedMps) > 0
+        ? Number(fallbackSpeedMps)
+        : 9;
+
+    const fallbackDistance = calculateDistance(start.lat, start.lng, end.lat, end.lng);
+    const fallbackDuration = Math.max(0, Math.round(fallbackDistance / speed));
+
+    const route = findCachedRoadRoute(start, end);
+    if (!route) {
+        return { distanceMeters: fallbackDistance, etaSeconds: fallbackDuration };
+    }
+
+    const routeDistance = Number(route.distance);
+    const routeDuration = Number(route.duration);
+    return {
+        distanceMeters: Number.isFinite(routeDistance) && routeDistance > 0 ? routeDistance : fallbackDistance,
+        etaSeconds: Number.isFinite(routeDuration) && routeDuration > 0 ? Math.round(routeDuration) : fallbackDuration
+    };
 }
 
 function upsertRoutePolyline(points, style, fitBounds = false) {
@@ -4953,12 +5000,12 @@ async function refreshPassengerLiveTripTracking() {
         }
 
         // Update distance + ETA
-        const distanceMeters = calculateDistance(newDriverCoords.lat, newDriverCoords.lng, targetCoords.lat, targetCoords.lng);
+        const speedMps = trip.status === 'ongoing' ? 10 : 9;
+        const metrics = getLiveRouteMetrics(newDriverCoords, targetCoords, speedMps);
+        const distanceMeters = metrics.distanceMeters;
         updateDriverDistance(distanceMeters);
 
-        // Rough ETA based on live distance
-        const speedMps = trip.status === 'ongoing' ? 10 : 9; // ~32-36 km/h
-        const etaSecondsLive = Math.round(distanceMeters / speedMps);
+        const etaSecondsLive = metrics.etaSeconds;
         if (trip.status === 'ongoing') {
             updatePassengerEtaUI(etaSecondsLive, 'ride');
         } else {
