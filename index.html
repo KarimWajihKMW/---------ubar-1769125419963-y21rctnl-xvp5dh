@@ -999,11 +999,14 @@
                         </button>
                     </div>
                     
-                    <div class="flex items-center bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-gray-200 shadow-sm focus-within:ring-2 ring-indigo-500/50 transition-all focus-within:shadow-md focus-within:border-indigo-200">
-                        <div class="w-10 h-10 sm:w-10 sm:h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 ml-2 sm:ml-3">
-                            <i class="fas fa-search text-sm sm:text-base"></i>
+                    <div class="relative">
+                        <div class="flex items-center bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-gray-200 shadow-sm focus-within:ring-2 ring-indigo-500/50 transition-all focus-within:shadow-md focus-within:border-indigo-200">
+                            <div class="w-10 h-10 sm:w-10 sm:h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 ml-2 sm:ml-3">
+                                <i class="fas fa-search text-sm sm:text-base"></i>
+                            </div>
+                            <input type="text" id="dest-input" placeholder="اكتب المكان المتجه اليه" class="bg-transparent w-full outline-none text-gray-800 text-sm sm:text-base font-medium placeholder-gray-400" style="font-size: 16px">
                         </div>
-                        <input type="text" id="dest-input" placeholder="اكتب المكان المتجه اليه" class="bg-transparent w-full outline-none text-gray-800 text-sm sm:text-base font-medium placeholder-gray-400" style="font-size: 16px">
+                        <div id="dest-suggestions" class="hidden absolute z-[1200] right-0 left-0 mt-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden"></div>
                     </div>
                     <div class="flex flex-wrap gap-2 sm:gap-3">
                         <button type="button" id="dest-map-btn" onclick="startMapSelection('destination')" class="px-3 sm:px-4 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-xs sm:text-sm font-bold border border-indigo-100 hover:bg-indigo-100 transition-colors">

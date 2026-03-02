@@ -2513,6 +2513,11 @@ let passengerPickupUpdateInterval = null;
 let driverIncomingTripUpdateInterval = null;
 
 let pickupHubSuggestRequestAt = 0;
+let destinationSuggestTimer = null;
+let destinationSuggestAbortController = null;
+let destinationSuggestRequestSeq = 0;
+let destinationSuggestItems = [];
+let destinationSuggestActiveIndex = -1;
 
 function setSelectedPickupHub(hub) {
     if (!hub || !hub.id) {
@@ -2572,6 +2577,132 @@ function escapeHtml(str) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#039;');
+}
+
+function hideDestinationSuggestions() {
+    const box = document.getElementById('dest-suggestions');
+    if (!box) return;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    destinationSuggestItems = [];
+    destinationSuggestActiveIndex = -1;
+}
+
+function renderDestinationSuggestions(items) {
+    const box = document.getElementById('dest-suggestions');
+    if (!box) return;
+
+    const rows = Array.isArray(items) ? items : [];
+    destinationSuggestItems = rows;
+    destinationSuggestActiveIndex = rows.length ? 0 : -1;
+
+    if (!rows.length) {
+        box.innerHTML = '';
+        box.classList.add('hidden');
+        return;
+    }
+
+    box.innerHTML = rows.map((item, idx) => {
+        const label = String(item.display_name || item.label || '').trim();
+        const title = label.split(',')[0]?.trim() || label;
+        const isActive = idx === destinationSuggestActiveIndex;
+        return `
+            <button type="button" data-dest-suggestion="${String(idx)}" class="w-full text-right px-4 py-3 border-b border-gray-100 last:border-0 transition-colors ${isActive ? 'bg-indigo-50' : 'bg-white hover:bg-gray-50'}">
+                <div class="text-sm font-extrabold text-gray-800">${escapeHtml(title)}</div>
+                <div class="text-[11px] text-gray-500 font-bold mt-0.5 truncate">${escapeHtml(label)}</div>
+            </button>
+        `;
+    }).join('');
+
+    box.classList.remove('hidden');
+
+    box.querySelectorAll('button[data-dest-suggestion]').forEach((btn) => {
+        btn.addEventListener('mousedown', (evt) => evt.preventDefault());
+        btn.addEventListener('click', () => {
+            const idx = Number(btn.getAttribute('data-dest-suggestion'));
+            const item = destinationSuggestItems[idx];
+            if (!item) return;
+            applyDestinationSuggestion(item);
+        });
+    });
+}
+
+function applyDestinationSuggestion(item) {
+    if (!item) return;
+    const lat = Number(item.lat);
+    const lng = Number(item.lon ?? item.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const label = String(item.display_name || item.label || 'الوجهة').trim() || 'الوجهة';
+    setDestination({ lat, lng }, label);
+
+    const destInput = document.getElementById('dest-input');
+    if (destInput) destInput.value = label;
+    if (leafletMap) leafletMap.setView([lat, lng], 15);
+    hideDestinationSuggestions();
+}
+
+function fetchDestinationSuggestions(query) {
+    const q = String(query || '').trim();
+    if (!q || currentUserRole !== 'passenger') {
+        hideDestinationSuggestions();
+        return Promise.resolve([]);
+    }
+
+    if (destinationSuggestAbortController) {
+        destinationSuggestAbortController.abort();
+    }
+
+    const requestSeq = ++destinationSuggestRequestSeq;
+    destinationSuggestAbortController = new AbortController();
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&limit=6&accept-language=ar&q=${encodeURIComponent(q)}`;
+
+    return fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        signal: destinationSuggestAbortController.signal
+    })
+        .then((r) => r.json())
+        .then((arr) => {
+            if (requestSeq !== destinationSuggestRequestSeq) return [];
+
+            const rows = (Array.isArray(arr) ? arr : []).filter((item) => {
+                const lat = Number(item?.lat);
+                const lon = Number(item?.lon);
+                return Number.isFinite(lat) && Number.isFinite(lon);
+            });
+
+            renderDestinationSuggestions(rows);
+            return rows;
+        })
+        .catch((err) => {
+            if (err && err.name === 'AbortError') return [];
+            hideDestinationSuggestions();
+            return [];
+        });
+}
+
+function queueDestinationSuggestions(query) {
+    if (destinationSuggestTimer) {
+        clearTimeout(destinationSuggestTimer);
+    }
+
+    const q = String(query || '').trim();
+    if (!q) {
+        hideDestinationSuggestions();
+        return;
+    }
+
+    destinationSuggestTimer = setTimeout(() => {
+        fetchDestinationSuggestions(q);
+    }, 220);
+}
+
+function moveDestinationSuggestionSelection(step) {
+    if (!destinationSuggestItems.length) return;
+    const next = destinationSuggestActiveIndex + step;
+    const max = destinationSuggestItems.length - 1;
+    destinationSuggestActiveIndex = Math.min(max, Math.max(0, next));
+    renderDestinationSuggestions(destinationSuggestItems);
 }
 
 function hasAccessibilityNeeds(p) {
@@ -3500,17 +3631,61 @@ function initLeafletMap() {
     // Hook destination search input
     const destInput = document.getElementById('dest-input');
     if (destInput) {
+        destInput.addEventListener('input', () => {
+            const q = destInput.value.trim();
+            if (currentDestination && q && q !== String(currentDestination.label || '').trim()) {
+                currentDestination = null;
+            }
+            queueDestinationSuggestions(q);
+        });
+        destInput.addEventListener('focus', () => {
+            const q = destInput.value.trim();
+            if (q) fetchDestinationSuggestions(q);
+        });
         destInput.addEventListener('keydown', evt => {
+            const suggestionsVisible = destinationSuggestItems.length > 0;
+
+            if (evt.key === 'ArrowDown' && suggestionsVisible) {
+                evt.preventDefault();
+                moveDestinationSuggestionSelection(1);
+                return;
+            }
+
+            if (evt.key === 'ArrowUp' && suggestionsVisible) {
+                evt.preventDefault();
+                moveDestinationSuggestionSelection(-1);
+                return;
+            }
+
+            if (evt.key === 'Escape' && suggestionsVisible) {
+                evt.preventDefault();
+                hideDestinationSuggestions();
+                return;
+            }
+
             if (evt.key === 'Enter') {
+                if (suggestionsVisible) {
+                    evt.preventDefault();
+                    const idx = destinationSuggestActiveIndex >= 0 ? destinationSuggestActiveIndex : 0;
+                    const item = destinationSuggestItems[idx];
+                    if (item) {
+                        applyDestinationSuggestion(item);
+                        return;
+                    }
+                }
+
                 const q = destInput.value.trim();
                 if (q) searchDestinationByName(q);
             }
         });
         destInput.addEventListener('blur', () => {
-            const q = destInput.value.trim();
-            if (shouldGeocodeInput(q, currentDestination?.label)) {
-                searchDestinationByName(q);
-            }
+            setTimeout(() => {
+                hideDestinationSuggestions();
+                const q = destInput.value.trim();
+                if (shouldGeocodeInput(q, currentDestination?.label)) {
+                    searchDestinationByName(q);
+                }
+            }, 120);
         });
         destInput.addEventListener('change', () => {
             const q = destInput.value.trim();
