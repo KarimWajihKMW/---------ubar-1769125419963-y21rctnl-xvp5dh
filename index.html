@@ -374,6 +374,11 @@
             #driver-panel-card {
                 transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
                 will-change: transform;
+                max-height: 88vh;
+                overflow-y: auto;
+                overflow-x: hidden;
+                -webkit-overflow-scrolling: touch;
+                touch-action: pan-y;
             }
 
             #driver-panel-card.driver-panel-collapsed {
@@ -2342,7 +2347,7 @@
          DRIVER UI COMPONENTS
     ============================================== -->
     <div id="driver-ui-container" class="absolute bottom-0 w-full z-20 pointer-events-none hidden">
-        <div id="driver-panel-card" class="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-hidden">
+        <div id="driver-panel-card" class="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden">
             <!-- Captain Header -->
             <div class="px-6 pt-6 pb-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
                 <div class="flex items-center justify-between">
