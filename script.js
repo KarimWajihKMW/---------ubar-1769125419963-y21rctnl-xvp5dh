@@ -2523,6 +2523,145 @@ let pickupSuggestAbortController = null;
 let pickupSuggestRequestSeq = 0;
 let pickupSuggestItems = [];
 let pickupSuggestActiveIndex = -1;
+const ROAD_ROUTE_API_BASE = 'https://router.project-osrm.org/route/v1/driving';
+const ROAD_ROUTE_MIN_FETCH_INTERVAL_MS = 2200;
+const ROAD_ROUTE_CACHE_LIMIT = 120;
+let routeFetchSeq = 0;
+let routeLastFetchAt = 0;
+const roadRouteCache = new Map();
+
+function isValidLatLngPoint(point) {
+    if (!point) return false;
+    const lat = Number(point.lat);
+    const lng = Number(point.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function getStraightRoutePoints(start, end) {
+    return [
+        [Number(start.lat), Number(start.lng)],
+        [Number(end.lat), Number(end.lng)]
+    ];
+}
+
+function decodePolyline6(encoded) {
+    if (!encoded || typeof encoded !== 'string') return [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+    const points = [];
+
+    while (index < encoded.length) {
+        let result = 0;
+        let shift = 0;
+        let b;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        const deltaLat = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lat += deltaLat;
+
+        result = 0;
+        shift = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        const deltaLng = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lng += deltaLng;
+
+        points.push([lat / 1e6, lng / 1e6]);
+    }
+
+    return points;
+}
+
+function getRoadRouteCacheKey(start, end) {
+    const sLat = Number(start.lat).toFixed(5);
+    const sLng = Number(start.lng).toFixed(5);
+    const eLat = Number(end.lat).toFixed(5);
+    const eLng = Number(end.lng).toFixed(5);
+    return `${sLat},${sLng}->${eLat},${eLng}`;
+}
+
+function rememberRoadRoute(key, payload) {
+    roadRouteCache.set(key, payload);
+    if (roadRouteCache.size <= ROAD_ROUTE_CACHE_LIMIT) return;
+    const oldestKey = roadRouteCache.keys().next().value;
+    if (oldestKey) roadRouteCache.delete(oldestKey);
+}
+
+async function fetchRoadRoute(start, end) {
+    if (!isValidLatLngPoint(start) || !isValidLatLngPoint(end)) return null;
+
+    const key = getRoadRouteCacheKey(start, end);
+    if (roadRouteCache.has(key)) {
+        return roadRouteCache.get(key);
+    }
+
+    const url = `${ROAD_ROUTE_API_BASE}/${Number(start.lng)},${Number(start.lat)};${Number(end.lng)},${Number(end.lat)}?overview=full&geometries=polyline6&steps=false&alternatives=false`;
+    const response = await fetch(url, { method: 'GET' });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const route = Array.isArray(data?.routes) ? data.routes[0] : null;
+    if (!route?.geometry) return null;
+
+    const points = decodePolyline6(route.geometry);
+    if (!Array.isArray(points) || points.length < 2) return null;
+
+    const payload = {
+        points,
+        distance: Number(route.distance),
+        duration: Number(route.duration)
+    };
+    rememberRoadRoute(key, payload);
+    return payload;
+}
+
+function upsertRoutePolyline(points, style, fitBounds = false) {
+    if (!leafletMap || !Array.isArray(points) || points.length < 2) return;
+
+    if (!routePolyline) {
+        routePolyline = L.polyline(points, style || { color: '#4f46e5', weight: 4, opacity: 0.75, dashArray: '10, 10' }).addTo(leafletMap);
+    } else {
+        if (style) routePolyline.setStyle(style);
+        routePolyline.setLatLngs(points);
+    }
+
+    if (fitBounds) {
+        const bounds = L.latLngBounds(points);
+        leafletMap.fitBounds(bounds, { padding: [50, 50] });
+    }
+}
+
+function updateRouteOnRoad(start, end, options = {}) {
+    if (!leafletMap || !isValidLatLngPoint(start) || !isValidLatLngPoint(end)) return;
+
+    const style = options.style || { color: '#4f46e5', weight: 4, opacity: 0.75, dashArray: '10, 10' };
+    const fitBounds = options.fitBounds === true;
+    const forceFetch = options.forceFetch === true;
+
+    upsertRoutePolyline(getStraightRoutePoints(start, end), style, fitBounds && !routePolyline);
+
+    const now = Date.now();
+    if (!forceFetch && (now - routeLastFetchAt) < ROAD_ROUTE_MIN_FETCH_INTERVAL_MS) return;
+    routeLastFetchAt = now;
+
+    const seq = ++routeFetchSeq;
+    fetchRoadRoute(start, end)
+        .then((route) => {
+            if (!route || !routePolyline) return;
+            if (seq !== routeFetchSeq) return;
+            upsertRoutePolyline(route.points, style, fitBounds);
+        })
+        .catch(() => {
+            // silent fallback to straight line
+        });
+}
 
 function setSelectedPickupHub(hub) {
     if (!hub || !hub.id) {
@@ -4310,16 +4449,16 @@ function getDriverActiveTargetCoords() {
 
 function updateDriverActiveRouteFromGps(coords) {
     if (currentUserRole !== 'driver') return;
-    if (!routePolyline) return;
     if (!coords) return;
 
     const target = getDriverActiveTargetCoords();
     if (!target) return;
 
-    routePolyline.setLatLngs([
-        [coords.lat, coords.lng],
-        [target.lat, target.lng]
-    ]);
+    const style = driverTripStarted
+        ? { color: '#2563eb', weight: 4, opacity: 0.8, dashArray: '8, 6' }
+        : { color: '#10b981', weight: 4, opacity: 0.8, dashArray: '8, 8' };
+
+    updateRouteOnRoad(coords, target, { style, fitBounds: false, forceFetch: false });
 }
 
 function updateDriverRealTripProgress(coords) {
@@ -4596,19 +4735,13 @@ function startDriverTrackingLive() {
     console.log('✅ Driver marker added at:', driverLocation);
     
     // Draw route line
-    routePolyline = L.polyline([
-        [driverLocation.lat, driverLocation.lng],
-        [currentPickup.lat, currentPickup.lng]
-    ], { color: '#4f46e5', weight: 4, opacity: 0.7, dashArray: '10, 10' }).addTo(leafletMap);
-    
+    updateRouteOnRoad(driverLocation, currentPickup, {
+        style: { color: '#4f46e5', weight: 4, opacity: 0.7, dashArray: '10, 10' },
+        fitBounds: true,
+        forceFetch: true
+    });
+
     console.log('✅ Route line drawn');
-    
-    // Fit map to show both driver and pickup
-    const bounds = L.latLngBounds([
-        [driverLocation.lat, driverLocation.lng],
-        [currentPickup.lat, currentPickup.lng]
-    ]);
-    leafletMap.fitBounds(bounds, { padding: [50, 50] });
     
     console.log('✅ Map fitted to bounds, starting animation...');
     
@@ -4671,19 +4804,11 @@ function ensurePassengerDriverMarker(location) {
 
 function updatePassengerDriverRoute(driverCoords, targetCoords) {
     if (!leafletMap || !driverCoords || !targetCoords) return;
-    const linePoints = [
-        [driverCoords.lat, driverCoords.lng],
-        [targetCoords.lat, targetCoords.lng]
-    ];
-
-    if (!routePolyline) {
-        routePolyline = L.polyline(linePoints, { color: '#4f46e5', weight: 4, opacity: 0.75, dashArray: '10, 10' }).addTo(leafletMap);
-        const bounds = L.latLngBounds(linePoints);
-        leafletMap.fitBounds(bounds, { padding: [50, 50] });
-        return;
-    }
-
-    routePolyline.setLatLngs(linePoints);
+    updateRouteOnRoad(driverCoords, targetCoords, {
+        style: { color: '#4f46e5', weight: 4, opacity: 0.75, dashArray: '10, 10' },
+        fitBounds: !routePolyline,
+        forceFetch: false
+    });
 }
 
 function updateDriverDistance(distanceMeters) {
@@ -5053,16 +5178,11 @@ function startDriverToPassengerRoute() {
     const passenger = passengerPickup || generatePassengerPickup(driverStart);
     setPassengerPickup(passenger, passenger.label);
 
-    routePolyline = L.polyline([
-        [driverStart.lat, driverStart.lng],
-        [passenger.lat, passenger.lng]
-    ], { color: '#10b981', weight: 4, opacity: 0.8, dashArray: '8, 8' }).addTo(leafletMap);
-
-    const bounds = L.latLngBounds([
-        [driverStart.lat, driverStart.lng],
-        [passenger.lat, passenger.lng]
-    ]);
-    leafletMap.fitBounds(bounds, { padding: [50, 50] });
+    updateRouteOnRoad(driverStart, passenger, {
+        style: { color: '#10b981', weight: 4, opacity: 0.8, dashArray: '8, 8' },
+        fitBounds: true,
+        forceFetch: true
+    });
 
     // Real mode: do not animate marker; it moves with GPS updates.
 }
@@ -5085,16 +5205,11 @@ function startDriverToDestinationRoute() {
     ensureDriverMarker(start);
 
     const target = { lat: Number(dropoffLat), lng: Number(dropoffLng) };
-    routePolyline = L.polyline([
-        [start.lat, start.lng],
-        [target.lat, target.lng]
-    ], { color: '#2563eb', weight: 4, opacity: 0.8, dashArray: '8, 6' }).addTo(leafletMap);
-
-    const bounds = L.latLngBounds([
-        [start.lat, start.lng],
-        [target.lat, target.lng]
-    ]);
-    leafletMap.fitBounds(bounds, { padding: [50, 50] });
+    updateRouteOnRoad(start, target, {
+        style: { color: '#2563eb', weight: 4, opacity: 0.8, dashArray: '8, 6' },
+        fitBounds: true,
+        forceFetch: true
+    });
 
     // Real mode: do not animate marker; it moves with GPS updates.
 }
