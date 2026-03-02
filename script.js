@@ -2518,6 +2518,11 @@ let destinationSuggestAbortController = null;
 let destinationSuggestRequestSeq = 0;
 let destinationSuggestItems = [];
 let destinationSuggestActiveIndex = -1;
+let pickupSuggestTimer = null;
+let pickupSuggestAbortController = null;
+let pickupSuggestRequestSeq = 0;
+let pickupSuggestItems = [];
+let pickupSuggestActiveIndex = -1;
 
 function setSelectedPickupHub(hub) {
     if (!hub || !hub.id) {
@@ -2703,6 +2708,133 @@ function moveDestinationSuggestionSelection(step) {
     const max = destinationSuggestItems.length - 1;
     destinationSuggestActiveIndex = Math.min(max, Math.max(0, next));
     renderDestinationSuggestions(destinationSuggestItems);
+}
+
+function hidePickupSuggestions() {
+    const box = document.getElementById('pickup-suggestions');
+    if (!box) return;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    pickupSuggestItems = [];
+    pickupSuggestActiveIndex = -1;
+}
+
+function renderPickupSuggestions(items) {
+    const box = document.getElementById('pickup-suggestions');
+    if (!box) return;
+
+    const rows = Array.isArray(items) ? items : [];
+    pickupSuggestItems = rows;
+    pickupSuggestActiveIndex = rows.length ? 0 : -1;
+
+    if (!rows.length) {
+        box.innerHTML = '';
+        box.classList.add('hidden');
+        return;
+    }
+
+    box.innerHTML = rows.map((item, idx) => {
+        const label = String(item.display_name || item.label || '').trim();
+        const title = label.split(',')[0]?.trim() || label;
+        const isActive = idx === pickupSuggestActiveIndex;
+        return `
+            <button type="button" data-pickup-suggestion="${String(idx)}" class="w-full text-right px-4 py-3 border-b border-gray-100 last:border-0 transition-colors ${isActive ? 'bg-indigo-50' : 'bg-white hover:bg-gray-50'}">
+                <div class="text-sm font-extrabold text-gray-800">${escapeHtml(title)}</div>
+                <div class="text-[11px] text-gray-500 font-bold mt-0.5 truncate">${escapeHtml(label)}</div>
+            </button>
+        `;
+    }).join('');
+
+    box.classList.remove('hidden');
+
+    box.querySelectorAll('button[data-pickup-suggestion]').forEach((btn) => {
+        btn.addEventListener('mousedown', (evt) => evt.preventDefault());
+        btn.addEventListener('click', () => {
+            const idx = Number(btn.getAttribute('data-pickup-suggestion'));
+            const item = pickupSuggestItems[idx];
+            if (!item) return;
+            applyPickupSuggestion(item);
+        });
+    });
+}
+
+function applyPickupSuggestion(item) {
+    if (!item) return;
+    const lat = Number(item.lat);
+    const lng = Number(item.lon ?? item.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const label = String(item.display_name || item.label || 'نقطة الالتقاط').trim() || 'نقطة الالتقاط';
+    setPickup({ lat, lng }, label);
+
+    const pickupInput = document.getElementById('current-loc-input');
+    if (pickupInput) pickupInput.value = label;
+    if (leafletMap) leafletMap.setView([lat, lng], 15);
+    hidePickupSuggestions();
+    showToast('تم تحديد موقع الالتقاط');
+}
+
+function fetchPickupSuggestions(query) {
+    const q = String(query || '').trim();
+    if (!q || currentUserRole !== 'passenger') {
+        hidePickupSuggestions();
+        return Promise.resolve([]);
+    }
+
+    if (pickupSuggestAbortController) {
+        pickupSuggestAbortController.abort();
+    }
+
+    const requestSeq = ++pickupSuggestRequestSeq;
+    pickupSuggestAbortController = new AbortController();
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&limit=6&accept-language=ar&q=${encodeURIComponent(q)}`;
+
+    return fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        signal: pickupSuggestAbortController.signal
+    })
+        .then((r) => r.json())
+        .then((arr) => {
+            if (requestSeq !== pickupSuggestRequestSeq) return [];
+
+            const rows = (Array.isArray(arr) ? arr : []).filter((item) => {
+                const lat = Number(item?.lat);
+                const lon = Number(item?.lon);
+                return Number.isFinite(lat) && Number.isFinite(lon);
+            });
+
+            renderPickupSuggestions(rows);
+            return rows;
+        })
+        .catch((err) => {
+            if (err && err.name === 'AbortError') return [];
+            hidePickupSuggestions();
+            return [];
+        });
+}
+
+function queuePickupSuggestions(query) {
+    if (pickupSuggestTimer) {
+        clearTimeout(pickupSuggestTimer);
+    }
+
+    const q = String(query || '').trim();
+    if (!q) {
+        hidePickupSuggestions();
+        return;
+    }
+
+    pickupSuggestTimer = setTimeout(() => {
+        fetchPickupSuggestions(q);
+    }, 220);
+}
+
+function movePickupSuggestionSelection(step) {
+    if (!pickupSuggestItems.length) return;
+    const next = pickupSuggestActiveIndex + step;
+    const max = pickupSuggestItems.length - 1;
+    pickupSuggestActiveIndex = Math.min(max, Math.max(0, next));
+    renderPickupSuggestions(pickupSuggestItems);
 }
 
 function hasAccessibilityNeeds(p) {
@@ -3698,17 +3830,61 @@ function initLeafletMap() {
     // Hook pickup search input
     const pickupInput = document.getElementById('current-loc-input');
     if (pickupInput) {
+        pickupInput.addEventListener('input', () => {
+            const q = pickupInput.value.trim();
+            if (currentPickup && q && q !== String(currentPickup.label || '').trim()) {
+                currentPickup = null;
+            }
+            queuePickupSuggestions(q);
+        });
+        pickupInput.addEventListener('focus', () => {
+            const q = pickupInput.value.trim();
+            if (q) fetchPickupSuggestions(q);
+        });
         pickupInput.addEventListener('keydown', evt => {
+            const suggestionsVisible = pickupSuggestItems.length > 0;
+
+            if (evt.key === 'ArrowDown' && suggestionsVisible) {
+                evt.preventDefault();
+                movePickupSuggestionSelection(1);
+                return;
+            }
+
+            if (evt.key === 'ArrowUp' && suggestionsVisible) {
+                evt.preventDefault();
+                movePickupSuggestionSelection(-1);
+                return;
+            }
+
+            if (evt.key === 'Escape' && suggestionsVisible) {
+                evt.preventDefault();
+                hidePickupSuggestions();
+                return;
+            }
+
             if (evt.key === 'Enter') {
+                if (suggestionsVisible) {
+                    evt.preventDefault();
+                    const idx = pickupSuggestActiveIndex >= 0 ? pickupSuggestActiveIndex : 0;
+                    const item = pickupSuggestItems[idx];
+                    if (item) {
+                        applyPickupSuggestion(item);
+                        return;
+                    }
+                }
+
                 const q = pickupInput.value.trim();
                 if (q) searchPickupByName(q);
             }
         });
         pickupInput.addEventListener('blur', () => {
-            const q = pickupInput.value.trim();
-            if (shouldGeocodeInput(q, currentPickup?.label)) {
-                searchPickupByName(q);
-            }
+            setTimeout(() => {
+                hidePickupSuggestions();
+                const q = pickupInput.value.trim();
+                if (shouldGeocodeInput(q, currentPickup?.label)) {
+                    searchPickupByName(q);
+                }
+            }, 120);
         });
         pickupInput.addEventListener('change', () => {
             const q = pickupInput.value.trim();
