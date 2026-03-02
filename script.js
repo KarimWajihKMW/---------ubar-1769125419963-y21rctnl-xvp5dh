@@ -2106,9 +2106,9 @@ function handleDriverLiveLocationRealtime(tripId, coords) {
         updateDriverDistance(distanceMeters);
         const etaSecondsLive = metrics.etaSeconds;
         if (passengerLastTripStatus === 'ongoing') {
-            updatePassengerEtaUI(etaSecondsLive, 'ride');
+            updatePassengerEtaUI(etaSecondsLive, 'ride', { smooth: true });
         } else {
-            updatePassengerEtaUI(etaSecondsLive, 'pickup');
+            updatePassengerEtaUI(etaSecondsLive, 'pickup', { smooth: true });
         }
     }
 }
@@ -2512,6 +2512,8 @@ let geoPermissionDenied = false;
 
 let passengerPickupUpdateInterval = null;
 let driverIncomingTripUpdateInterval = null;
+let passengerLiveEtaTicker = null;
+let passengerLiveEtaState = { target: null, seconds: 0 };
 
 let pickupHubSuggestRequestAt = 0;
 let destinationSuggestTimer = null;
@@ -4806,6 +4808,8 @@ function stopPassengerLiveTripTracking() {
     passengerLastTripStatus = null;
     passengerArrivalToastShown = false;
     passengerOngoingToastShown = false;
+    passengerLiveEtaState = { target: null, seconds: 0 };
+    stopPassengerLiveEtaTicker();
 }
 
 function preparePassengerDriverMapView() {
@@ -4873,7 +4877,7 @@ function updateDriverDistance(distanceMeters) {
     el.innerText = `على بُعد ${Math.round(meters)} متر`;
 }
 
-function updatePassengerEtaUI(seconds, target = 'pickup') {
+function renderPassengerEtaValue(seconds, target = 'pickup') {
     const s = Math.max(0, Math.round(Number(seconds) || 0));
     if (target === 'ride') {
         const rideEtaEl = document.getElementById('ride-eta-display');
@@ -4885,6 +4889,46 @@ function updatePassengerEtaUI(seconds, target = 'pickup') {
     }
     const etaEl = document.getElementById('eta-display');
     if (etaEl) etaEl.innerText = formatETA(s);
+}
+
+function stopPassengerLiveEtaTicker() {
+    if (passengerLiveEtaTicker) {
+        clearInterval(passengerLiveEtaTicker);
+        passengerLiveEtaTicker = null;
+    }
+}
+
+function startPassengerLiveEtaTicker() {
+    if (passengerLiveEtaTicker) return;
+    passengerLiveEtaTicker = setInterval(() => {
+        if (!passengerLiveEtaState.target) {
+            stopPassengerLiveEtaTicker();
+            return;
+        }
+        if (passengerLiveEtaState.seconds <= 0) {
+            renderPassengerEtaValue(0, passengerLiveEtaState.target);
+            stopPassengerLiveEtaTicker();
+            return;
+        }
+        passengerLiveEtaState.seconds = Math.max(0, passengerLiveEtaState.seconds - 1);
+        renderPassengerEtaValue(passengerLiveEtaState.seconds, passengerLiveEtaState.target);
+    }, 1000);
+}
+
+function updatePassengerEtaUI(seconds, target = 'pickup', options = {}) {
+    const s = Math.max(0, Math.round(Number(seconds) || 0));
+    renderPassengerEtaValue(s, target);
+
+    if (options?.smooth !== true) {
+        if (target === 'pickup') {
+            passengerLiveEtaState = { target: null, seconds: 0 };
+            stopPassengerLiveEtaTicker();
+        }
+        return;
+    }
+
+    passengerLiveEtaState = { target, seconds: s };
+    startPassengerLiveEtaTicker();
 }
 
 async function refreshPassengerLiveTripTracking() {
@@ -5007,9 +5051,9 @@ async function refreshPassengerLiveTripTracking() {
 
         const etaSecondsLive = metrics.etaSeconds;
         if (trip.status === 'ongoing') {
-            updatePassengerEtaUI(etaSecondsLive, 'ride');
+            updatePassengerEtaUI(etaSecondsLive, 'ride', { smooth: true });
         } else {
-            updatePassengerEtaUI(etaSecondsLive, 'pickup');
+            updatePassengerEtaUI(etaSecondsLive, 'pickup', { smooth: true });
         }
 
         // Arrival toast near pickup
