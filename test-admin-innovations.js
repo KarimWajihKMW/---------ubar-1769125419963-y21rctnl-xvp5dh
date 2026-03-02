@@ -70,6 +70,15 @@ async function testAdminInnovations() {
   }
 
   {
+    const { res, data } = await jsonFetch(`${baseURL}/admin/innovations/gaps`, { headers });
+    assertOk('innovations gaps report', res, data);
+    if (!data?.data?.gap_free) {
+      throw new Error(`innovation gaps detected: missing=${data?.data?.missing_features_count || 0}, governance=${data?.data?.governance_gaps_count || 0}`);
+    }
+    console.log('✅ Gaps check (no missing approved features)');
+  }
+
+  {
     const { res, data } = await jsonFetch(`${baseURL}/admin/innovations/policy-twin/simulate`, {
       method: 'POST',
       headers,

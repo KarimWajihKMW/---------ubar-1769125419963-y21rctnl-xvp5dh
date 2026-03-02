@@ -156,6 +156,7 @@ Admin Innovations endpoints (exclusive features):
 - `GET /api/admin/innovations/kpis/summary`
 - `GET /api/admin/innovations/roadmap`
 - `GET /api/admin/innovations/compliance-report`
+- `GET /api/admin/innovations/gaps`
 
 Approved reference for these 10 features:
 

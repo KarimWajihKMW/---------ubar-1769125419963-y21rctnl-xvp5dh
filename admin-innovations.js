@@ -407,6 +407,60 @@ function registerAdminInnovationRoutes(app, { pool, requirePermission, writeAdmi
         }
     });
 
+    app.get('/api/admin/innovations/gaps', requirePermission('admin.innovations.read'), async (req, res) => {
+        try {
+            const featureRows = await pool.query(
+                `SELECT key, enabled, kpis_json
+                 FROM admin_innovation_features`
+            );
+            const existingByKey = new Map((featureRows.rows || []).map(r => [String(r.key), r]));
+
+            const missingFeatures = [];
+            const governanceGaps = [];
+
+            for (const approved of APPROVED_INNOVATION_FEATURES) {
+                const row = existingByKey.get(approved.key) || null;
+                if (!row) {
+                    missingFeatures.push({ key: approved.key, reason: 'missing_db_feature_row' });
+                    continue;
+                }
+
+                if (row.enabled !== true) {
+                    governanceGaps.push({ key: approved.key, reason: 'feature_disabled' });
+                }
+
+                const kpis = Array.isArray(row.kpis_json) ? row.kpis_json : [];
+                if (!kpis.length) {
+                    governanceGaps.push({ key: approved.key, reason: 'missing_kpis' });
+                }
+
+                const perms = INNOVATION_PERMISSION_MATRIX[approved.key] || [];
+                if (!perms.length) {
+                    governanceGaps.push({ key: approved.key, reason: 'missing_rbac_mapping' });
+                }
+
+                const actions = INNOVATION_AUDIT_ACTIONS[approved.key] || [];
+                if (!actions.length) {
+                    governanceGaps.push({ key: approved.key, reason: 'missing_audit_mapping' });
+                }
+            }
+
+            res.json({
+                success: true,
+                data: {
+                    approved_total: APPROVED_INNOVATION_FEATURES.length,
+                    missing_features_count: missingFeatures.length,
+                    governance_gaps_count: governanceGaps.length,
+                    gap_free: missingFeatures.length === 0 && governanceGaps.length === 0,
+                    missing_features: missingFeatures,
+                    governance_gaps: governanceGaps
+                }
+            });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     app.post('/api/admin/innovations/policy-twin/simulate', requirePermission('admin.innovations.simulate'), async (req, res) => {
         try {
             const policyName = String(req.body?.policy_name || 'generic_policy').trim().slice(0, 120);

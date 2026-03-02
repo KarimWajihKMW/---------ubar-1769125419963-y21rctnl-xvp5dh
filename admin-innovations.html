@@ -175,6 +175,11 @@
       setOutput(data);
     }
 
+    async function runGapsCheck() {
+      const data = await api('/admin/innovations/gaps');
+      setOutput(data);
+    }
+
     async function loadEthicalDial() {
       const data = await api('/admin/innovations/ethical-dial');
       document.getElementById('dial-profit').value = data.profit_weight;
@@ -216,7 +221,8 @@
         ['Admin Copilot Arena', runCopilotArena],
         ['Autonomous Hub Rebalancer', runHubRebalancer],
         ['Phase Roadmap', runRoadmap],
-        ['Governance Compliance Report', runComplianceReport]
+        ['Governance Compliance Report', runComplianceReport],
+        ['Missing Gaps Check', runGapsCheck]
       ];
 
       const root = document.getElementById('features');
