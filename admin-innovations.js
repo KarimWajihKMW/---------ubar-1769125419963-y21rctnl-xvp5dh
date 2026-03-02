@@ -1134,9 +1134,11 @@ function registerAdminInnovationRoutes(app, { pool, requirePermission, writeAdmi
                                    COUNT(*) FILTER (WHERE score < 20)::int AS false_like
                             FROM admin_silent_crisis_predictions
                             WHERE created_at >= NOW() - INTERVAL '30 days'`),
-                pool.query(`SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (created_at - created_at))/60.0), 0)::numeric(10,2) AS mttr_minutes
-                            FROM admin_innovation_runs
-                            WHERE created_at >= NOW() - INTERVAL '30 days'`)
+                                pool.query(`SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (settled_at - created_at))/60.0), 0)::numeric(10,2) AS mttr_minutes
+                                                        FROM admin_outcome_market
+                                                        WHERE status = 'settled'
+                                                            AND settled_at IS NOT NULL
+                                                            AND settled_at >= NOW() - INTERVAL '30 days'`)
             ]);
 
             const crisisTotal = Number(crisisRes.rows?.[0]?.total || 0);
