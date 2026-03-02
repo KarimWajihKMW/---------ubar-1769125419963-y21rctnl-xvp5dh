@@ -1270,6 +1270,7 @@ async function ensureCoreSchema() {
                 email VARCHAR(100) UNIQUE,
                 password VARCHAR(255),
                 car_type VARCHAR(50) DEFAULT 'economy',
+                car_color VARCHAR(50),
                 car_plate VARCHAR(20),
                 approval_status VARCHAR(20) DEFAULT 'pending',
                 approved_by INTEGER,
@@ -5991,6 +5992,15 @@ async function ensureDriverLocationColumns() {
         console.log('✅ Driver location columns ensured');
     } catch (err) {
         console.error('❌ Failed to ensure driver location columns:', err.message);
+    }
+}
+
+async function ensureDriverVehicleColumns() {
+    try {
+        await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_color VARCHAR(50);`);
+        console.log('✅ Driver vehicle columns ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure driver vehicle columns:', err.message);
     }
 }
 
@@ -15170,7 +15180,7 @@ app.get('/api/drivers/resolve', requireRole('driver', 'admin'), async (req, res)
 
         const params = [];
         const conditions = [];
-        let query = 'SELECT id, name, phone, email, car_type, status, approval_status, rating, total_trips FROM drivers';
+        let query = 'SELECT id, name, phone, email, car_type, car_color, status, approval_status, rating, total_trips FROM drivers';
 
         if (email) {
             params.push(String(email).trim().toLowerCase());
@@ -15206,9 +15216,9 @@ app.get('/api/drivers/resolve', requireRole('driver', 'admin'), async (req, res)
             const fallbackEmail = userLookup.rows[0]?.email || (email ? String(email).trim().toLowerCase() : `driver_${Date.now()}@ubar.sa`);
 
             const insert = await pool.query(
-                `INSERT INTO drivers (name, phone, email, car_type, status, approval_status, rating, total_trips)
-                 VALUES ($1, $2, $3, 'economy', 'online', 'approved', 5.0, 0)
-                 RETURNING id, name, phone, email, car_type, status, approval_status, rating, total_trips`,
+                `INSERT INTO drivers (name, phone, email, car_type, car_color, status, approval_status, rating, total_trips)
+                 VALUES ($1, $2, $3, 'economy', NULL, 'online', 'approved', 5.0, 0)
+                 RETURNING id, name, phone, email, car_type, car_color, status, approval_status, rating, total_trips`,
                 [fallbackName, fallbackPhone, fallbackEmail]
             );
 
@@ -15229,7 +15239,7 @@ app.post('/api/drivers/register', upload.fields([
     { name: 'vehicle_license', maxCount: 1 }
 ]), async (req, res) => {
     try {
-        const { name, phone, email, password, car_type, car_plate } = req.body;
+        const { name, phone, email, password, car_type, car_color, car_plate } = req.body;
         
         // Validate required fields
         if (!name || !phone || !email || !password) {
@@ -15270,14 +15280,14 @@ app.post('/api/drivers/register', upload.fields([
         // Insert new driver
         const result = await pool.query(`
             INSERT INTO drivers (
-                name, phone, email, password, car_type, car_plate,
+                name, phone, email, password, car_type, car_color, car_plate,
                 id_card_photo, drivers_license, vehicle_license,
                 approval_status, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'offline')
-            RETURNING id, name, phone, email, car_type, car_plate, 
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 'offline')
+            RETURNING id, name, phone, email, car_type, car_color, car_plate, 
                       id_card_photo, drivers_license, vehicle_license,
                       approval_status, created_at
-        `, [name, phone, email, hashedPassword, car_type || 'economy', car_plate || '',
+        `, [name, phone, email, hashedPassword, car_type || 'economy', car_color ? String(car_color).trim() : null, car_plate || '',
             id_card_photo, drivers_license, vehicle_license]);
         
         res.status(201).json({
@@ -15297,7 +15307,7 @@ app.get('/api/drivers/status/:phone', async (req, res) => {
         const { phone } = req.params;
         
         const result = await pool.query(
-            `SELECT id, name, phone, email, car_type, car_plate, 
+            `SELECT id, name, phone, email, car_type, car_color, car_plate, 
                     approval_status, rejection_reason, created_at, approved_at
              FROM drivers WHERE phone = $1`,
             [phone]
@@ -19984,6 +19994,7 @@ ensureCoreSchema()
     .then(() => ensurePickupMetaColumns())
     .then(() => ensurePendingRideColumns())
     .then(() => ensureDriverLocationColumns())
+    .then(() => ensureDriverVehicleColumns())
     .then(() => ensureDriverRiskColumns())
     .then(() => ensureAdminTripCountersTables())
     .then(() => ensurePassengerFeatureTables())

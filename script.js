@@ -9707,6 +9707,23 @@ async function updateDriverMenuData() {
     const carTypeNames = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
     const driverCarType = currentDriverProfile?.car_type || user.car_type || 'economy';
     const driverCarLabel = carTypeNames[driverCarType] || driverCarType;
+    const colorRaw = currentDriverProfile?.car_color || user.car_color || user.vehicle_color || '';
+    const colorKey = String(colorRaw || '').trim().toLowerCase();
+    const carColorNames = {
+        white: 'أبيض',
+        black: 'أسود',
+        silver: 'فضي',
+        gray: 'رمادي',
+        grey: 'رمادي',
+        blue: 'أزرق',
+        red: 'أحمر',
+        green: 'أخضر',
+        yellow: 'أصفر',
+        orange: 'برتقالي',
+        brown: 'بني',
+        gold: 'ذهبي'
+    };
+    const driverCarColorLabel = colorKey ? (carColorNames[colorKey] || colorRaw) : 'غير محدد';
 
     const nameEl = document.getElementById('driver-sidebar-name');
     if (nameEl) nameEl.innerText = `أهلاً، ${firstName}`;
@@ -9723,6 +9740,8 @@ async function updateDriverMenuData() {
     if (homeRatingEl) homeRatingEl.innerText = user.rating || '4.8';
     const homeCarTypeEl = document.getElementById('driver-home-car-type');
     if (homeCarTypeEl) homeCarTypeEl.innerText = driverCarLabel;
+    const homeCarColorEl = document.getElementById('driver-home-car-color');
+    if (homeCarColorEl) homeCarColorEl.innerText = `لون: ${driverCarColorLabel}`;
 
     // Fetch real-time driver earnings from API (same as profile.html)
     if (user.id) {
