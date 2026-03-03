@@ -148,6 +148,76 @@ function loadUser() {
     }
 }
 
+function setDriverVehicleUi({ carType, carColor, carYear }) {
+    const typeEl = document.getElementById('settings-driver-car-type');
+    const colorEl = document.getElementById('settings-driver-car-color');
+    const yearEl = document.getElementById('settings-driver-car-year');
+    if (typeEl) typeEl.textContent = carType || 'غير محدد';
+    if (colorEl) colorEl.textContent = carColor || 'غير محدد';
+    if (yearEl) yearEl.textContent = carYear || 'غير محدد';
+}
+
+function normalizeCarTypeLabel(rawType) {
+    const value = String(rawType || '').trim().toLowerCase();
+    if (!value) return '';
+    const map = {
+        economy: 'اقتصادي',
+        comfort: 'مريح',
+        business: 'بزنس',
+        suv: 'SUV',
+        van: 'فان'
+    };
+    return map[value] || String(rawType).trim();
+}
+
+async function loadDriverVehicleInfo() {
+    if (ROLE !== 'driver') return;
+
+    let localUser = null;
+    try {
+        const raw = localStorage.getItem('akwadra_user');
+        localUser = raw ? JSON.parse(raw) : null;
+    } catch (e) {
+        localUser = null;
+    }
+
+    const localCarType = normalizeCarTypeLabel(localUser?.car_type || localUser?.carType || '');
+    const localCarColor = String(localUser?.car_color || localUser?.carColor || '').trim();
+    const localCarYear = String(localUser?.car_model_year || localUser?.model_year || localUser?.carYear || '').trim();
+
+    setDriverVehicleUi({
+        carType: localCarType || '—',
+        carColor: localCarColor || '—',
+        carYear: localCarYear || '—'
+    });
+
+    try {
+        const me = await getAuthMe();
+        const email = String(me?.auth?.email || localUser?.email || '').trim();
+        const phone = String(me?.auth?.phone || localUser?.phone || '').trim();
+        if (!email && !phone) return;
+
+        const params = new URLSearchParams();
+        if (email) params.set('email', email);
+        if (phone) params.set('phone', phone);
+        params.set('auto_create', '0');
+
+        const { res, data } = await apiJson(`/api/drivers/resolve?${params.toString()}`);
+        if (!res.ok || !data.success || !data.data) return;
+
+        const row = data.data;
+        const carType = normalizeCarTypeLabel(row.car_type || localUser?.car_type || localUser?.carType || '');
+        const carColor = String(row.car_color || localUser?.car_color || localUser?.carColor || '').trim();
+        const carYear = String(
+            row.car_model_year || row.model_year || row.year ||
+            localUser?.car_model_year || localUser?.model_year || localUser?.carYear || ''
+        ).trim();
+
+        setDriverVehicleUi({ carType, carColor, carYear });
+    } catch (e) {
+    }
+}
+
 function getToken() {
     try { return localStorage.getItem('akwadra_token'); } catch (e) { return null; }
 }
@@ -1020,6 +1090,7 @@ window.addEventListener('DOMContentLoaded', () => {
     updateDarkModeToggleUI();
     applyRoleUI();
     loadUser();
+    loadDriverVehicleInfo().catch(() => {});
     populateLanguages();
     loadPrefs();
 
