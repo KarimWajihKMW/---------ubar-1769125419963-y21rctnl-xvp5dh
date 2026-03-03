@@ -15819,17 +15819,45 @@ app.get('/api/users/:id', requireAuth, async (req, res) => {
 
         let userData = result.rows[0];
 
-        // If user is a driver, also fetch driver earnings data
-        if (userData.role === 'driver' && userData.driver_id) {
-            try {
-                const driverProfile = await pool.query(
-                    `SELECT car_type, car_plate, car_color, car_model_year
+        async function resolveDriverRowForUser(userRow) {
+            if (!userRow || String(userRow.role || '').toLowerCase() !== 'driver') return null;
+
+            const byId = userRow.driver_id
+                ? await pool.query(
+                    `SELECT id, car_type, car_plate, car_color, car_model_year
                      FROM drivers
                      WHERE id = $1
                      LIMIT 1`,
-                    [userData.driver_id]
-                );
-                const driverRow = driverProfile.rows[0] || null;
+                    [userRow.driver_id]
+                )
+                : { rows: [] };
+
+            const byIdentity = await pool.query(
+                `SELECT id, car_type, car_plate, car_color, car_model_year
+                 FROM drivers
+                 WHERE (email IS NOT NULL AND LOWER(email) = LOWER($1))
+                    OR (phone IS NOT NULL AND phone = $2)
+                 ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(email) = LOWER($1)) THEN 0 ELSE 1 END, id ASC
+                 LIMIT 1`,
+                [String(userRow.email || '').trim(), String(userRow.phone || '').trim()]
+            );
+
+            const resolved = byIdentity.rows[0] || byId.rows[0] || null;
+            if (resolved && userRow.driver_id && Number(userRow.driver_id) !== Number(resolved.id)) {
+                try {
+                    await pool.query('UPDATE users SET driver_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [resolved.id, userRow.id]);
+                    userData = { ...userData, driver_id: resolved.id };
+                } catch (e) {
+                    // non-blocking
+                }
+            }
+            return resolved;
+        }
+
+        // If user is a driver, also fetch driver earnings data
+        if (userData.role === 'driver' && userData.driver_id) {
+            try {
+                const driverRow = await resolveDriverRowForUser(userData);
                 if (driverRow) {
                     userData = {
                         ...userData,
@@ -15908,7 +15936,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
 
         // Check if user exists
         const existing = await pool.query(
-            'SELECT id, role, driver_id FROM users WHERE id = $1',
+            'SELECT id, role, driver_id, email, phone FROM users WHERE id = $1',
             [id]
         );
 
@@ -15920,10 +15948,33 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
         }
 
         const existingUser = existing.rows[0];
+
+        let resolvedDriverId = existingUser.driver_id || null;
+        if (String(existingUser.role || '').toLowerCase() === 'driver') {
+            const resolvedDriver = await pool.query(
+                `SELECT id
+                 FROM drivers
+                 WHERE (email IS NOT NULL AND LOWER(email) = LOWER($1))
+                    OR (phone IS NOT NULL AND phone = $2)
+                 ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(email) = LOWER($1)) THEN 0 ELSE 1 END, id ASC
+                 LIMIT 1`,
+                [String(existingUser.email || '').trim(), String(existingUser.phone || '').trim()]
+            );
+            if (resolvedDriver.rows[0]?.id) {
+                resolvedDriverId = resolvedDriver.rows[0].id;
+                if (!existingUser.driver_id || Number(existingUser.driver_id) !== Number(resolvedDriverId)) {
+                    try {
+                        await pool.query('UPDATE users SET driver_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [resolvedDriverId, id]);
+                    } catch (e) {
+                        // non-blocking
+                    }
+                }
+            }
+        }
         const updates = [];
         const params = [];
         let paramCount = 0;
-        const isDriverUser = String(existingUser.role || '').toLowerCase() === 'driver' && !!existingUser.driver_id;
+        const isDriverUser = String(existingUser.role || '').toLowerCase() === 'driver' && !!resolvedDriverId;
 
         const driverUpdates = [];
         const driverParams = [];
@@ -16064,7 +16115,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
             if (driverUpdates.length > 0) {
                 driverParamCount++;
                 driverUpdates.push('updated_at = CURRENT_TIMESTAMP');
-                driverParams.push(existingUser.driver_id);
+                driverParams.push(resolvedDriverId);
                 await pool.query(
                     `UPDATE drivers SET ${driverUpdates.join(', ')} WHERE id = $${driverParamCount}`,
                     driverParams
@@ -16076,7 +16127,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
                  FROM drivers
                  WHERE id = $1
                  LIMIT 1`,
-                [existingUser.driver_id]
+                [resolvedDriverId]
             );
             const driverRow = driverProfile.rows[0] || null;
             if (driverRow) {

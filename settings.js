@@ -164,6 +164,8 @@ function normalizeCarTypeLabel(rawType) {
         economy: 'اقتصادي',
         comfort: 'مريح',
         business: 'بزنس',
+        family: 'عائلية',
+        luxury: 'فاخرة',
         suv: 'SUV',
         van: 'فان'
     };
