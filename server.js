@@ -15282,6 +15282,12 @@ app.post('/api/drivers/register', upload.fields([
             ? Number.parseInt(String(car_model_year).trim(), 10)
             : null;
         const normalizedCarModelYear = Number.isFinite(carModelYearNum) ? carModelYearNum : null;
+        if (normalizedCarModelYear !== null) {
+            const maxYear = new Date().getFullYear() + 1;
+            if (normalizedCarModelYear < 1990 || normalizedCarModelYear > maxYear) {
+                return res.status(400).json({ success: false, error: `car_model_year must be between 1990 and ${maxYear}` });
+            }
+        }
         
         // Insert new driver
         const result = await pool.query(`
@@ -15950,6 +15956,12 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
             if (car_model_year !== undefined) {
                 const yearRaw = String(car_model_year || '').trim();
                 const parsedYear = yearRaw ? Number.parseInt(yearRaw, 10) : null;
+                if (yearRaw) {
+                    const maxYear = new Date().getFullYear() + 1;
+                    if (!Number.isFinite(parsedYear) || parsedYear < 1990 || parsedYear > maxYear) {
+                        return res.status(400).json({ success: false, error: `car_model_year must be between 1990 and ${maxYear}` });
+                    }
+                }
                 driverParamCount++;
                 driverUpdates.push(`car_model_year = $${driverParamCount}`);
                 driverParams.push(Number.isFinite(parsedYear) ? parsedYear : null);

@@ -1067,6 +1067,20 @@
             
             await saveProfileEditsAuto();
         }
+
+        function normalizeCarModelYearInput(rawValue) {
+            const raw = String(rawValue || '').trim();
+            if (!raw || raw === 'غير محدد') return { ok: true, value: '' };
+            if (!/^\d{4}$/.test(raw)) {
+                return { ok: false, error: 'سنة الموديل لازم تكون 4 أرقام' };
+            }
+            const year = Number.parseInt(raw, 10);
+            const maxYear = new Date().getFullYear() + 1;
+            if (!Number.isFinite(year) || year < 1990 || year > maxYear) {
+                return { ok: false, error: `سنة الموديل لازم تكون بين 1990 و ${maxYear}` };
+            }
+            return { ok: true, value: year };
+        }
         
         async function saveProfileEditsAuto() {
             console.log('💾 حفظ تلقائي...');
@@ -1088,6 +1102,12 @@
                     }
                 });
 
+                const carModelYearCheck = normalizeCarModelYearInput(allFields.carModelYear);
+                if (!carModelYearCheck.ok) {
+                    showAutoSaveNotification(`❌ ${carModelYearCheck.error}`, 'error');
+                    return;
+                }
+
                 const normalizedPhone = normalizePhoneKey(allFields.phone || currentUser.phone);
                 
                 // IMPORTANT: DO NOT update balance, points, rating, or status from UI
@@ -1099,7 +1119,7 @@
                     car_type: allFields.carType || currentUser.car_type || '',
                     car_plate: allFields.plate || currentUser.car_plate || '',
                     car_color: allFields.carColor === 'غير محدد' ? '' : (allFields.carColor || currentUser.car_color || ''),
-                    car_model_year: allFields.carModelYear === 'غير محدد' ? '' : (allFields.carModelYear || currentUser.car_model_year || '')
+                    car_model_year: carModelYearCheck.value
                     // balance, points, rating, status are NOT included - database values preserved
                 };
                 
@@ -1237,6 +1257,12 @@
                     }
                 });
 
+                const carModelYearCheck = normalizeCarModelYearInput(allFields.carModelYear);
+                if (!carModelYearCheck.ok) {
+                    alert(`❌ ${carModelYearCheck.error}`);
+                    return;
+                }
+
                 const normalizedPhone = normalizePhoneKey(allFields.phone || (currentUser ? currentUser.phone : ''));
                 
                 // IMPORTANT: DO NOT update balance, points, rating, or status from UI
@@ -1248,7 +1274,7 @@
                     car_type: allFields.carType || (currentUser ? currentUser.car_type : ''),
                     car_plate: allFields.plate || (currentUser ? currentUser.car_plate : ''),
                     car_color: allFields.carColor === 'غير محدد' ? '' : (allFields.carColor || (currentUser ? currentUser.car_color : '')),
-                    car_model_year: allFields.carModelYear === 'غير محدد' ? '' : (allFields.carModelYear || (currentUser ? currentUser.car_model_year : ''))
+                    car_model_year: carModelYearCheck.value
                     // balance, points, rating, status are NOT included - database values preserved
                 };
 
