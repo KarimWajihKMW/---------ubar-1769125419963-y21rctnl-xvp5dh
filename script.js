@@ -192,7 +192,13 @@ function updateRideExtraOptionsCollapseUI() {
     const btn = document.getElementById('extra-options-toggle-btn');
     if (!content || !icon || !btn) return;
 
-    content.classList.toggle('hidden', passengerExtraOptionsCollapsed);
+    content.classList.toggle('max-h-0', passengerExtraOptionsCollapsed);
+    content.classList.toggle('opacity-0', passengerExtraOptionsCollapsed);
+    content.classList.toggle('mt-0', passengerExtraOptionsCollapsed);
+    content.classList.toggle('pointer-events-none', passengerExtraOptionsCollapsed);
+    content.classList.toggle('max-h-[2200px]', !passengerExtraOptionsCollapsed);
+    content.classList.toggle('opacity-100', !passengerExtraOptionsCollapsed);
+    content.classList.toggle('mt-3', !passengerExtraOptionsCollapsed);
     icon.classList.toggle('rotate-180', !passengerExtraOptionsCollapsed);
     btn.setAttribute('aria-expanded', passengerExtraOptionsCollapsed ? 'false' : 'true');
 }
