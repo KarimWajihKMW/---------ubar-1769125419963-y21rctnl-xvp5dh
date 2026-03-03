@@ -181,6 +181,7 @@ function maybeAutoAcceptIncomingTrip(trip) {
 
 // --- Dark Mode ---
 const DARK_MODE_KEY = 'akwadra_dark_mode';
+const PICKUP_HUBS_COLLAPSE_KEY = 'akwadra_pickup_hubs_collapsed';
 
 function updateDarkModeToggleUI() {
     const isDark = document.body.classList.contains('dark-mode');
@@ -226,6 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    pickupHubSuggestionsCollapsed = SafeStorage.getItem(PICKUP_HUBS_COLLAPSE_KEY) === '1';
     updatePickupHubSuggestionsCollapseUI();
 });
 
@@ -2741,6 +2743,7 @@ function updatePickupHubSuggestionsCollapseUI() {
 
 function togglePickupHubSuggestions() {
     pickupHubSuggestionsCollapsed = !pickupHubSuggestionsCollapsed;
+    SafeStorage.setItem(PICKUP_HUBS_COLLAPSE_KEY, pickupHubSuggestionsCollapsed ? '1' : '0');
     updatePickupHubSuggestionsCollapseUI();
 }
 
