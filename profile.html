@@ -220,6 +220,18 @@
                 <div class="font-bold text-gray-800 info-value text-base" data-field="plate">أ ب ج 1234</div>
                 <div class="text-gray-500 text-sm">لوحة السيارة</div>
             </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">🎨</div>
+                <div class="font-bold text-gray-800 info-value text-base" data-field="carColor">غير محدد</div>
+                <div class="text-gray-500 text-sm">لون السيارة</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors">
+                <div class="text-3xl mb-3">📅</div>
+                <div class="font-bold text-gray-800 info-value text-base" data-field="carModelYear">غير محدد</div>
+                <div class="text-gray-500 text-sm">سنة الموديل</div>
+            </div>
             
             <!-- Actions -->
              <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 text-center hover:bg-gray-50 transition-colors cursor-pointer" id="editBtnCard" tabindex="0" role="button">
@@ -569,6 +581,8 @@
                 const emailField = document.querySelector('[data-field="email"]');
                 const carTypeField = document.querySelector('[data-field="carType"]');
                 const plateField = document.querySelector('[data-field="plate"]');
+                const carColorField = document.querySelector('[data-field="carColor"]');
+                const carModelYearField = document.querySelector('[data-field="carModelYear"]');
                 const balanceField = document.querySelector('[data-field="balance"]');
                 const pointsField = document.querySelector('[data-field="points"]');
                 const ratingField = document.querySelector('[data-field="rating"]');
@@ -587,6 +601,12 @@
                 }
                 if (plateField && currentUser.car_plate) {
                     plateField.textContent = currentUser.car_plate;
+                }
+                if (carColorField) {
+                    carColorField.textContent = currentUser.car_color || 'غير محدد';
+                }
+                if (carModelYearField) {
+                    carModelYearField.textContent = currentUser.car_model_year ? String(currentUser.car_model_year) : 'غير محدد';
                 }
                 if (balanceField) {
                     const balanceValue = parseFloat(currentUser.balance || 0).toFixed(2);
@@ -1077,7 +1097,9 @@
                     phone: normalizedPhone,
                     email: allFields.email || currentUser.email || '',
                     car_type: allFields.carType || currentUser.car_type || '',
-                    car_plate: allFields.plate || currentUser.car_plate || ''
+                    car_plate: allFields.plate || currentUser.car_plate || '',
+                    car_color: allFields.carColor === 'غير محدد' ? '' : (allFields.carColor || currentUser.car_color || ''),
+                    car_model_year: allFields.carModelYear === 'غير محدد' ? '' : (allFields.carModelYear || currentUser.car_model_year || '')
                     // balance, points, rating, status are NOT included - database values preserved
                 };
                 
@@ -1128,6 +1150,8 @@
                         email: currentUser.email,
                         car_type: currentUser.car_type,
                         car_plate: currentUser.car_plate,
+                        car_color: currentUser.car_color,
+                        car_model_year: currentUser.car_model_year,
                         balance: currentUser.balance,
                         points: currentUser.points,
                         rating: currentUser.rating,
@@ -1222,7 +1246,9 @@
                     phone: normalizedPhone,
                     email: allFields.email || (currentUser ? currentUser.email : ''),
                     car_type: allFields.carType || (currentUser ? currentUser.car_type : ''),
-                    car_plate: allFields.plate || (currentUser ? currentUser.car_plate : '')
+                    car_plate: allFields.plate || (currentUser ? currentUser.car_plate : ''),
+                    car_color: allFields.carColor === 'غير محدد' ? '' : (allFields.carColor || (currentUser ? currentUser.car_color : '')),
+                    car_model_year: allFields.carModelYear === 'غير محدد' ? '' : (allFields.carModelYear || (currentUser ? currentUser.car_model_year : ''))
                     // balance, points, rating, status are NOT included - database values preserved
                 };
 
@@ -1275,6 +1301,8 @@
                         email: currentUser.email,
                         car_type: currentUser.car_type,
                         car_plate: currentUser.car_plate,
+                        car_color: currentUser.car_color,
+                        car_model_year: currentUser.car_model_year,
                         balance: currentUser.balance,
                         points: currentUser.points,
                         rating: currentUser.rating,
@@ -1322,6 +1350,8 @@
                         email: updateData.email,
                         car_type: updateData.car_type,
                         car_plate: updateData.car_plate,
+                        car_color: updateData.car_color,
+                        car_model_year: updateData.car_model_year,
                         balance: updateData.balance,
                         points: updateData.points,
                         rating: updateData.rating,

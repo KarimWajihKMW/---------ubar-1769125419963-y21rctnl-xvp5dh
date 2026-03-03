@@ -1271,6 +1271,7 @@ async function ensureCoreSchema() {
                 password VARCHAR(255),
                 car_type VARCHAR(50) DEFAULT 'economy',
                 car_color VARCHAR(50),
+                car_model_year INTEGER,
                 car_plate VARCHAR(20),
                 approval_status VARCHAR(20) DEFAULT 'pending',
                 approved_by INTEGER,
@@ -5998,6 +5999,7 @@ async function ensureDriverLocationColumns() {
 async function ensureDriverVehicleColumns() {
     try {
         await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_color VARCHAR(50);`);
+        await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_model_year INTEGER;`);
         console.log('✅ Driver vehicle columns ensured');
     } catch (err) {
         console.error('❌ Failed to ensure driver vehicle columns:', err.message);
@@ -15180,7 +15182,7 @@ app.get('/api/drivers/resolve', requireRole('driver', 'admin'), async (req, res)
 
         const params = [];
         const conditions = [];
-        let query = 'SELECT id, name, phone, email, car_type, car_color, status, approval_status, rating, total_trips FROM drivers';
+        let query = 'SELECT id, name, phone, email, car_type, car_color, car_model_year, status, approval_status, rating, total_trips FROM drivers';
 
         if (email) {
             params.push(String(email).trim().toLowerCase());
@@ -15216,9 +15218,9 @@ app.get('/api/drivers/resolve', requireRole('driver', 'admin'), async (req, res)
             const fallbackEmail = userLookup.rows[0]?.email || (email ? String(email).trim().toLowerCase() : `driver_${Date.now()}@ubar.sa`);
 
             const insert = await pool.query(
-                `INSERT INTO drivers (name, phone, email, car_type, car_color, status, approval_status, rating, total_trips)
-                 VALUES ($1, $2, $3, 'economy', NULL, 'online', 'approved', 5.0, 0)
-                 RETURNING id, name, phone, email, car_type, car_color, status, approval_status, rating, total_trips`,
+                `INSERT INTO drivers (name, phone, email, car_type, car_color, car_model_year, status, approval_status, rating, total_trips)
+                 VALUES ($1, $2, $3, 'economy', NULL, NULL, 'online', 'approved', 5.0, 0)
+                 RETURNING id, name, phone, email, car_type, car_color, car_model_year, status, approval_status, rating, total_trips`,
                 [fallbackName, fallbackPhone, fallbackEmail]
             );
 
@@ -15239,7 +15241,7 @@ app.post('/api/drivers/register', upload.fields([
     { name: 'vehicle_license', maxCount: 1 }
 ]), async (req, res) => {
     try {
-        const { name, phone, email, password, car_type, car_color, car_plate } = req.body;
+        const { name, phone, email, password, car_type, car_color, car_model_year, car_plate } = req.body;
         
         // Validate required fields
         if (!name || !phone || !email || !password) {
@@ -15276,18 +15278,22 @@ app.post('/api/drivers/register', upload.fields([
         const vehicle_license = `/uploads/${req.files.vehicle_license[0].filename}`;
 
         const hashedPassword = await hashPassword(password);
+        const carModelYearNum = car_model_year !== undefined && car_model_year !== null && String(car_model_year).trim() !== ''
+            ? Number.parseInt(String(car_model_year).trim(), 10)
+            : null;
+        const normalizedCarModelYear = Number.isFinite(carModelYearNum) ? carModelYearNum : null;
         
         // Insert new driver
         const result = await pool.query(`
             INSERT INTO drivers (
-                name, phone, email, password, car_type, car_color, car_plate,
+                name, phone, email, password, car_type, car_color, car_model_year, car_plate,
                 id_card_photo, drivers_license, vehicle_license,
                 approval_status, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 'offline')
-            RETURNING id, name, phone, email, car_type, car_color, car_plate, 
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', 'offline')
+            RETURNING id, name, phone, email, car_type, car_color, car_model_year, car_plate, 
                       id_card_photo, drivers_license, vehicle_license,
                       approval_status, created_at
-        `, [name, phone, email, hashedPassword, car_type || 'economy', car_color ? String(car_color).trim() : null, car_plate || '',
+        `, [name, phone, email, hashedPassword, car_type || 'economy', car_color ? String(car_color).trim() : null, normalizedCarModelYear, car_plate || '',
             id_card_photo, drivers_license, vehicle_license]);
         
         res.status(201).json({
@@ -15307,7 +15313,7 @@ app.get('/api/drivers/status/:phone', async (req, res) => {
         const { phone } = req.params;
         
         const result = await pool.query(
-            `SELECT id, name, phone, email, car_type, car_color, car_plate, 
+            `SELECT id, name, phone, email, car_type, car_color, car_model_year, car_plate, 
                     approval_status, rejection_reason, created_at, approved_at
              FROM drivers WHERE phone = $1`,
             [phone]
@@ -15810,6 +15816,24 @@ app.get('/api/users/:id', requireAuth, async (req, res) => {
         // If user is a driver, also fetch driver earnings data
         if (userData.role === 'driver' && userData.driver_id) {
             try {
+                const driverProfile = await pool.query(
+                    `SELECT car_type, car_plate, car_color, car_model_year
+                     FROM drivers
+                     WHERE id = $1
+                     LIMIT 1`,
+                    [userData.driver_id]
+                );
+                const driverRow = driverProfile.rows[0] || null;
+                if (driverRow) {
+                    userData = {
+                        ...userData,
+                        car_type: driverRow.car_type || userData.car_type || null,
+                        car_plate: driverRow.car_plate || userData.car_plate || null,
+                        car_color: driverRow.car_color || null,
+                        car_model_year: driverRow.car_model_year || null
+                    };
+                }
+
                 // Fetch the most recent earnings record (for cumulative totals)
                 const latestEarningsResult = await pool.query(
                     `SELECT today_trips, today_earnings, total_trips, total_earnings, date 
@@ -15868,7 +15892,7 @@ app.get('/api/users/:id', requireAuth, async (req, res) => {
 app.put('/api/users/:id', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
-        const { phone, name, email, password, car_type, car_plate, balance, points, rating, status, avatar } = req.body;
+        const { phone, name, email, password, car_type, car_plate, car_color, car_model_year, balance, points, rating, status, avatar } = req.body;
 
         const authRole = String(req.auth?.role || '').toLowerCase();
         const authUserId = req.auth?.uid;
@@ -15878,7 +15902,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
 
         // Check if user exists
         const existing = await pool.query(
-            'SELECT id FROM users WHERE id = $1',
+            'SELECT id, role, driver_id FROM users WHERE id = $1',
             [id]
         );
 
@@ -15889,9 +15913,48 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
             });
         }
 
+        const existingUser = existing.rows[0];
         const updates = [];
         const params = [];
         let paramCount = 0;
+        const isDriverUser = String(existingUser.role || '').toLowerCase() === 'driver' && !!existingUser.driver_id;
+
+        const driverUpdates = [];
+        const driverParams = [];
+        let driverParamCount = 0;
+
+        if (isDriverUser) {
+            if (car_type !== undefined) {
+                const normalized = String(car_type || '').trim();
+                if (normalized) {
+                    driverParamCount++;
+                    driverUpdates.push(`car_type = $${driverParamCount}`);
+                    driverParams.push(normalized);
+                }
+            }
+
+            if (car_plate !== undefined) {
+                const normalized = String(car_plate || '').trim();
+                driverParamCount++;
+                driverUpdates.push(`car_plate = $${driverParamCount}`);
+                driverParams.push(normalized || null);
+            }
+
+            if (car_color !== undefined) {
+                const normalized = String(car_color || '').trim();
+                driverParamCount++;
+                driverUpdates.push(`car_color = $${driverParamCount}`);
+                driverParams.push(normalized || null);
+            }
+
+            if (car_model_year !== undefined) {
+                const yearRaw = String(car_model_year || '').trim();
+                const parsedYear = yearRaw ? Number.parseInt(yearRaw, 10) : null;
+                driverParamCount++;
+                driverUpdates.push(`car_model_year = $${driverParamCount}`);
+                driverParams.push(Number.isFinite(parsedYear) ? parsedYear : null);
+            }
+        }
 
         if (phone !== undefined && String(phone).trim()) {
             const normalizedPhone = normalizePhoneForStore(phone);
@@ -15961,24 +16024,63 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
             params.push(hashed);
         }
 
-        if (updates.length === 0) {
+        if (updates.length === 0 && driverUpdates.length === 0) {
             return res.status(400).json({
                 success: false,
                 error: 'No valid fields to update'
             });
         }
 
-        paramCount++;
-        updates.push(`updated_at = CURRENT_TIMESTAMP`);
-        params.push(id);
+        let responseRow = null;
+        if (updates.length > 0) {
+            paramCount++;
+            updates.push(`updated_at = CURRENT_TIMESTAMP`);
+            params.push(id);
 
-        const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at`;
+            const query = `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at`;
+            const result = await pool.query(query, params);
+            responseRow = result.rows[0];
+        } else {
+            const currentUserRes = await pool.query(
+                'SELECT id, phone, name, email, role, car_type, car_plate, balance, points, rating, status, avatar, created_at, updated_at FROM users WHERE id = $1 LIMIT 1',
+                [id]
+            );
+            responseRow = currentUserRes.rows[0] || null;
+        }
 
-        const result = await pool.query(query, params);
+        if (isDriverUser) {
+            if (driverUpdates.length > 0) {
+                driverParamCount++;
+                driverUpdates.push('updated_at = CURRENT_TIMESTAMP');
+                driverParams.push(existingUser.driver_id);
+                await pool.query(
+                    `UPDATE drivers SET ${driverUpdates.join(', ')} WHERE id = $${driverParamCount}`,
+                    driverParams
+                );
+            }
+
+            const driverProfile = await pool.query(
+                `SELECT car_type, car_plate, car_color, car_model_year
+                 FROM drivers
+                 WHERE id = $1
+                 LIMIT 1`,
+                [existingUser.driver_id]
+            );
+            const driverRow = driverProfile.rows[0] || null;
+            if (driverRow) {
+                responseRow = {
+                    ...responseRow,
+                    car_type: driverRow.car_type || responseRow.car_type || null,
+                    car_plate: driverRow.car_plate || responseRow.car_plate || null,
+                    car_color: driverRow.car_color || null,
+                    car_model_year: driverRow.car_model_year || null
+                };
+            }
+        }
 
         res.json({
             success: true,
-            data: result.rows[0]
+            data: responseRow
         });
     } catch (err) {
         console.error('Error updating user:', err);

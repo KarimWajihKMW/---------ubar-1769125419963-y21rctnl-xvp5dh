@@ -193,6 +193,26 @@ async function loadDriverVehicleInfo() {
 
     try {
         const me = await getAuthMe();
+        const authUserId = me?.auth?.uid;
+        if (authUserId) {
+            const { res: userRes, data: userData } = await apiJson(`/api/users/${encodeURIComponent(String(authUserId))}`);
+            if (userRes.ok && userData.success && userData.data) {
+                const row = userData.data;
+                const profileCarType = normalizeCarTypeLabel(row.car_type || localUser?.car_type || localUser?.carType || '');
+                const profileCarColor = String(row.car_color || localUser?.car_color || localUser?.carColor || '').trim();
+                const profileCarYear = String(
+                    row.car_model_year || row.model_year || row.year ||
+                    localUser?.car_model_year || localUser?.model_year || localUser?.carYear || ''
+                ).trim();
+                setDriverVehicleUi({
+                    carType: profileCarType,
+                    carColor: profileCarColor,
+                    carYear: profileCarYear
+                });
+                return;
+            }
+        }
+
         const email = String(me?.auth?.email || localUser?.email || '').trim();
         const phone = String(me?.auth?.phone || localUser?.phone || '').trim();
         if (!email && !phone) return;
