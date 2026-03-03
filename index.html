@@ -988,14 +988,19 @@
 
                     <!-- Smart Pickup Hubs Suggestions -->
                     <div id="pickup-hubs-suggestions" class="hidden bg-white border border-gray-100 rounded-2xl p-3 shadow-sm">
-                        <div class="flex items-center justify-between mb-2">
+                        <button type="button" id="pickup-hubs-toggle-btn" onclick="togglePickupHubSuggestions()" class="w-full flex items-center justify-between text-right">
                             <div class="text-xs font-extrabold text-gray-500">نقاط تجمع مقترحة قريبًا</div>
-                            <select id="pickup-hub-preference" class="text-[11px] font-bold border border-gray-200 rounded-xl px-2 py-1 bg-white text-gray-700">
-                                <option value="clear">أوضح نقطة</option>
-                                <option value="safe">أأمن نقطة</option>
-                            </select>
+                            <i id="pickup-hubs-toggle-icon" class="fas fa-chevron-up text-xs text-gray-500"></i>
+                        </button>
+                        <div id="pickup-hubs-content" class="mt-2">
+                            <div class="flex items-center justify-end mb-2">
+                                <select id="pickup-hub-preference" class="text-[11px] font-bold border border-gray-200 rounded-xl px-2 py-1 bg-white text-gray-700">
+                                    <option value="clear">أوضح نقطة</option>
+                                    <option value="safe">أأمن نقطة</option>
+                                </select>
+                            </div>
+                            <div id="pickup-hubs-list" class="space-y-2"></div>
                         </div>
-                        <div id="pickup-hubs-list" class="space-y-2"></div>
                     </div>
 
                     <div class="flex flex-wrap gap-2 sm:gap-3">

@@ -225,6 +225,8 @@ document.addEventListener('DOMContentLoaded', () => {
             try { refreshPickupHubSuggestions(); } catch (e) {}
         });
     }
+
+    updatePickupHubSuggestionsCollapseUI();
 });
 
 // --- Global State ---
@@ -266,6 +268,7 @@ let passengerTripStartedAt = null;
 let driverTripStartedAt = null;
 let lastDriverLocationUpdateAt = 0;
 let nearestDriverPreview = null;
+let pickupHubSuggestionsCollapsed = false;
 
 // Driving Coach (Driver, privacy-first)
 let drivingCoachRunning = false;
@@ -2724,6 +2727,25 @@ function clearSelectedPickupHub() {
     currentPickupHubId = null;
 }
 
+function updatePickupHubSuggestionsCollapseUI() {
+    const content = document.getElementById('pickup-hubs-content');
+    const icon = document.getElementById('pickup-hubs-toggle-icon');
+    const toggleBtn = document.getElementById('pickup-hubs-toggle-btn');
+    if (!content || !icon || !toggleBtn) return;
+
+    content.classList.toggle('hidden', pickupHubSuggestionsCollapsed);
+    icon.classList.toggle('fa-chevron-up', !pickupHubSuggestionsCollapsed);
+    icon.classList.toggle('fa-chevron-down', pickupHubSuggestionsCollapsed);
+    toggleBtn.setAttribute('aria-expanded', pickupHubSuggestionsCollapsed ? 'false' : 'true');
+}
+
+function togglePickupHubSuggestions() {
+    pickupHubSuggestionsCollapsed = !pickupHubSuggestionsCollapsed;
+    updatePickupHubSuggestionsCollapseUI();
+}
+
+window.togglePickupHubSuggestions = togglePickupHubSuggestions;
+
 function renderPickupHubSuggestions(hubs) {
     const box = document.getElementById('pickup-hubs-suggestions');
     const list = document.getElementById('pickup-hubs-list');
@@ -2750,6 +2772,7 @@ function renderPickupHubSuggestions(hubs) {
     }).join('');
 
     box.classList.remove('hidden');
+    updatePickupHubSuggestionsCollapseUI();
 
     list.querySelectorAll('button[data-hub-id]').forEach((btn) => {
         btn.addEventListener('click', () => {
