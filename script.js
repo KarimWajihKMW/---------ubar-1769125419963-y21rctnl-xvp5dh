@@ -5685,12 +5685,7 @@ function startTripToDestination() {
 
 // End trip manually
 window.endTripEarly = function() {
-    showToast('✅ تم إنهاء الرحلة');
-    updatePaymentSummary();
-    setTimeout(() => {
-        window.switchSection('payment-method');
-        showToast('💳 اختر طريقة الدفع');
-    }, 500);
+    showToast('إنهاء الرحلة يتم من جهة الكابتن بعد الوصول');
 };
 
 // Share ride details
