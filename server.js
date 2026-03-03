@@ -1269,6 +1269,7 @@ async function ensureCoreSchema() {
                 phone VARCHAR(20) UNIQUE NOT NULL,
                 email VARCHAR(100) UNIQUE,
                 password VARCHAR(255),
+                car_name VARCHAR(120),
                 car_type VARCHAR(50) DEFAULT 'economy',
                 car_color VARCHAR(50),
                 car_model_year INTEGER,
@@ -5998,6 +5999,7 @@ async function ensureDriverLocationColumns() {
 
 async function ensureDriverVehicleColumns() {
     try {
+        await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_name VARCHAR(120);`);
         await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_color VARCHAR(50);`);
         await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_model_year INTEGER;`);
         console.log('✅ Driver vehicle columns ensured');
@@ -15182,7 +15184,7 @@ app.get('/api/drivers/resolve', requireRole('driver', 'admin'), async (req, res)
 
         const params = [];
         const conditions = [];
-        let query = 'SELECT id, name, phone, email, car_type, car_color, car_model_year, status, approval_status, rating, total_trips FROM drivers';
+        let query = 'SELECT id, name, phone, email, car_name, car_type, car_color, car_model_year, status, approval_status, rating, total_trips FROM drivers';
 
         if (email) {
             params.push(String(email).trim().toLowerCase());
@@ -15218,9 +15220,9 @@ app.get('/api/drivers/resolve', requireRole('driver', 'admin'), async (req, res)
             const fallbackEmail = userLookup.rows[0]?.email || (email ? String(email).trim().toLowerCase() : `driver_${Date.now()}@ubar.sa`);
 
             const insert = await pool.query(
-                `INSERT INTO drivers (name, phone, email, car_type, car_color, car_model_year, status, approval_status, rating, total_trips)
-                 VALUES ($1, $2, $3, 'economy', NULL, NULL, 'online', 'approved', 5.0, 0)
-                 RETURNING id, name, phone, email, car_type, car_color, car_model_year, status, approval_status, rating, total_trips`,
+                `INSERT INTO drivers (name, phone, email, car_name, car_type, car_color, car_model_year, status, approval_status, rating, total_trips)
+                 VALUES ($1, $2, $3, NULL, 'economy', NULL, NULL, 'online', 'approved', 5.0, 0)
+                 RETURNING id, name, phone, email, car_name, car_type, car_color, car_model_year, status, approval_status, rating, total_trips`,
                 [fallbackName, fallbackPhone, fallbackEmail]
             );
 
@@ -15241,7 +15243,7 @@ app.post('/api/drivers/register', upload.fields([
     { name: 'vehicle_license', maxCount: 1 }
 ]), async (req, res) => {
     try {
-        const { name, phone, email, password, car_type, car_color, car_model_year, car_plate } = req.body;
+        const { name, phone, email, password, car_name, car_type, car_color, car_model_year, car_plate } = req.body;
         
         // Validate required fields
         if (!name || !phone || !email || !password) {
@@ -15292,14 +15294,14 @@ app.post('/api/drivers/register', upload.fields([
         // Insert new driver
         const result = await pool.query(`
             INSERT INTO drivers (
-                name, phone, email, password, car_type, car_color, car_model_year, car_plate,
+                name, phone, email, password, car_name, car_type, car_color, car_model_year, car_plate,
                 id_card_photo, drivers_license, vehicle_license,
                 approval_status, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', 'offline')
-            RETURNING id, name, phone, email, car_type, car_color, car_model_year, car_plate, 
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', 'offline')
+            RETURNING id, name, phone, email, car_name, car_type, car_color, car_model_year, car_plate, 
                       id_card_photo, drivers_license, vehicle_license,
                       approval_status, created_at
-        `, [name, phone, email, hashedPassword, car_type || 'economy', car_color ? String(car_color).trim() : null, normalizedCarModelYear, car_plate || '',
+        `, [name, phone, email, hashedPassword, car_name ? String(car_name).trim() : null, car_type || 'economy', car_color ? String(car_color).trim() : null, normalizedCarModelYear, car_plate || '',
             id_card_photo, drivers_license, vehicle_license]);
         
         res.status(201).json({
@@ -15319,7 +15321,7 @@ app.get('/api/drivers/status/:phone', async (req, res) => {
         const { phone } = req.params;
         
         const result = await pool.query(
-            `SELECT id, name, phone, email, car_type, car_color, car_model_year, car_plate, 
+            `SELECT id, name, phone, email, car_name, car_type, car_color, car_model_year, car_plate, 
                     approval_status, rejection_reason, created_at, approved_at
              FROM drivers WHERE phone = $1`,
             [phone]
@@ -15824,7 +15826,7 @@ app.get('/api/users/:id', requireAuth, async (req, res) => {
 
             const byId = userRow.driver_id
                 ? await pool.query(
-                    `SELECT id, car_type, car_plate, car_color, car_model_year
+                    `SELECT id, car_name, car_type, car_plate, car_color, car_model_year
                      FROM drivers
                      WHERE id = $1
                      LIMIT 1`,
@@ -15833,7 +15835,7 @@ app.get('/api/users/:id', requireAuth, async (req, res) => {
                 : { rows: [] };
 
             const byIdentity = await pool.query(
-                `SELECT id, car_type, car_plate, car_color, car_model_year
+                `SELECT id, car_name, car_type, car_plate, car_color, car_model_year
                  FROM drivers
                  WHERE (email IS NOT NULL AND LOWER(email) = LOWER($1))
                     OR (phone IS NOT NULL AND phone = $2)
@@ -15855,12 +15857,13 @@ app.get('/api/users/:id', requireAuth, async (req, res) => {
         }
 
         // If user is a driver, also fetch driver earnings data
-        if (userData.role === 'driver' && userData.driver_id) {
+        if (userData.role === 'driver') {
             try {
                 const driverRow = await resolveDriverRowForUser(userData);
                 if (driverRow) {
                     userData = {
                         ...userData,
+                        car_name: driverRow.car_name || null,
                         car_type: driverRow.car_type || userData.car_type || null,
                         car_plate: driverRow.car_plate || userData.car_plate || null,
                         car_color: driverRow.car_color || null,
@@ -15926,7 +15929,7 @@ app.get('/api/users/:id', requireAuth, async (req, res) => {
 app.put('/api/users/:id', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
-        const { phone, name, email, password, car_type, car_plate, car_color, car_model_year, balance, points, rating, status, avatar } = req.body;
+        const { phone, name, email, password, car_name, car_type, car_plate, car_color, car_model_year, balance, points, rating, status, avatar } = req.body;
 
         const authRole = String(req.auth?.role || '').toLowerCase();
         const authUserId = req.auth?.uid;
@@ -15981,6 +15984,13 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
         let driverParamCount = 0;
 
         if (isDriverUser) {
+            if (car_name !== undefined) {
+                const normalized = String(car_name || '').trim();
+                driverParamCount++;
+                driverUpdates.push(`car_name = $${driverParamCount}`);
+                driverParams.push(normalized || null);
+            }
+
             if (car_type !== undefined) {
                 const normalized = String(car_type || '').trim();
                 if (normalized) {
@@ -16123,7 +16133,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
             }
 
             const driverProfile = await pool.query(
-                `SELECT car_type, car_plate, car_color, car_model_year
+                `SELECT car_name, car_type, car_plate, car_color, car_model_year
                  FROM drivers
                  WHERE id = $1
                  LIMIT 1`,
@@ -16133,6 +16143,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
             if (driverRow) {
                 responseRow = {
                     ...responseRow,
+                    car_name: driverRow.car_name || null,
                     car_type: driverRow.car_type || responseRow.car_type || null,
                     car_plate: driverRow.car_plate || responseRow.car_plate || null,
                     car_color: driverRow.car_color || null,

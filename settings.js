@@ -148,10 +148,12 @@ function loadUser() {
     }
 }
 
-function setDriverVehicleUi({ carType, carColor, carYear }) {
+function setDriverVehicleUi({ carName, carType, carColor, carYear }) {
+    const nameEl = document.getElementById('settings-driver-car-name');
     const typeEl = document.getElementById('settings-driver-car-type');
     const colorEl = document.getElementById('settings-driver-car-color');
     const yearEl = document.getElementById('settings-driver-car-year');
+    if (nameEl) nameEl.textContent = carName || 'غير محدد';
     if (typeEl) typeEl.textContent = carType || 'غير محدد';
     if (colorEl) colorEl.textContent = carColor || 'غير محدد';
     if (yearEl) yearEl.textContent = carYear || 'غير محدد';
@@ -184,10 +186,12 @@ async function loadDriverVehicleInfo() {
     }
 
     const localCarType = normalizeCarTypeLabel(localUser?.car_type || localUser?.carType || '');
+    const localCarName = String(localUser?.car_name || localUser?.carName || '').trim();
     const localCarColor = String(localUser?.car_color || localUser?.carColor || '').trim();
     const localCarYear = String(localUser?.car_model_year || localUser?.model_year || localUser?.carYear || '').trim();
 
     setDriverVehicleUi({
+        carName: localCarName || '—',
         carType: localCarType || '—',
         carColor: localCarColor || '—',
         carYear: localCarYear || '—'
@@ -201,12 +205,14 @@ async function loadDriverVehicleInfo() {
             if (userRes.ok && userData.success && userData.data) {
                 const row = userData.data;
                 const profileCarType = normalizeCarTypeLabel(row.car_type || localUser?.car_type || localUser?.carType || '');
+                const profileCarName = String(row.car_name || localUser?.car_name || localUser?.carName || '').trim();
                 const profileCarColor = String(row.car_color || localUser?.car_color || localUser?.carColor || '').trim();
                 const profileCarYear = String(
                     row.car_model_year || row.model_year || row.year ||
                     localUser?.car_model_year || localUser?.model_year || localUser?.carYear || ''
                 ).trim();
                 setDriverVehicleUi({
+                    carName: profileCarName,
                     carType: profileCarType,
                     carColor: profileCarColor,
                     carYear: profileCarYear
@@ -229,13 +235,14 @@ async function loadDriverVehicleInfo() {
 
         const row = data.data;
         const carType = normalizeCarTypeLabel(row.car_type || localUser?.car_type || localUser?.carType || '');
+        const carName = String(row.car_name || localUser?.car_name || localUser?.carName || '').trim();
         const carColor = String(row.car_color || localUser?.car_color || localUser?.carColor || '').trim();
         const carYear = String(
             row.car_model_year || row.model_year || row.year ||
             localUser?.car_model_year || localUser?.model_year || localUser?.carYear || ''
         ).trim();
 
-        setDriverVehicleUi({ carType, carColor, carYear });
+        setDriverVehicleUi({ carName, carType, carColor, carYear });
     } catch (e) {
     }
 }
