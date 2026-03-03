@@ -2250,6 +2250,41 @@ function handleTripCompletedRealtime(payload) {
     // Driver
     if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
         stopDriverTripSocketLocationUpdates();
+
+        const paymentMethod = String(payload?.payment_method || '').toLowerCase();
+        const paymentLabel = paymentMethod === 'cash'
+            ? 'كاش'
+            : paymentMethod === 'card'
+                ? 'بطاقة'
+                : paymentMethod === 'wallet'
+                    ? 'محفظة'
+                    : 'طريقة الدفع المحددة';
+
+        showToast(`✅ الراكب أكد الدفع (${paymentLabel})`);
+
+        document.getElementById('driver-active-trip').classList.add('hidden');
+        document.getElementById('driver-status-waiting').classList.remove('hidden');
+        clearDriverPassengerRoute();
+        setDriverAwaitingPayment(false);
+        setDriverStartReady(false);
+        setDriverTripStarted(false);
+
+        const previousTripId = activeDriverTripId;
+        activeDriverTripId = null;
+        currentIncomingTrip = null;
+        if (previousTripId) {
+            unsubscribeTripRealtime(previousTripId);
+        }
+        triggerDriverRequestPolling();
+
+        ApiService.trips.getById(String(tripId)).then((response) => {
+            if (response?.data) {
+                lastCompletedTrip = buildDriverSummaryTrip(response.data);
+                openDriverTripSummary(response.data);
+            }
+        }).catch((error) => {
+            console.error('Failed to load trip summary after payment:', error);
+        });
     }
 }
 
@@ -2259,14 +2294,6 @@ function handleTripRatedRealtime(tripId) {
 
     // Driver gets notified rating submitted
     showToast('⭐ تم تقييم الرحلة');
-
-    try {
-        if (typeof window.closeDriverTripSummary === 'function') {
-            window.closeDriverTripSummary();
-        }
-    } catch (e) {
-        // ignore
-    }
 }
 
 function isMapWorldActive() {
@@ -11285,7 +11312,11 @@ window.proceedToPayment = function() {
     const amount = (tripDetails.basePrice || 25) - promoDiscount;
     
     // Simulate payment processing
-    const btn = event.target;
+    const btn = document.querySelector('#state-payment-invoice button[onclick="proceedToPayment()"]');
+    if (!btn) {
+        showToast('تعذر بدء عملية الدفع الآن');
+        return;
+    }
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جاري معالجة الدفع...';
     
@@ -11376,9 +11407,6 @@ window.proceedToPayment = function() {
         updatePaymentSuccessTripSummary(lastCompletedTrip);
 
         window.switchSection('payment-success');
-        if (typeof window.driverEndTrip === 'function') {
-            window.driverEndTrip();
-        }
 
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';

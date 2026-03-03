@@ -13377,8 +13377,21 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
             if (String(beforeTripRow.user_id) !== String(authUserId)) {
                 return res.status(403).json({ success: false, error: 'Forbidden' });
             }
-            if (status !== 'cancelled') {
-                return res.status(403).json({ success: false, error: 'Passengers can only cancel their trips' });
+
+            const passengerAllowed = new Set(['cancelled', 'completed']);
+            const normalizedStatus = String(status || '').toLowerCase();
+            if (!passengerAllowed.has(normalizedStatus)) {
+                return res.status(403).json({ success: false, error: 'Passengers can only cancel or complete their trips' });
+            }
+
+            if (normalizedStatus === 'completed') {
+                const beforeStatusNormalized = String(beforeTripRow.status || '').toLowerCase();
+                const beforeTripStatusNormalized = String(beforeTripRow.trip_status || '').toLowerCase();
+                const canCompleteFromStatus = beforeStatusNormalized === 'ongoing' || beforeStatusNormalized === 'completed';
+                const canCompleteFromTripStatus = beforeTripStatusNormalized === 'started' || beforeTripStatusNormalized === 'completed' || beforeTripStatusNormalized === 'rated';
+                if (!canCompleteFromStatus && !canCompleteFromTripStatus) {
+                    return res.status(409).json({ success: false, error: 'Trip is not ready for passenger payment completion' });
+                }
             }
         }
 
@@ -13643,7 +13656,9 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
                     trip_status: 'completed',
                     duration: updatedTrip.duration !== undefined && updatedTrip.duration !== null ? Number(updatedTrip.duration) : null,
                     distance: updatedTrip.distance !== undefined && updatedTrip.distance !== null ? Number(updatedTrip.distance) : null,
-                    price: updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null
+                    price: updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null,
+                    payment_method: updatedTrip.payment_method || null,
+                    paid: true
                 });
             }
 
@@ -14291,7 +14306,9 @@ async function endTripHandler(req, res) {
                     trip_status: 'completed',
                     duration: updatedTrip.duration_minutes !== undefined && updatedTrip.duration_minutes !== null ? Number(updatedTrip.duration_minutes) : (updatedTrip.duration !== undefined && updatedTrip.duration !== null ? Number(updatedTrip.duration) : null),
                     distance: updatedTrip.distance_km !== undefined && updatedTrip.distance_km !== null ? Number(updatedTrip.distance_km) : (updatedTrip.distance !== undefined && updatedTrip.distance !== null ? Number(updatedTrip.distance) : null),
-                    price: updatedTrip.price !== undefined && updatedTrip.price !== null ? Number(updatedTrip.price) : (updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null)
+                    price: updatedTrip.price !== undefined && updatedTrip.price !== null ? Number(updatedTrip.price) : (updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null),
+                    payment_method: updatedTrip.payment_method || null,
+                    paid: true
                 });
             }
         } catch (e) {
