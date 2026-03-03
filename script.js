@@ -182,6 +182,8 @@ function maybeAutoAcceptIncomingTrip(trip) {
 // --- Dark Mode ---
 const DARK_MODE_KEY = 'akwadra_dark_mode';
 const PICKUP_HUBS_COLLAPSE_KEY = 'akwadra_pickup_hubs_collapsed';
+const PASSENGER_DRIVER_DETAILS_COLLAPSE_KEY = 'akwadra_passenger_driver_details_collapsed';
+const DRIVER_TRIP_DETAILS_COLLAPSE_KEY = 'akwadra_driver_trip_details_collapsed';
 
 function updateDarkModeToggleUI() {
     const isDark = document.body.classList.contains('dark-mode');
@@ -228,7 +230,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     pickupHubSuggestionsCollapsed = SafeStorage.getItem(PICKUP_HUBS_COLLAPSE_KEY) === '1';
+    passengerDriverDetailsCollapsed = SafeStorage.getItem(PASSENGER_DRIVER_DETAILS_COLLAPSE_KEY) === '1';
+    driverTripDetailsCollapsed = SafeStorage.getItem(DRIVER_TRIP_DETAILS_COLLAPSE_KEY) === '1';
     updatePickupHubSuggestionsCollapseUI();
+    updatePassengerDriverDetailsCollapseUI();
+    updateDriverTripDetailsCollapseUI();
 });
 
 // --- Global State ---
@@ -271,6 +277,8 @@ let driverTripStartedAt = null;
 let lastDriverLocationUpdateAt = 0;
 let nearestDriverPreview = null;
 let pickupHubSuggestionsCollapsed = false;
+let passengerDriverDetailsCollapsed = false;
+let driverTripDetailsCollapsed = false;
 
 // Driving Coach (Driver, privacy-first)
 let drivingCoachRunning = false;
@@ -2748,6 +2756,55 @@ function togglePickupHubSuggestions() {
 }
 
 window.togglePickupHubSuggestions = togglePickupHubSuggestions;
+
+function updatePassengerDriverDetailsCollapseUI() {
+    const content = document.getElementById('passenger-driver-details-content');
+    const icon = document.getElementById('passenger-driver-details-toggle-icon');
+    const toggleBtn = document.getElementById('passenger-driver-details-toggle-btn');
+    if (!content || !icon || !toggleBtn) return;
+
+    content.classList.toggle('hidden', passengerDriverDetailsCollapsed);
+    icon.classList.toggle('fa-chevron-up', !passengerDriverDetailsCollapsed);
+    icon.classList.toggle('fa-chevron-down', passengerDriverDetailsCollapsed);
+    toggleBtn.setAttribute('aria-expanded', passengerDriverDetailsCollapsed ? 'false' : 'true');
+}
+
+function togglePassengerDriverDetails() {
+    passengerDriverDetailsCollapsed = !passengerDriverDetailsCollapsed;
+    SafeStorage.setItem(PASSENGER_DRIVER_DETAILS_COLLAPSE_KEY, passengerDriverDetailsCollapsed ? '1' : '0');
+    updatePassengerDriverDetailsCollapseUI();
+}
+
+window.togglePassengerDriverDetails = togglePassengerDriverDetails;
+
+function updateDriverTripDetailsCollapseUI() {
+    const content = document.getElementById('driver-trip-details-content');
+    const icon = document.getElementById('driver-trip-details-toggle-icon');
+    const toggleBtn = document.getElementById('driver-trip-details-toggle-btn');
+    if (!content || !icon || !toggleBtn) return;
+
+    content.classList.toggle('hidden', driverTripDetailsCollapsed);
+    icon.classList.toggle('fa-chevron-up', !driverTripDetailsCollapsed);
+    icon.classList.toggle('fa-chevron-down', driverTripDetailsCollapsed);
+    toggleBtn.setAttribute('aria-expanded', driverTripDetailsCollapsed ? 'false' : 'true');
+}
+
+function toggleDriverTripDetails() {
+    driverTripDetailsCollapsed = !driverTripDetailsCollapsed;
+    SafeStorage.setItem(DRIVER_TRIP_DETAILS_COLLAPSE_KEY, driverTripDetailsCollapsed ? '1' : '0');
+    updateDriverTripDetailsCollapseUI();
+}
+
+window.toggleDriverTripDetails = toggleDriverTripDetails;
+
+window.passengerStartTripShortcut = function() {
+    const meetCodeCard = document.getElementById('passenger-meet-code-card');
+    if (meetCodeCard && !meetCodeCard.classList.contains('hidden') && typeof window.passengerVerifyMeetCode === 'function') {
+        window.passengerVerifyMeetCode();
+        return;
+    }
+    showToast('بانتظار الكابتن يبدأ الرحلة بعد تأكيد الاستلام');
+};
 
 function renderPickupHubSuggestions(hubs) {
     const box = document.getElementById('pickup-hubs-suggestions');

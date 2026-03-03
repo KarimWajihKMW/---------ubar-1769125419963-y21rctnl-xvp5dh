@@ -1330,6 +1330,17 @@
                 
                 <!-- Info Section - Bottom Half -->
                 <div id="driver-info-section" class="flex-1 p-4 sm:p-6 overflow-y-auto bg-white">
+                    <button id="passenger-start-trip-btn" type="button" onclick="passengerStartTripShortcut()" class="w-full mb-3 bg-emerald-600 text-white py-3.5 rounded-xl font-extrabold shadow-lg hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2">
+                        <i class="fas fa-play"></i>
+                        بدء الرحلة
+                    </button>
+
+                    <button id="passenger-driver-details-toggle-btn" type="button" onclick="togglePassengerDriverDetails()" class="w-full flex items-center justify-between text-right bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+                        <span class="text-sm font-extrabold text-gray-700">تفاصيل الرحلة</span>
+                        <i id="passenger-driver-details-toggle-icon" class="fas fa-chevron-up text-xs text-gray-500"></i>
+                    </button>
+
+                    <div id="passenger-driver-details-content" class="mt-4">
                     <!-- Driver Info Card -->
                     <div class="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-200">
                         <div class="flex items-center">
@@ -1543,6 +1554,7 @@
                             <span class="text-gray-500">التكلفة المتوقعة:</span>
                             <span class="font-bold text-green-600 text-lg" id="trip-price-display">-- ر.س</span>
                         </div>
+                    </div>
                     </div>
                 </div>
             </div>
@@ -2531,6 +2543,15 @@
 
             <!-- Driver Status: Active Trip -->
             <div id="driver-active-trip" class="hidden p-6 bg-white">
+                 <button id="driver-start-btn" onclick="driverStartTrip()" class="hidden w-full mb-3 bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-emerald-700">بدء الرحلة</button>
+                 <button id="driver-end-btn" onclick="driverEndTrip()" class="w-full mb-3 bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700" disabled>إنهاء الرحلة</button>
+
+                 <button id="driver-trip-details-toggle-btn" type="button" onclick="toggleDriverTripDetails()" class="w-full flex items-center justify-between text-right bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+                     <span class="text-sm font-extrabold text-gray-700">تفاصيل الرحلة</span>
+                     <i id="driver-trip-details-toggle-icon" class="fas fa-chevron-up text-xs text-gray-500"></i>
+                 </button>
+
+                 <div id="driver-trip-details-content" class="mt-4">
                  <div class="flex items-center justify-between mb-4">
                      <h3 class="text-xl font-bold">رحلة جارية</h3>
                      <span id="driver-active-status" class="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">في انتظار بدء الرحلة</span>
@@ -2799,9 +2820,7 @@
                      </button>
                      <p class="text-[11px] text-gray-500 mt-2">التسجيل الصوتي اختياري ومشفّر، ولا يفتح إلا للإدارة عند الحاجة.</p>
                  </div>
-
-                 <button id="driver-end-btn" onclick="driverEndTrip()" class="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-indigo-700" disabled>إنهاء الرحلة</button>
-                 <button id="driver-start-btn" onclick="driverStartTrip()" class="hidden w-full mt-3 bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-emerald-700">بدء الرحلة</button>
+                 </div>
             </div>
         </div>
     </div>
