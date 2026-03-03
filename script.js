@@ -184,6 +184,25 @@ const DARK_MODE_KEY = 'akwadra_dark_mode';
 const PICKUP_HUBS_COLLAPSE_KEY = 'akwadra_pickup_hubs_collapsed';
 const PASSENGER_DRIVER_DETAILS_COLLAPSE_KEY = 'akwadra_passenger_driver_details_collapsed';
 const DRIVER_TRIP_DETAILS_COLLAPSE_KEY = 'akwadra_driver_trip_details_collapsed';
+const PASSENGER_EXTRA_OPTIONS_COLLAPSE_KEY = 'akwadra_passenger_extra_options_collapsed';
+
+function updateRideExtraOptionsCollapseUI() {
+    const content = document.getElementById('extra-options-content');
+    const icon = document.getElementById('extra-options-toggle-icon');
+    const btn = document.getElementById('extra-options-toggle-btn');
+    if (!content || !icon || !btn) return;
+
+    content.classList.toggle('hidden', passengerExtraOptionsCollapsed);
+    icon.classList.toggle('fa-chevron-up', !passengerExtraOptionsCollapsed);
+    icon.classList.toggle('fa-chevron-down', passengerExtraOptionsCollapsed);
+    btn.setAttribute('aria-expanded', passengerExtraOptionsCollapsed ? 'false' : 'true');
+}
+
+window.toggleRideExtraOptions = function() {
+    passengerExtraOptionsCollapsed = !passengerExtraOptionsCollapsed;
+    SafeStorage.setItem(PASSENGER_EXTRA_OPTIONS_COLLAPSE_KEY, passengerExtraOptionsCollapsed ? '1' : '0');
+    updateRideExtraOptionsCollapseUI();
+};
 
 function updateDarkModeToggleUI() {
     const isDark = document.body.classList.contains('dark-mode');
@@ -232,9 +251,11 @@ document.addEventListener('DOMContentLoaded', () => {
     pickupHubSuggestionsCollapsed = SafeStorage.getItem(PICKUP_HUBS_COLLAPSE_KEY) === '1';
     passengerDriverDetailsCollapsed = SafeStorage.getItem(PASSENGER_DRIVER_DETAILS_COLLAPSE_KEY) === '1';
     driverTripDetailsCollapsed = SafeStorage.getItem(DRIVER_TRIP_DETAILS_COLLAPSE_KEY) === '1';
+    passengerExtraOptionsCollapsed = SafeStorage.getItem(PASSENGER_EXTRA_OPTIONS_COLLAPSE_KEY) === '1';
     updatePickupHubSuggestionsCollapseUI();
     updatePassengerDriverDetailsCollapseUI();
     updateDriverTripDetailsCollapseUI();
+    updateRideExtraOptionsCollapseUI();
 });
 
 // --- Global State ---
@@ -279,6 +300,7 @@ let nearestDriverPreview = null;
 let pickupHubSuggestionsCollapsed = false;
 let passengerDriverDetailsCollapsed = false;
 let driverTripDetailsCollapsed = false;
+let passengerExtraOptionsCollapsed = false;
 
 // Driving Coach (Driver, privacy-first)
 let drivingCoachRunning = false;

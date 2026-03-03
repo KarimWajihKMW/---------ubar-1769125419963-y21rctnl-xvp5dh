@@ -1182,7 +1182,12 @@
 
                 <!-- Extra Options: Price Lock / Family / Notes / Stops -->
                 <div class="mb-6 bg-gray-50 border border-gray-200 rounded-2xl p-4">
-                    <p class="text-sm font-extrabold text-gray-800 mb-3">خيارات إضافية</p>
+                    <button id="extra-options-toggle-btn" type="button" onclick="toggleRideExtraOptions()" class="w-full flex items-center justify-between text-right">
+                        <p class="text-sm font-extrabold text-gray-800">خيارات إضافية</p>
+                        <i id="extra-options-toggle-icon" class="fas fa-chevron-up text-gray-500"></i>
+                    </button>
+
+                    <div id="extra-options-content" class="mt-3">
 
                     <!-- Price Lock -->
                     <div class="bg-white border border-gray-200 rounded-2xl p-4 mb-4">
@@ -1265,6 +1270,7 @@
                             </div>
                             <p class="text-[11px] text-gray-500 mt-2">(MVP) أدخل `user_id` للمشاركين.</p>
                         </div>
+                    </div>
                     </div>
                 </div>
 
