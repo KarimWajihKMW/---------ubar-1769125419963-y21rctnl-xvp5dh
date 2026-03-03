@@ -193,8 +193,7 @@ function updateRideExtraOptionsCollapseUI() {
     if (!content || !icon || !btn) return;
 
     content.classList.toggle('hidden', passengerExtraOptionsCollapsed);
-    icon.classList.toggle('fa-chevron-up', !passengerExtraOptionsCollapsed);
-    icon.classList.toggle('fa-chevron-down', passengerExtraOptionsCollapsed);
+    icon.classList.toggle('rotate-180', !passengerExtraOptionsCollapsed);
     btn.setAttribute('aria-expanded', passengerExtraOptionsCollapsed ? 'false' : 'true');
 }
 
