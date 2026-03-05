@@ -6672,6 +6672,9 @@ async function findNearestAvailableDriver({ pickupLat, pickupLng, carType, rider
 app.get('/api/public-config', (req, res) => {
     const googleMapsApiKey = String(
         process.env.GOOGLE_MAPS_API_KEY ||
+        process.env.GOOGLE_MAPS_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.GMAPS_API_KEY ||
         process.env.GOOGLE_MAPS_BROWSER_KEY ||
         ''
     ).trim();

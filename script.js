@@ -2324,6 +2324,7 @@ function handleTripRatedRealtime(tripId) {
 }
 
 function isMapWorldActive() {
+    if (googleMapsReady) return false;
     const mapWorld = document.getElementById('map-world');
     return mapWorld && !mapWorld.classList.contains('hidden');
 }
@@ -2602,6 +2603,27 @@ let googleMapsBootstrapPromise = null;
 let googleDirectionsService = null;
 let googleGeocoderService = null;
 let googlePlacesAutocompleteService = null;
+let googleMapsReady = false;
+
+function setMapFallbackMode(enabled, reasonText = '') {
+    const world = document.getElementById('map-world');
+    const fallback = document.getElementById('map-fallback-message');
+    const mapEl = document.getElementById('leaflet-map');
+
+    if (enabled) {
+        if (world) world.classList.remove('hidden');
+        if (mapEl) mapEl.style.opacity = '0';
+        if (fallback) {
+            fallback.classList.remove('hidden');
+            if (reasonText) fallback.textContent = reasonText;
+        }
+        return;
+    }
+
+    if (world) world.classList.add('hidden');
+    if (mapEl) mapEl.style.opacity = '1';
+    if (fallback) fallback.classList.add('hidden');
+}
 
 async function loadGoogleMapsBootstrapConfig() {
     try {
@@ -4521,9 +4543,13 @@ async function initLeafletMap() {
         await ensureGoogleMapsLoaded();
         ensureLeafletCompatibilityLayer();
         ensureGoogleServices();
+        googleMapsReady = true;
+        setMapFallbackMode(false);
     } catch (e) {
         console.error('Failed to initialize Google Maps:', e);
-        showToast('❌ تعذر تحميل Google Maps');
+        googleMapsReady = false;
+        setMapFallbackMode(true, 'الخريطة غير متاحة الآن: أضف مفتاح Google Maps في إعدادات السيرفر.');
+        showToast('❌ تعذر تحميل Google Maps - تأكد من مفتاح GOOGLE_MAPS_API_KEY');
         return;
     }
 
