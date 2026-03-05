@@ -5093,7 +5093,7 @@ async function updateDriverLiveLocation(coords) {
     } catch (error) {
         console.error('Failed to update driver location:', error);
     }
-        setMapFallbackMode(true, 'الخريطة غير متاحة الآن: أضف مفتاح Google Maps في إعدادات السيرفر أو أدخله يدويًا.');
+}
 
 function maybeReverseGeocodePickup(coords) {
     const now = Date.now();
