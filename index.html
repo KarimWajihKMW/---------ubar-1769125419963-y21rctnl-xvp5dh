@@ -1036,9 +1036,11 @@
             </div>
 
             <!-- State 2: Select Car -->
-            <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-8 h-full overflow-y-auto no-scrollbar ride-select-sheet">
-                <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
-                <div class="text-center mb-6">
+            <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-8 ride-select-sheet">
+                <div class="pt-1 pb-2 cursor-grab active:cursor-grabbing select-none" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
+                    <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-4"></div>
+                </div>
+                <div class="text-center mb-6 cursor-grab active:cursor-grabbing select-none" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
                     <h3 class="text-2xl font-extrabold text-gray-800">اختر الرحلة</h3>
                     <div class="flex justify-center items-center mt-2 space-x-2 space-x-reverse">
                         <span id="ride-distance-badge" class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold">-- كم</span>
@@ -1049,7 +1051,7 @@
                     </div>
                 </div>
 
-                <button id="car-options-toggle" type="button" onclick="toggleCarOptions()" class="w-full mb-4 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors" aria-expanded="true">
+                <button id="car-options-toggle" type="button" onclick="toggleCarOptions()" onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()" class="w-full mb-4 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors" aria-expanded="true">
                     <i id="car-options-toggle-icon" class="fas fa-chevron-up"></i>
                     <span id="car-options-toggle-text">إخفاء أنواع السيارات</span>
                 </button>
