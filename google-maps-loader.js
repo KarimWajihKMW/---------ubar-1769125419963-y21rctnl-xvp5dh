@@ -1,4 +1,16 @@
 (function bootstrapGoogleMaps() {
+    function readBrowserGoogleMapsKey() {
+        try {
+            var qsKey = new URLSearchParams(window.location.search).get('gmap_key');
+            if (qsKey && String(qsKey).trim()) return String(qsKey).trim();
+        } catch (e) {}
+        try {
+            var stored = window.localStorage.getItem('akwadra_google_maps_key');
+            if (stored && String(stored).trim()) return String(stored).trim();
+        } catch (e) {}
+        return '';
+    }
+
     if (window.google && window.google.maps) {
         window.__googleMapsReadyPromise = Promise.resolve(window.google.maps);
         return;
@@ -19,6 +31,7 @@
         .then(function(payload) {
             var cfg = payload && (payload.data || payload);
             var key = cfg && cfg.googleMapsApiKey ? String(cfg.googleMapsApiKey).trim() : '';
+            if (!key) key = readBrowserGoogleMapsKey();
             if (!key) throw new Error('Missing GOOGLE_MAPS_API_KEY');
 
             return new Promise(function(resolve, reject) {

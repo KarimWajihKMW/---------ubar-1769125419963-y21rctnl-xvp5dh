@@ -2605,6 +2605,7 @@ let googleGeocoderService = null;
 let googlePlacesAutocompleteService = null;
 let googleMapsReady = false;
 let leafletRuntimePromise = null;
+const GOOGLE_MAPS_KEY_STORAGE_KEY = 'akwadra_google_maps_key';
 
 function setMapFallbackMode(enabled, reasonText = '') {
     const world = document.getElementById('map-world');
@@ -2625,6 +2626,46 @@ function setMapFallbackMode(enabled, reasonText = '') {
     if (mapEl) mapEl.style.opacity = '1';
     if (fallback) fallback.classList.add('hidden');
 }
+
+function readGoogleMapsKeyFromBrowser() {
+    try {
+        const qsKey = new URLSearchParams(window.location.search).get('gmap_key');
+        if (qsKey && String(qsKey).trim()) {
+            return String(qsKey).trim();
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    try {
+        const stored = window.localStorage.getItem(GOOGLE_MAPS_KEY_STORAGE_KEY);
+        if (stored && String(stored).trim()) {
+            return String(stored).trim();
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    return '';
+}
+
+window.setGoogleMapsKeyAndReload = function() {
+    const current = readGoogleMapsKeyFromBrowser();
+    const raw = window.prompt('ادخل Google Maps API Key (Browser key)', current || '');
+    if (raw === null) return;
+    const key = String(raw || '').trim();
+    if (!key) {
+        showToast('لم يتم إدخال مفتاح');
+        return;
+    }
+    try {
+        window.localStorage.setItem(GOOGLE_MAPS_KEY_STORAGE_KEY, key);
+        showToast('تم حفظ المفتاح وإعادة تحميل الصفحة');
+        setTimeout(() => window.location.reload(), 300);
+    } catch (e) {
+        showToast('تعذر حفظ المفتاح في المتصفح');
+    }
+};
 
 function loadScriptOnce(src) {
     return new Promise((resolve, reject) => {
@@ -2706,9 +2747,9 @@ async function ensureGoogleMapsLoaded() {
     googleMapsBootstrapPromise = new Promise(async (resolve, reject) => {
         try {
             const cfg = await loadGoogleMapsBootstrapConfig();
-            const key = String(cfg?.googleMapsApiKey || '').trim();
+            const key = String(cfg?.googleMapsApiKey || readGoogleMapsKeyFromBrowser() || '').trim();
             if (!key) {
-                reject(new Error('Google Maps API key is missing. Set GOOGLE_MAPS_API_KEY in server env.'));
+                reject(new Error('Google Maps API key is missing. Set GOOGLE_MAPS_API_KEY in server env or browser local key.'));
                 return;
             }
 
@@ -5027,7 +5068,7 @@ async function updateDriverLiveLocation(coords) {
     } catch (error) {
         console.error('Failed to update driver location:', error);
     }
-}
+        setMapFallbackMode(true, 'الخريطة غير متاحة الآن: أضف مفتاح Google Maps في إعدادات السيرفر أو أدخله يدويًا.');
 
 function maybeReverseGeocodePickup(coords) {
     const now = Date.now();
