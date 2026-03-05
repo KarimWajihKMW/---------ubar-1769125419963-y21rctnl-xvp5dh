@@ -6669,6 +6669,21 @@ async function findNearestAvailableDriver({ pickupLat, pickupLng, carType, rider
 }
 
 // Health check
+app.get('/api/public-config', (req, res) => {
+    const googleMapsApiKey = String(
+        process.env.GOOGLE_MAPS_API_KEY ||
+        process.env.GOOGLE_MAPS_BROWSER_KEY ||
+        ''
+    ).trim();
+
+    res.json({
+        success: true,
+        data: {
+            googleMapsApiKey
+        }
+    });
+});
+
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Server is running' });
 });

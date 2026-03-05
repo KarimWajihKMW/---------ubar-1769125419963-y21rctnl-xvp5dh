@@ -16,9 +16,8 @@
             };
         </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Leaflet Map (OSM) -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <!-- Google Maps bootstrap (key is fetched from /api/public-config) -->
+    <script src="google-maps-loader.js?v=20260305-1"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -652,73 +651,18 @@
 
     <!-- Map Container (Interactive) - Shared by User and Driver -->
     <div id="map-container" class="absolute inset-0 z-0 overflow-hidden grab-cursor bg-gray-100">
-        <!-- Leaflet Map Layer (Egypt) -->
+        <!-- Main Map Layer (Google Maps) -->
         <div id="leaflet-map" class="absolute inset-0"></div>
-        <!-- The Draggable World Layer -->
-        <div id="map-world" class="absolute top-0 left-0 w-[3000px] h-[3000px] origin-center map-pattern transition-transform duration-75 will-change-transform">
-            
-            <!-- SVG Layer for Routes -->
+        <!-- map-world is intentionally disabled in MVP to avoid conflicts with Google Maps -->
+        <div id="map-world" class="hidden" aria-hidden="true">
             <svg class="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
-                <!-- Dynamic Route Line -->
                 <path id="driver-route-line" d="" stroke="#6366f1" stroke-width="6" fill="none" stroke-linecap="round" class="route-line opacity-0 transition-opacity duration-300" />
             </svg>
-
-            <!-- Decorative City Elements -->
-            <!-- Parks -->
-            <div class="green-park w-64 h-64 top-[500px] left-[500px]"></div>
-            <div class="green-park w-96 h-48 top-[1200px] left-[1800px]"></div>
-            <div class="green-park w-32 h-32 top-[200px] left-[1500px]"></div>
-            
-            <!-- Water -->
-            <div class="water-body w-[800px] h-32 top-[1500px] left-[200px] rotate-3"></div>
-            <div class="water-body w-48 h-48 rounded-full top-[800px] left-[2200px]"></div>
-
-            <!-- Random Buildings/Blocks -->
-            <div class="city-block w-20 h-20 top-[400px] left-[800px]"></div>
-            <div class="city-block w-40 h-20 top-[600px] left-[900px]"></div>
-            <div class="city-block w-24 h-64 top-[1000px] left-[1200px]"></div>
-            <div class="city-block w-32 h-32 top-[1400px] left-[600px] rounded-full opacity-50"></div>
-            
-            <!-- Street Names (Simulated) -->
-            <div class="absolute top-[520px] left-[520px] text-green-800/60 text-xs font-bold bg-white/40 px-2 py-1 rounded backdrop-blur-sm">حديقة الملك فهد</div>
-            <div class="absolute top-[1520px] left-[300px] text-blue-800/60 text-xs font-bold bg-white/40 px-2 py-1 rounded backdrop-blur-sm">وادي حنيفة</div>
-
-            <!-- Dynamic Moving Cars in World Space -->
-            <div class="absolute transition-all duration-[5000ms] ease-linear z-10" id="car-1" style="top: 1000px; left: 1000px;">
-                 <i class="fas fa-car-side text-gray-700 text-lg transform scale-x-[-1]"></i>
-            </div>
-            <div class="absolute transition-all duration-[6000ms] ease-linear z-10" id="car-2" style="top: 1200px; left: 1400px;">
-                 <i class="fas fa-car-side text-gray-500 text-lg"></i>
-            </div>
-            <div class="absolute transition-all duration-[7000ms] ease-linear z-10" id="car-3" style="top: 800px; left: 600px;">
-                 <i class="fas fa-taxi text-yellow-500 text-lg transform scale-x-[-1]"></i>
-            </div>
-
-            <!-- ACTIVE DRIVER MARKER (Real-time tracking) -->
-            <div id="active-driver" class="absolute z-50 hidden transition-transform duration-100 ease-linear">
-                <div class="relative">
-                    <!-- Car Body -->
-                    <div class="w-12 h-20 bg-gray-900 rounded-lg shadow-2xl border-2 border-white flex flex-col items-center justify-center relative z-10">
-                        <div class="w-10 h-4 bg-gray-700 rounded-sm mt-1 mb-auto"></div> <!-- Windshield -->
-                        <div class="w-10 h-3 bg-red-500/80 rounded-sm mb-1 mt-auto"></div> <!-- Rear Lights -->
-                    </div>
-                    <!-- Glow/Headlights -->
-                    <div class="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-32 bg-yellow-300/20 blur-xl rounded-t-full pointer-events-none"></div>
-                    <!-- Label -->
-                    <div class="absolute -right-24 top-1/2 -translate-y-1/2 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-gray-200 flex items-center gap-2">
-                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" class="w-6 h-6 rounded-full bg-gray-100" alt="Driver">
-                        <span id="driver-label-text">أحمد قادم إليك</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Destination Marker (Placed on Click) -->
-            <div id="dest-marker" class="absolute hidden z-20">
-                <div class="relative w-8 h-8 pin-anim">
-                    <i class="fas fa-map-marker-alt text-5xl text-red-500 absolute bottom-0 left-1/2 transform -translate-x-1/2 drop-shadow-xl"></i>
-                    <div class="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1 w-3 h-1.5 bg-black/20 rounded-full blur-sm"></div>
-                </div>
-            </div>
+            <div id="car-1" class="hidden"></div>
+            <div id="car-2" class="hidden"></div>
+            <div id="car-3" class="hidden"></div>
+            <div id="active-driver" class="hidden"></div>
+            <div id="dest-marker" class="hidden"></div>
         </div>
 
         <!-- User Pickup Marker (Fixed Center Screen) - ONLY FOR PASSENGER MODE -->

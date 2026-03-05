@@ -2593,12 +2593,363 @@ let pickupSuggestAbortController = null;
 let pickupSuggestRequestSeq = 0;
 let pickupSuggestItems = [];
 let pickupSuggestActiveIndex = -1;
-const ROAD_ROUTE_API_BASE = 'https://router.project-osrm.org/route/v1/driving';
 const ROAD_ROUTE_MIN_FETCH_INTERVAL_MS = 2200;
 const ROAD_ROUTE_CACHE_LIMIT = 120;
 let routeFetchSeq = 0;
 let routeLastFetchAt = 0;
 const roadRouteCache = new Map();
+let googleMapsBootstrapPromise = null;
+let googleDirectionsService = null;
+let googleGeocoderService = null;
+let googlePlacesAutocompleteService = null;
+
+async function loadGoogleMapsBootstrapConfig() {
+    try {
+        const response = await fetch('/api/public-config', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        return payload?.data || payload || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function ensureGoogleMapsLoaded() {
+    if (window.google && window.google.maps) {
+        return window.google.maps;
+    }
+
+    if (!googleMapsBootstrapPromise && window.__googleMapsReadyPromise) {
+        googleMapsBootstrapPromise = window.__googleMapsReadyPromise;
+    }
+
+    if (googleMapsBootstrapPromise) {
+        return googleMapsBootstrapPromise;
+    }
+
+    googleMapsBootstrapPromise = new Promise(async (resolve, reject) => {
+        try {
+            const cfg = await loadGoogleMapsBootstrapConfig();
+            const key = String(cfg?.googleMapsApiKey || '').trim();
+            if (!key) {
+                reject(new Error('Google Maps API key is missing. Set GOOGLE_MAPS_API_KEY in server env.'));
+                return;
+            }
+
+            const callbackName = `__akwadraGoogleMapsInit_${Date.now()}`;
+            window[callbackName] = () => {
+                try { delete window[callbackName]; } catch (e) {}
+                resolve(window.google.maps);
+            };
+
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places&language=ar&region=EG&callback=${encodeURIComponent(callbackName)}`;
+            script.async = true;
+            script.defer = true;
+            script.onerror = () => {
+                try { delete window[callbackName]; } catch (e) {}
+                reject(new Error('Failed to load Google Maps JavaScript API'));
+            };
+            document.head.appendChild(script);
+        } catch (e) {
+            reject(e);
+        }
+    });
+
+    return googleMapsBootstrapPromise;
+}
+
+function ensureGoogleServices() {
+    if (!window.google || !window.google.maps) return false;
+    if (!googleDirectionsService) googleDirectionsService = new google.maps.DirectionsService();
+    if (!googleGeocoderService) googleGeocoderService = new google.maps.Geocoder();
+    if (!googlePlacesAutocompleteService) googlePlacesAutocompleteService = new google.maps.places.AutocompleteService();
+    return true;
+}
+
+function ensureLeafletCompatibilityLayer() {
+    if (window.L && window.L.__akwadraGoogleCompat) return;
+
+    class GoogleLatLngBoundsCompat {
+        constructor(points = []) {
+            this._bounds = new google.maps.LatLngBounds();
+            points.forEach((p) => this.extend(p));
+        }
+
+        extend(point) {
+            if (!point) return this;
+            if (Array.isArray(point) && point.length >= 2) {
+                this._bounds.extend(new google.maps.LatLng(Number(point[0]), Number(point[1])));
+                return this;
+            }
+            const lat = Number(point.lat);
+            const lng = Number(point.lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                this._bounds.extend(new google.maps.LatLng(lat, lng));
+            }
+            return this;
+        }
+
+        toGoogleBounds() {
+            return this._bounds;
+        }
+    }
+
+    class GoogleMapCompat {
+        constructor(id, options = {}) {
+            const el = typeof id === 'string' ? document.getElementById(id) : id;
+            this._map = new google.maps.Map(el, {
+                zoom: 12,
+                center: { lat: 31.2001, lng: 29.9187 },
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: false,
+                zoomControl: false,
+                ...options
+            });
+            this._listeners = [];
+        }
+
+        setView(coords, zoom) {
+            const lat = Number(coords?.[0]);
+            const lng = Number(coords?.[1]);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                this._map.setCenter({ lat, lng });
+            }
+            if (Number.isFinite(Number(zoom))) {
+                this._map.setZoom(Number(zoom));
+            }
+            return this;
+        }
+
+        setCenter(coords) {
+            const lat = Number(coords?.lat ?? coords?.[0]);
+            const lng = Number(coords?.lng ?? coords?.[1]);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                this._map.setCenter({ lat, lng });
+            }
+            return this;
+        }
+
+        panTo(coords) {
+            const lat = Number(coords?.[0] ?? coords?.lat);
+            const lng = Number(coords?.[1] ?? coords?.lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                this._map.panTo({ lat, lng });
+            }
+            return this;
+        }
+
+        zoomIn() {
+            this._map.setZoom((this._map.getZoom() || 12) + 1);
+            return this;
+        }
+
+        zoomOut() {
+            this._map.setZoom((this._map.getZoom() || 12) - 1);
+            return this;
+        }
+
+        getZoom() {
+            return Number(this._map.getZoom() || 12);
+        }
+
+        getCenter() {
+            const c = this._map.getCenter();
+            return {
+                lat: c ? c.lat() : 0,
+                lng: c ? c.lng() : 0
+            };
+        }
+
+        fitBounds(bounds, options = {}) {
+            const b = bounds?.toGoogleBounds ? bounds.toGoogleBounds() : bounds;
+            const paddingRaw = options?.padding;
+            const padding = Array.isArray(paddingRaw) ? Number(paddingRaw[0] || 0) : Number(paddingRaw || 0);
+            this._map.fitBounds(b, Number.isFinite(padding) ? padding : 0);
+            return this;
+        }
+
+        invalidateSize() {
+            google.maps.event.trigger(this._map, 'resize');
+            return this;
+        }
+
+        on(eventName, cb) {
+            if (eventName !== 'click') return this;
+            const l = this._map.addListener('click', (evt) => {
+                cb({
+                    latlng: {
+                        lat: evt?.latLng?.lat ? evt.latLng.lat() : null,
+                        lng: evt?.latLng?.lng ? evt.latLng.lng() : null
+                    }
+                });
+            });
+            this._listeners.push(l);
+            return this;
+        }
+    }
+
+    class GoogleMarkerCompat {
+        constructor(coords, options = {}) {
+            this._coords = { lat: Number(coords?.[0]), lng: Number(coords?.[1]) };
+            this._options = options || {};
+            this._marker = null;
+            this._popup = null;
+            this._title = '';
+        }
+
+        _buildIcon() {
+            const iconSpec = this._options?.icon;
+            if (!iconSpec || !iconSpec.html) return undefined;
+            const html = String(iconSpec.html);
+            const svg = `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="44" height="44"><foreignObject x="0" y="0" width="44" height="44"><div xmlns="http://www.w3.org/1999/xhtml" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;">${html}</div></foreignObject></svg>`;
+            return {
+                url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+                scaledSize: new google.maps.Size(44, 44),
+                anchor: new google.maps.Point(22, 22)
+            };
+        }
+
+        addTo(mapCompat) {
+            const mapObj = mapCompat?._map || null;
+            const markerOptions = {
+                map: mapObj,
+                position: this._coords,
+                draggable: !!this._options?.draggable,
+                opacity: Number.isFinite(Number(this._options?.opacity)) ? Number(this._options.opacity) : 1,
+                title: this._title || undefined
+            };
+            const maybeIcon = this._buildIcon();
+            if (maybeIcon) markerOptions.icon = maybeIcon;
+            this._marker = new google.maps.Marker(markerOptions);
+            return this;
+        }
+
+        remove() {
+            if (this._popup) this._popup.close();
+            if (this._marker) this._marker.setMap(null);
+            this._marker = null;
+            return this;
+        }
+
+        bindPopup(text) {
+            this._title = String(text || '');
+            this._popup = new google.maps.InfoWindow({ content: this._title });
+            if (this._marker) this._marker.setTitle(this._title);
+            return this;
+        }
+
+        setPopupContent(text) {
+            this._title = String(text || '');
+            if (!this._popup) {
+                this._popup = new google.maps.InfoWindow({ content: this._title });
+            } else {
+                this._popup.setContent(this._title);
+            }
+            if (this._marker) this._marker.setTitle(this._title);
+            return this;
+        }
+
+        openPopup() {
+            if (this._marker && this._popup) {
+                this._popup.open({ map: this._marker.getMap(), anchor: this._marker });
+            }
+            return this;
+        }
+
+        bindTooltip(text) {
+            if (this._marker) {
+                this._marker.setLabel({ text: String(text || ''), color: '#111827', fontWeight: '700' });
+            }
+            return this;
+        }
+
+        unbindTooltip() {
+            if (this._marker) this._marker.setLabel(null);
+            return this;
+        }
+
+        openTooltip() {
+            return this;
+        }
+
+        on(eventName, cb) {
+            if (!this._marker) return this;
+            if (eventName === 'dragend') {
+                this._marker.addListener('dragend', () => cb());
+            }
+            return this;
+        }
+
+        setLatLng(coords) {
+            const lat = Number(coords?.[0] ?? coords?.lat);
+            const lng = Number(coords?.[1] ?? coords?.lng);
+            this._coords = { lat, lng };
+            if (this._marker) this._marker.setPosition(this._coords);
+            return this;
+        }
+
+        getLatLng() {
+            const p = this._marker ? this._marker.getPosition() : null;
+            if (p) return { lat: p.lat(), lng: p.lng() };
+            return { lat: this._coords.lat, lng: this._coords.lng };
+        }
+
+        getElement() {
+            return null;
+        }
+    }
+
+    class GooglePolylineCompat {
+        constructor(points = [], style = {}) {
+            this._polyline = new google.maps.Polyline({
+                path: (Array.isArray(points) ? points : []).map((p) => ({ lat: Number(p[0]), lng: Number(p[1]) })),
+                geodesic: true,
+                strokeColor: style?.color || '#4f46e5',
+                strokeOpacity: Number.isFinite(Number(style?.opacity)) ? Number(style.opacity) : 0.75,
+                strokeWeight: Number.isFinite(Number(style?.weight)) ? Number(style.weight) : 4
+            });
+        }
+
+        addTo(mapCompat) {
+            this._polyline.setMap(mapCompat?._map || null);
+            return this;
+        }
+
+        setStyle(style = {}) {
+            this._polyline.setOptions({
+                strokeColor: style?.color || '#4f46e5',
+                strokeOpacity: Number.isFinite(Number(style?.opacity)) ? Number(style.opacity) : 0.75,
+                strokeWeight: Number.isFinite(Number(style?.weight)) ? Number(style.weight) : 4
+            });
+            return this;
+        }
+
+        setLatLngs(points = []) {
+            this._polyline.setPath((Array.isArray(points) ? points : []).map((p) => ({ lat: Number(p[0]), lng: Number(p[1]) })));
+            return this;
+        }
+
+        remove() {
+            this._polyline.setMap(null);
+            return this;
+        }
+    }
+
+    window.L = {
+        __akwadraGoogleCompat: true,
+        map: (id, options) => new GoogleMapCompat(id, options),
+        tileLayer: () => ({ addTo: () => ({}) }),
+        marker: (coords, options) => new GoogleMarkerCompat(coords, options),
+        polyline: (points, style) => new GooglePolylineCompat(points, style),
+        divIcon: (options = {}) => ({ ...options }),
+        latLngBounds: (points = []) => new GoogleLatLngBoundsCompat(points)
+    };
+}
 
 function isValidLatLngPoint(point) {
     if (!point) return false;
@@ -2667,26 +3018,44 @@ function rememberRoadRoute(key, payload) {
 async function fetchRoadRoute(start, end) {
     if (!isValidLatLngPoint(start) || !isValidLatLngPoint(end)) return null;
 
+    await ensureGoogleMapsLoaded();
+    if (!ensureGoogleServices()) return null;
+
     const key = getRoadRouteCacheKey(start, end);
     if (roadRouteCache.has(key)) {
         return roadRouteCache.get(key);
     }
 
-    const url = `${ROAD_ROUTE_API_BASE}/${Number(start.lng)},${Number(start.lat)};${Number(end.lng)},${Number(end.lat)}?overview=full&geometries=polyline6&steps=false&alternatives=false`;
-    const response = await fetch(url, { method: 'GET' });
-    if (!response.ok) return null;
+    const route = await new Promise((resolve) => {
+        googleDirectionsService.route({
+            origin: { lat: Number(start.lat), lng: Number(start.lng) },
+            destination: { lat: Number(end.lat), lng: Number(end.lng) },
+            travelMode: google.maps.TravelMode.DRIVING,
+            provideRouteAlternatives: false
+        }, (result, status) => {
+            if (status !== 'OK' || !result?.routes?.length) {
+                resolve(null);
+                return;
+            }
+            resolve(result.routes[0]);
+        });
+    });
+    if (!route) return null;
 
-    const data = await response.json();
-    const route = Array.isArray(data?.routes) ? data.routes[0] : null;
-    if (!route?.geometry) return null;
+    const overviewPath = Array.isArray(route.overview_path) ? route.overview_path : [];
+    const points = overviewPath
+        .map((p) => [Number(p?.lat?.()), Number(p?.lng?.())])
+        .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    if (points.length < 2) return null;
 
-    const points = decodePolyline6(route.geometry);
-    if (!Array.isArray(points) || points.length < 2) return null;
+    const firstLeg = Array.isArray(route.legs) ? route.legs[0] : null;
+    const distanceMeters = Number(firstLeg?.distance?.value);
+    const durationSeconds = Number(firstLeg?.duration?.value);
 
     const payload = {
         points,
-        distance: Number(route.distance),
-        duration: Number(route.duration),
+        distance: Number.isFinite(distanceMeters) ? distanceMeters : calculateDistance(start.lat, start.lng, end.lat, end.lng),
+        duration: Number.isFinite(durationSeconds) ? durationSeconds : null,
         start: { lat: Number(start.lat), lng: Number(start.lng) },
         end: { lat: Number(end.lat), lng: Number(end.lng) }
     };
@@ -2952,18 +3321,139 @@ function renderDestinationSuggestions(items) {
             const idx = Number(btn.getAttribute('data-dest-suggestion'));
             const item = destinationSuggestItems[idx];
             if (!item) return;
-            applyDestinationSuggestion(item);
+            void applyDestinationSuggestion(item);
         });
     });
 }
 
-function applyDestinationSuggestion(item) {
-    if (!item) return;
-    const lat = Number(item.lat);
-    const lng = Number(item.lon ?? item.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+async function geocodeAddressWithGoogle(query) {
+    const q = String(query || '').trim();
+    if (!q) return null;
+    await ensureGoogleMapsLoaded();
+    if (!ensureGoogleServices()) return null;
 
-    const label = String(item.display_name || item.label || 'الوجهة').trim() || 'الوجهة';
+    return new Promise((resolve) => {
+        googleGeocoderService.geocode({
+            address: q,
+            componentRestrictions: { country: 'EG' },
+            language: 'ar',
+            region: 'EG'
+        }, (results, status) => {
+            if (status !== 'OK' || !Array.isArray(results) || !results.length) {
+                resolve(null);
+                return;
+            }
+            const best = results[0];
+            const lat = Number(best?.geometry?.location?.lat?.());
+            const lng = Number(best?.geometry?.location?.lng?.());
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                resolve(null);
+                return;
+            }
+            resolve({
+                lat,
+                lng,
+                label: String(best.formatted_address || q)
+            });
+        });
+    });
+}
+
+async function geocodePlaceIdWithGoogle(placeId) {
+    const id = String(placeId || '').trim();
+    if (!id) return null;
+    await ensureGoogleMapsLoaded();
+    if (!ensureGoogleServices()) return null;
+
+    return new Promise((resolve) => {
+        googleGeocoderService.geocode({
+            placeId: id,
+            language: 'ar',
+            region: 'EG'
+        }, (results, status) => {
+            if (status !== 'OK' || !Array.isArray(results) || !results.length) {
+                resolve(null);
+                return;
+            }
+            const best = results[0];
+            const lat = Number(best?.geometry?.location?.lat?.());
+            const lng = Number(best?.geometry?.location?.lng?.());
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                resolve(null);
+                return;
+            }
+            resolve({
+                lat,
+                lng,
+                label: String(best.formatted_address || best.name || 'موقع')
+            });
+        });
+    });
+}
+
+async function reverseGeocodeWithGoogle(lat, lng) {
+    await ensureGoogleMapsLoaded();
+    if (!ensureGoogleServices()) return `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`;
+
+    return new Promise((resolve) => {
+        googleGeocoderService.geocode({
+            location: { lat: Number(lat), lng: Number(lng) },
+            language: 'ar',
+            region: 'EG'
+        }, (results, status) => {
+            if (status !== 'OK' || !Array.isArray(results) || !results.length) {
+                resolve(`${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`);
+                return;
+            }
+            resolve(String(results[0].formatted_address || `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`));
+        });
+    });
+}
+
+async function fetchPlacePredictions(query) {
+    const q = String(query || '').trim();
+    if (!q) return [];
+
+    await ensureGoogleMapsLoaded();
+    if (!ensureGoogleServices()) return [];
+
+    return new Promise((resolve) => {
+        googlePlacesAutocompleteService.getPlacePredictions({
+            input: q,
+            componentRestrictions: { country: 'eg' },
+            language: 'ar',
+            types: ['geocode']
+        }, (predictions, status) => {
+            if (status !== google.maps.places.PlacesServiceStatus.OK || !Array.isArray(predictions)) {
+                resolve([]);
+                return;
+            }
+            const rows = predictions.slice(0, 6).map((p) => ({
+                place_id: String(p.place_id || ''),
+                display_name: String(p.description || ''),
+                label: String(p.description || '')
+            }));
+            resolve(rows);
+        });
+    });
+}
+
+async function applyDestinationSuggestion(item) {
+    if (!item) return;
+    let lat = Number(item.lat);
+    let lng = Number(item.lon ?? item.lng);
+    let label = String(item.display_name || item.label || 'الوجهة').trim() || 'الوجهة';
+
+    if ((!Number.isFinite(lat) || !Number.isFinite(lng)) && item.place_id) {
+        const geocoded = await geocodePlaceIdWithGoogle(item.place_id);
+        if (geocoded) {
+            lat = Number(geocoded.lat);
+            lng = Number(geocoded.lng);
+            label = geocoded.label || label;
+        }
+    }
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     setDestination({ lat, lng }, label);
 
     const destInput = document.getElementById('dest-input');
@@ -2985,21 +3475,12 @@ function fetchDestinationSuggestions(query) {
 
     const requestSeq = ++destinationSuggestRequestSeq;
     destinationSuggestAbortController = new AbortController();
-    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&limit=6&accept-language=ar&q=${encodeURIComponent(q)}`;
+    const signal = destinationSuggestAbortController.signal;
 
-    return fetch(url, {
-        headers: { 'Accept': 'application/json' },
-        signal: destinationSuggestAbortController.signal
-    })
-        .then((r) => r.json())
-        .then((arr) => {
+    return fetchPlacePredictions(q)
+        .then((rows) => {
             if (requestSeq !== destinationSuggestRequestSeq) return [];
-
-            const rows = (Array.isArray(arr) ? arr : []).filter((item) => {
-                const lat = Number(item?.lat);
-                const lon = Number(item?.lon);
-                return Number.isFinite(lat) && Number.isFinite(lon);
-            });
+            if (signal.aborted) return [];
 
             renderDestinationSuggestions(rows);
             return rows;
@@ -3078,18 +3559,27 @@ function renderPickupSuggestions(items) {
             const idx = Number(btn.getAttribute('data-pickup-suggestion'));
             const item = pickupSuggestItems[idx];
             if (!item) return;
-            applyPickupSuggestion(item);
+            void applyPickupSuggestion(item);
         });
     });
 }
 
-function applyPickupSuggestion(item) {
+async function applyPickupSuggestion(item) {
     if (!item) return;
-    const lat = Number(item.lat);
-    const lng = Number(item.lon ?? item.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    let lat = Number(item.lat);
+    let lng = Number(item.lon ?? item.lng);
+    let label = String(item.display_name || item.label || 'نقطة الالتقاط').trim() || 'نقطة الالتقاط';
 
-    const label = String(item.display_name || item.label || 'نقطة الالتقاط').trim() || 'نقطة الالتقاط';
+    if ((!Number.isFinite(lat) || !Number.isFinite(lng)) && item.place_id) {
+        const geocoded = await geocodePlaceIdWithGoogle(item.place_id);
+        if (geocoded) {
+            lat = Number(geocoded.lat);
+            lng = Number(geocoded.lng);
+            label = geocoded.label || label;
+        }
+    }
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     setPickup({ lat, lng }, label);
 
     const pickupInput = document.getElementById('current-loc-input');
@@ -3112,21 +3602,12 @@ function fetchPickupSuggestions(query) {
 
     const requestSeq = ++pickupSuggestRequestSeq;
     pickupSuggestAbortController = new AbortController();
-    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&limit=6&accept-language=ar&q=${encodeURIComponent(q)}`;
+    const signal = pickupSuggestAbortController.signal;
 
-    return fetch(url, {
-        headers: { 'Accept': 'application/json' },
-        signal: pickupSuggestAbortController.signal
-    })
-        .then((r) => r.json())
-        .then((arr) => {
+    return fetchPlacePredictions(q)
+        .then((rows) => {
             if (requestSeq !== pickupSuggestRequestSeq) return [];
-
-            const rows = (Array.isArray(arr) ? arr : []).filter((item) => {
-                const lat = Number(item?.lat);
-                const lon = Number(item?.lon);
-                return Number.isFinite(lat) && Number.isFinite(lon);
-            });
+            if (signal.aborted) return [];
 
             renderPickupSuggestions(rows);
             return rows;
@@ -4024,7 +4505,7 @@ window.expandDriverPanel = function() {
     setDriverPanelCollapsed(false);
 };
 
-function initLeafletMap() {
+async function initLeafletMap() {
     const mapDiv = document.getElementById('leaflet-map');
     if (!mapDiv) {
         console.error('Leaflet map div not found!');
@@ -4036,23 +4517,28 @@ function initLeafletMap() {
         return;
     }
     
-    console.log('Initializing Leaflet map...');
+    try {
+        await ensureGoogleMapsLoaded();
+        ensureLeafletCompatibilityLayer();
+        ensureGoogleServices();
+    } catch (e) {
+        console.error('Failed to initialize Google Maps:', e);
+        showToast('❌ تعذر تحميل Google Maps');
+        return;
+    }
+
+    console.log('Initializing map with Google Maps...');
     
     const alexandriaCenter = [31.2001, 29.9187];
-    const egyptCenter = [26.8206, 30.8025];
-    const isDriver = currentUserRole === 'driver';
     const initialCenter = alexandriaCenter;
     leafletMap = L.map('leaflet-map', { 
         zoomControl: false,
         attributionControl: true
     }).setView(initialCenter, 12);
     
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '© OpenStreetMap'
-    }).addTo(leafletMap);
-    
-    console.log('✅ Leaflet map initialized successfully');
+    L.tileLayer('', {}).addTo(leafletMap);
+
+    console.log('✅ Google map initialized successfully');
 
     // Custom controls hookup
     const zi = document.getElementById('zoom-in');
@@ -4126,7 +4612,7 @@ function initLeafletMap() {
                     const idx = destinationSuggestActiveIndex >= 0 ? destinationSuggestActiveIndex : 0;
                     const item = destinationSuggestItems[idx];
                     if (item) {
-                        applyDestinationSuggestion(item);
+                        void applyDestinationSuggestion(item);
                         return;
                     }
                 }
@@ -4193,7 +4679,7 @@ function initLeafletMap() {
                     const idx = pickupSuggestActiveIndex >= 0 ? pickupSuggestActiveIndex : 0;
                     const item = pickupSuggestItems[idx];
                     if (item) {
-                        applyPickupSuggestion(item);
+                        void applyPickupSuggestion(item);
                         return;
                     }
                 }
@@ -4289,18 +4775,16 @@ function setDestination(coords, label) {
 }
 
 function searchDestinationByName(q) {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&q=${encodeURIComponent(q)}`;
-    return fetch(url, { headers: { 'Accept': 'application/json' }})
-        .then(r => r.json())
-        .then(arr => {
-            if (!arr || !arr.length) {
+    return geocodeAddressWithGoogle(q)
+        .then((best) => {
+            if (!best) {
                 showToast('لم يتم العثور على نتائج');
                 return false;
             }
-            const best = arr[0];
-            const lat = parseFloat(best.lat), lon = parseFloat(best.lon);
-            setDestination({ lat, lng: lon }, best.display_name);
-            leafletMap.setView([lat, lon], 15);
+            const lat = Number(best.lat);
+            const lng = Number(best.lng);
+            setDestination({ lat, lng }, best.label || String(q || 'الوجهة'));
+            if (leafletMap) leafletMap.setView([lat, lng], 15);
             return true;
         })
         .catch(() => {
@@ -4310,18 +4794,16 @@ function searchDestinationByName(q) {
 }
 
 function searchPickupByName(q) {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&q=${encodeURIComponent(q)}`;
-    return fetch(url, { headers: { 'Accept': 'application/json' }})
-        .then(r => r.json())
-        .then(arr => {
-            if (!arr || !arr.length) {
+    return geocodeAddressWithGoogle(q)
+        .then((best) => {
+            if (!best) {
                 showToast('لم يتم العثور على نتائج');
                 return false;
             }
-            const best = arr[0];
-            const lat = parseFloat(best.lat), lon = parseFloat(best.lon);
-            setPickup({ lat, lng: lon }, best.display_name);
-            leafletMap.setView([lat, lon], 15);
+            const lat = Number(best.lat);
+            const lng = Number(best.lng);
+            setPickup({ lat, lng }, best.label || String(q || 'نقطة الالتقاط'));
+            if (leafletMap) leafletMap.setView([lat, lng], 15);
             showToast('تم تحديد موقع الالتقاط');
             return true;
         })
@@ -4367,16 +4849,9 @@ function ensurePickupFallback() {
 }
 
 function reverseGeocode(lat, lng, callback) {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ar`;
-    fetch(url, { headers: { 'Accept': 'application/json' }})
-        .then(r => r.json())
-        .then(data => {
-            const address = data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-            callback(address);
-        })
-        .catch(() => {
-            callback(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-        });
+    reverseGeocodeWithGoogle(lat, lng)
+        .then((address) => callback(address))
+        .catch(() => callback(`${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`));
 }
 
 function updateCurrentLocationInput(text) {
