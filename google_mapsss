@@ -1,0 +1,67 @@
+توثيق واعتماد خطة استبدال الخريطة بـ Google Maps (MVP)
+
+تاريخ الاعتماد: 2026-03-03
+الحالة: معتمد
+اسم الملف المرجعي: google_mapsss
+
+1) نطاق التنفيذ المعتمد
+- التنفيذ في المرحلة الحالية على الصفحة الأساسية فقط: index.html
+- لا يشمل حاليًا: admin-ops-radar.html أو egypt-map.html
+
+2) القرارات المعتمدة
+- استبدال Leaflet/OpenStreetMap بالكامل في الصفحة الأساسية بـ Google Maps.
+- استخدام خدمات Google التالية:
+  - Maps JavaScript API
+  - Places Autocomplete
+  - Geocoding / Reverse Geocoding
+  - Directions API
+- إلغاء طبقة map-world في الصفحة الأساسية لتفادي التعارض.
+- استخدام Google API Key جاهز عبر .env.
+
+3) ملخص التعديلات المطلوبة
+- index.html:
+  - إزالة تحميل Leaflet (CSS/JS) للصفحة الأساسية.
+  - إضافة تحميل Google Maps JS + Places.
+  - الإبقاء على حاوية الخريطة وربطها بـ Google Map.
+- script.js:
+  - تحويل initLeafletMap إلى تهيئة Google Map.
+  - تحويل إدارة markers/pickup/destination إلى كائنات Google Maps.
+  - استبدال البحث الجغرافي من Nominatim إلى Places/Geocoding.
+  - استبدال رسم المسار من OSRM إلى Directions Service/Renderer.
+  - الحفاظ على نفس تدفق التتبع الحي للسائق وربطه بعناصر Google Maps.
+- server.js / env:
+  - تمرير مفتاح Google API للواجهة بشكل صحيح وآمن.
+  - لا حاجة لتغيير بنية جداول قاعدة البيانات الخاصة بالإحداثيات.
+
+4) خطوات التنفيذ المعتمدة
+1. تثبيت مسار إعداد Google API Key في البيئة.
+2. تعديل index.html لتحميل Google Maps بدل Leaflet.
+3. تعديل script.js لاستبدال وظائف الخريطة/البحث/المسارات.
+4. إزالة اعتماد map-world داخل الصفحة الأساسية.
+5. الحفاظ على تكامل API الحالي للإحداثيات كما هو.
+
+5) التحقق الإلزامي قبل أي Commit
+- اختبار endpoints/features الجديدة المتعلقة بالخريطة:
+  - اختيار pickup/destination
+  - رسم route
+  - تحديث موقع السائق الحي
+- اختبار الـ API المتأثرة يدويًا ومن خلال الاختبارات المتاحة.
+- اختبار البناء (build) قبل commit.
+
+أوامر تحقق مقترحة:
+- npm install
+- npm start
+- npm test
+
+6) سياسة الدمج والنشر (حسب طلبك)
+- يجب اختبار الـ endpoints والـ API قبل أي commit.
+- يجب اختبار build قبل commit.
+- بعد نجاح الاختبارات: commit ثم push على main.
+
+7) بيانات الاتصال المؤقتة بقاعدة البيانات (مرجعية)
+- DATABASE_URL:
+  postgresql://postgres:gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ@trolley.proxy.rlwy.net:47888/railway
+- username: postgres
+- password: gnQuusUxfjjvwiryBRkdvFjzBkXhEieJ
+
+انتهى التوثيق والاعتماد.
