@@ -4,11 +4,12 @@ console.log('Akwadra Super Builder Initialized - Multi-Role System with Auth');
 // These must be available immediately for onclick handlers in HTML
 const selectRoleImpl = function(role) {
     console.log('✅ selectRole called with:', role);
-    if (typeof currentUserRole === 'undefined') {
-        console.warn('⚠️ currentUserRole not yet defined, defining now');
-        window.currentUserRole = role;
-    } else {
+    // Keep role state on window first to avoid TDZ race while script is still parsing.
+    window.currentUserRole = role;
+    try {
         currentUserRole = role;
+    } catch (e) {
+        // currentUserRole (let) may still be in TDZ if user clicks very early.
     }
     
     const roleModal = document.getElementById('role-selection-modal');
@@ -30,7 +31,19 @@ const selectRoleImpl = function(role) {
             if (typeof openAuthModal === 'function') {
                 openAuthModal();
             } else {
-                setTimeout(() => window.openAuthModal && window.openAuthModal(), 100);
+                let tries = 0;
+                const t = setInterval(() => {
+                    tries += 1;
+                    if (typeof window.openAuthModal === 'function') {
+                        clearInterval(t);
+                        window.openAuthModal();
+                        return;
+                    }
+                    if (tries >= 20) {
+                        clearInterval(t);
+                        showToast('تعذر فتح نافذة الدخول، أعد تحميل الصفحة');
+                    }
+                }, 80);
             }
         }
     } else if (role === 'driver' || role === 'admin') {
@@ -38,7 +51,19 @@ const selectRoleImpl = function(role) {
         if (typeof openRoleLoginModal === 'function') {
             openRoleLoginModal(role);
         } else {
-            setTimeout(() => window.openRoleLoginModal && window.openRoleLoginModal(role), 100);
+            let tries = 0;
+            const t = setInterval(() => {
+                tries += 1;
+                if (typeof window.openRoleLoginModal === 'function') {
+                    clearInterval(t);
+                    window.openRoleLoginModal(role);
+                    return;
+                }
+                if (tries >= 20) {
+                    clearInterval(t);
+                    showToast('تعذر فتح نافذة الدخول، أعد تحميل الصفحة');
+                }
+            }, 80);
         }
     }
 };
@@ -6599,6 +6624,9 @@ function closeRoleLoginModal() {
         }
     }, 250);
 }
+
+window.openRoleLoginModal = openRoleLoginModal;
+window.closeRoleLoginModal = closeRoleLoginModal;
 
 window.submitRoleLogin = async function() {
     const modal = document.getElementById('role-login-modal');
