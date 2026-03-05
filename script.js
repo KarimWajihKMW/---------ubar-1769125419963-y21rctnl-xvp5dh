@@ -12039,12 +12039,12 @@ window.initPaymentFlow = function() {
 // ========================================
 
 let panelDragStartY = 0;
-let panelCurrentHeight = 85; // in vh
+let panelCurrentHeight = 50; // in vh
 let isDraggingPanel = false;
 
 let panelMinHeight = 10;
-let panelMidHeight = 50;
-let panelMaxHeight = 85;
+let panelMidHeight = 30;
+let panelMaxHeight = 50;
 let panelDragPreset = 'default';
 
 function applyPanelHeightVh(vh, animate = true) {
@@ -12067,8 +12067,8 @@ function setPanelDragPreset(preset) {
 
     panelDragPreset = 'default';
     panelMinHeight = 10;
-    panelMidHeight = 50;
-    panelMaxHeight = 85;
+    panelMidHeight = 30;
+    panelMaxHeight = 50;
 
     const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMaxHeight));
     applyPanelHeightVh(next, true);
@@ -12144,10 +12144,13 @@ function endDragPanel(e) {
                 panelCurrentHeight = panelMaxHeight;
             }
         } else {
-            if (currentMaxHeight < 30) {
+            const minToMidThreshold = (panelMinHeight + panelMidHeight) / 2;
+            const midToMaxThreshold = (panelMidHeight + panelMaxHeight) / 2;
+
+            if (currentMaxHeight < minToMidThreshold) {
                 panel.style.maxHeight = `${panelMinHeight}vh`;
                 panelCurrentHeight = panelMinHeight;
-            } else if (currentMaxHeight < 60) {
+            } else if (currentMaxHeight < midToMaxThreshold) {
                 panel.style.maxHeight = `${panelMidHeight}vh`;
                 panelCurrentHeight = panelMidHeight;
             } else {
