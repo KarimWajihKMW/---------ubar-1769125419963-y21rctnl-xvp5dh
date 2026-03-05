@@ -12055,6 +12055,33 @@ function applyPanelHeightVh(vh, animate = true) {
     panelCurrentHeight = vh;
 }
 
+function getPanelSnapPoints() {
+    return [panelMinHeight, panelMidHeight, panelMaxHeight]
+        .map(point => Number(point))
+        .filter(point => Number.isFinite(point))
+        .sort((a, b) => a - b)
+        .filter((point, index, arr) => index === 0 || point !== arr[index - 1]);
+}
+
+window.panelStepUp = function() {
+    const points = getPanelSnapPoints();
+    if (!points.length) return;
+
+    const current = Number(panelCurrentHeight);
+    const target = points.find(point => point > current + 0.5) ?? points[points.length - 1];
+    applyPanelHeightVh(target, true);
+};
+
+window.panelStepDown = function() {
+    const points = getPanelSnapPoints();
+    if (!points.length) return;
+
+    const current = Number(panelCurrentHeight);
+    const reversed = [...points].reverse();
+    const target = reversed.find(point => point < current - 0.5) ?? points[0];
+    applyPanelHeightVh(target, true);
+};
+
 function setPanelDragPreset(preset) {
     if (preset === 'trip-completion') {
         panelDragPreset = 'trip-completion';
