@@ -2604,6 +2604,7 @@ let googleDirectionsService = null;
 let googleGeocoderService = null;
 let googlePlacesAutocompleteService = null;
 let googleMapsReady = false;
+let leafletRuntimePromise = null;
 
 function setMapFallbackMode(enabled, reasonText = '') {
     const world = document.getElementById('map-world');
@@ -2623,6 +2624,56 @@ function setMapFallbackMode(enabled, reasonText = '') {
     if (world) world.classList.add('hidden');
     if (mapEl) mapEl.style.opacity = '1';
     if (fallback) fallback.classList.add('hidden');
+}
+
+function loadScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+        const existing = Array.from(document.querySelectorAll('script')).find((s) => s.src === src);
+        if (existing) {
+            if (existing.dataset.loaded === '1') {
+                resolve();
+                return;
+            }
+            existing.addEventListener('load', () => resolve(), { once: true });
+            existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.defer = true;
+        script.addEventListener('load', () => {
+            script.dataset.loaded = '1';
+            resolve();
+        }, { once: true });
+        script.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+        document.head.appendChild(script);
+    });
+}
+
+function loadStylesheetOnce(href) {
+    const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find((l) => l.href === href);
+    if (existing) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    document.head.appendChild(link);
+}
+
+async function ensureLeafletRuntimeLoaded() {
+    if (window.L && typeof window.L.map === 'function') return;
+    if (leafletRuntimePromise) {
+        await leafletRuntimePromise;
+        return;
+    }
+
+    leafletRuntimePromise = (async () => {
+        loadStylesheetOnce('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+        await loadScriptOnce('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+    })();
+
+    await leafletRuntimePromise;
 }
 
 async function loadGoogleMapsBootstrapConfig() {
@@ -4548,9 +4599,15 @@ async function initLeafletMap() {
     } catch (e) {
         console.error('Failed to initialize Google Maps:', e);
         googleMapsReady = false;
-        setMapFallbackMode(true, 'الخريطة غير متاحة الآن: أضف مفتاح Google Maps في إعدادات السيرفر.');
-        showToast('❌ تعذر تحميل Google Maps - تأكد من مفتاح GOOGLE_MAPS_API_KEY');
-        return;
+        try {
+            await ensureLeafletRuntimeLoaded();
+            setMapFallbackMode(false);
+            showToast('⚠️ Google Maps غير متاحة الآن - تم تشغيل خريطة احتياطية');
+        } catch (leafletErr) {
+            setMapFallbackMode(true, 'الخريطة غير متاحة الآن: أضف مفتاح Google Maps في إعدادات السيرفر.');
+            showToast('❌ تعذر تحميل الخريطة');
+            return;
+        }
     }
 
     console.log('Initializing map with Google Maps...');
@@ -4562,7 +4619,14 @@ async function initLeafletMap() {
         attributionControl: true
     }).setView(initialCenter, 12);
     
-    L.tileLayer('', {}).addTo(leafletMap);
+    if (googleMapsReady) {
+        L.tileLayer('', {}).addTo(leafletMap);
+    } else {
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(leafletMap);
+    }
 
     console.log('✅ Google map initialized successfully');
 
