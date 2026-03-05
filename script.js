@@ -4831,7 +4831,7 @@ function setPickup(coords, label, options = {}) {
     if (!leafletMap) return;
     if (pickupMarkerL) pickupMarkerL.remove();
     pickupMarkerL = L.marker([coords.lat, coords.lng], { draggable: true }).addTo(leafletMap);
-    pickupMarkerL.bindPopup(currentPickup.label).openPopup();
+    pickupMarkerL.bindPopup(currentPickup.label);
     bindStreetLabel(pickupMarkerL, currentPickup.label);
     
     // Update current location input
@@ -4845,7 +4845,7 @@ function setPickup(coords, label, options = {}) {
         // Reverse geocode to get address
         reverseGeocode(p.lat, p.lng, (address) => {
             currentPickup.label = address;
-            pickupMarkerL.setPopupContent(address).openPopup();
+            pickupMarkerL.setPopupContent(address);
             bindStreetLabel(pickupMarkerL, address);
             updateCurrentLocationInput(address);
             showToast('تم تعديل موقع الالتقاط');
@@ -5044,7 +5044,7 @@ function maybeReverseGeocodePickup(coords) {
                 currentPickup.label = address;
             }
             if (pickupMarkerL) {
-                pickupMarkerL.setPopupContent(address).openPopup();
+                pickupMarkerL.setPopupContent(address);
                 bindStreetLabel(pickupMarkerL, address);
             }
             updateCurrentLocationInput(address);
