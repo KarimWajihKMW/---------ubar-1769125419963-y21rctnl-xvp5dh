@@ -2589,7 +2589,7 @@ let etaSeconds = 0;
 let driverToPassengerAnim = null;
 let driverToDestinationAnim = null;
 let passengerToDestinationAnim = null;
-let mapSelectionMode = 'destination';
+let mapSelectionMode = null;
 let isDriverInfoCollapsed = false;
 let isDriverPanelCollapsed = false;
 let isPassengerPanelHidden = false;
@@ -4651,18 +4651,19 @@ async function initLeafletMap() {
     // Destination/Pickup select by click
     leafletMap.on('click', e => {
         if (!isPassengerMapSelectionEnabled()) return;
+        if (!mapSelectionMode) return;
         if (mapSelectionMode === 'pickup') {
             reverseGeocode(e.latlng.lat, e.latlng.lng, (address) => {
                 setPickup({ lat: e.latlng.lat, lng: e.latlng.lng }, address);
                 leafletMap.setView([e.latlng.lat, e.latlng.lng], Math.max(leafletMap.getZoom(), 14));
                 showToast('تم تحديد موقع الالتقاط');
             });
-            mapSelectionMode = 'destination';
-            updateMapSelectionButtons();
+            clearMapSelectionMode();
             return;
         }
 
         setDestination({ lat: e.latlng.lat, lng: e.latlng.lng }, 'وجهة محددة');
+        clearMapSelectionMode();
     });
 
     // Hook destination search input
@@ -4965,6 +4966,23 @@ function updateMapSelectionButtons() {
         destBtn.classList.toggle('ring-2', mapSelectionMode === 'destination');
         destBtn.classList.toggle('ring-indigo-500', mapSelectionMode === 'destination');
     }
+}
+
+function clearMapSelectionMode() {
+    mapSelectionMode = null;
+    updateMapSelectionButtons();
+}
+
+function isRideSelectStateVisible() {
+    const rideSelectState = document.getElementById('state-ride-select');
+    return !!(rideSelectState && !rideSelectState.classList.contains('hidden'));
+}
+
+function shouldBlockMapWorldInteraction() {
+    // While user is selecting ride options, ignore fallback-map gestures
+    // unless map selection was explicitly enabled from a map button.
+    if (!isRideSelectStateVisible()) return false;
+    return !mapSelectionMode;
 }
 
 function isPassengerMapSelectionEnabled() {
@@ -7292,6 +7310,7 @@ window.switchSection = function(name) {
     }
 
     if (name === 'rideSelect') {
+        clearMapSelectionMode();
         try { window.refreshFamilyUI && window.refreshFamilyUI(); } catch (e) { /* ignore */ }
         try { window.refreshNoteTemplatesUI && window.refreshNoteTemplatesUI(); } catch (e) { /* ignore */ }
         try { updatePriceLockUI(); } catch (e) { /* ignore */ }
@@ -10786,6 +10805,7 @@ function toggleAdminMenu() {
 // --- Map Drag Logic (Enhanced for Mobile Touch) ---
 function startDrag(e) {
     if (!isMapWorldActive()) return;
+    if (shouldBlockMapWorldInteraction()) return;
     if (e.target.closest('.pointer-events-auto')) return;
     const mapContainer = document.getElementById('map-container');
     
@@ -10869,6 +10889,8 @@ function handleMapClick(cx, cy) {
     // Only handle click for destination setting in Passenger Mode
     if (currentUserRole !== 'passenger') return;
     if (!isMapWorldActive()) return;
+    if (!isPassengerMapSelectionEnabled()) return;
+    if (!mapSelectionMode) return;
 
     const mapWorld = document.getElementById('map-world');
     const destMarker = document.getElementById('dest-marker');
@@ -10886,6 +10908,7 @@ function handleMapClick(cx, cy) {
     
     if (destInput) destInput.value = "تم تحديد موقع على الخريطة";
     window.confirmDestination("Map Point");
+    clearMapSelectionMode();
 }
 
 // --- Driver Tracking Logic (Visuals) ---
