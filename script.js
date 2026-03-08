@@ -12207,6 +12207,7 @@ function applyPanelHeightVh(vh, animate = true) {
 
 function setPanelDragPreset(preset) {
     const rideSelectState = document.getElementById('state-ride-select');
+    const panel = document.getElementById('main-panel');
 
     if (preset === 'ride-select') {
         panelDragPreset = 'ride-select';
@@ -12221,8 +12222,10 @@ function setPanelDragPreset(preset) {
         if (rideSelectState) {
             rideSelectState.style.overflowY = 'auto';
             rideSelectState.style.webkitOverflowScrolling = 'touch';
-            rideSelectState.style.maxHeight = 'calc(72vh - 56px)';
+            rideSelectState.style.maxHeight = '';
+            rideSelectState.style.height = '';
         }
+        if (panel) panel.scrollTop = 0;
         return;
     }
 
@@ -12242,6 +12245,7 @@ function setPanelDragPreset(preset) {
 
     if (rideSelectState) {
         rideSelectState.style.maxHeight = '';
+        rideSelectState.style.height = '';
     }
 
     const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMaxHeight));
@@ -12251,6 +12255,8 @@ function setPanelDragPreset(preset) {
 function configurePassengerMainPanelForSection(name) {
     const panel = document.getElementById('main-panel');
     if (!panel) return;
+
+    panel.classList.toggle('ride-select-active', name === 'rideSelect');
 
     if (name === 'payment-success') {
         setPanelDragPreset('trip-completion');
@@ -12412,6 +12418,81 @@ window.scrollRideSelectPanel = function(direction) {
     const offset = direction === 'up' ? -step : step;
     scrollTarget.scrollBy({ top: offset, behavior: 'smooth' });
 };
+
+let rideSelectGlobalBindingsReady = false;
+
+function bindRideSelectGlobalFallbacks() {
+    if (rideSelectGlobalBindingsReady) return;
+
+    const rideSelectState = document.getElementById('state-ride-select');
+    if (!rideSelectState) return;
+
+    rideSelectGlobalBindingsReady = true;
+
+    document.addEventListener('click', (e) => {
+        const target = e.target;
+        if (!target || !target.closest) return;
+
+        const upBtn = target.closest('#ride-select-scroll-up');
+        if (upBtn) {
+            e.preventDefault();
+            if (typeof window.scrollRideSelectPanel === 'function') {
+                window.scrollRideSelectPanel('up');
+            }
+            return;
+        }
+
+        const downBtn = target.closest('#ride-select-scroll-down');
+        if (downBtn) {
+            e.preventDefault();
+            if (typeof window.scrollRideSelectPanel === 'function') {
+                window.scrollRideSelectPanel('down');
+            }
+            return;
+        }
+
+        const toggleCarsBtn = target.closest('#car-options-toggle');
+        if (toggleCarsBtn) {
+            e.preventDefault();
+            if (typeof window.toggleCarOptions === 'function') {
+                window.toggleCarOptions();
+            }
+            return;
+        }
+
+        const extraOptionsBtn = target.closest('#extra-options-toggle-btn');
+        if (extraOptionsBtn) {
+            e.preventDefault();
+            if (typeof window.toggleRideExtraOptions === 'function') {
+                window.toggleRideExtraOptions();
+            }
+            return;
+        }
+
+        const carCard = target.closest('#state-ride-select .car-select[data-car-type]');
+        if (carCard) {
+            const type = carCard.getAttribute('data-car-type');
+            if (type && typeof window.selectCar === 'function') {
+                e.preventDefault();
+                window.selectCar(carCard, type);
+            }
+        }
+    });
+
+    document.addEventListener('change', (e) => {
+        const target = e.target;
+        if (!target || !target.matches) return;
+        if (target.matches('#split-fare-check') && typeof window.toggleSplitFareUI === 'function') {
+            window.toggleSplitFareUI();
+        }
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindRideSelectGlobalFallbacks);
+} else {
+    bindRideSelectGlobalFallbacks();
+}
 
 // ========================================
 // TRIP HISTORY SYSTEM

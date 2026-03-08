@@ -447,6 +447,17 @@
                 touch-action: pan-y;
             }
 
+            #main-panel.ride-select-active {
+                overflow-y: hidden;
+            }
+
+            #main-panel.ride-select-active #state-ride-select {
+                height: calc(100% - 56px);
+                max-height: calc(100% - 56px);
+                overflow-y: auto;
+                overscroll-behavior-y: contain;
+            }
+
             #main-panel,
             #state-ride-select {
                 scrollbar-gutter: stable;
