@@ -448,12 +448,16 @@
             }
 
             #main-panel.ride-select-active {
+                display: flex;
+                flex-direction: column;
                 overflow-y: hidden;
             }
 
             #main-panel.ride-select-active #state-ride-select {
-                height: calc(100% - 56px);
-                max-height: calc(100% - 56px);
+                flex: 1 1 auto;
+                min-height: 0;
+                height: auto;
+                max-height: none;
                 overflow-y: auto;
                 overscroll-behavior-y: contain;
             }
@@ -3157,7 +3161,7 @@
     
     <!-- Script loaded at the end -->
     <script src="/socket.io/socket.io.js"></script>
-    <script src="api-service.js?v=20260205-1"></script>
-    <script src="script.js?v=20260308-3"></script>
+    <script src="api-service.js?v=20260308-2"></script>
+    <script src="script.js?v=20260308-4"></script>
 </body>
 </html>
