@@ -11379,6 +11379,76 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const pickupMapBtn = document.getElementById('pickup-map-btn');
+    bindOnce(pickupMapBtn, 'PickupMapClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.startMapSelection === 'function') {
+            window.startMapSelection('pickup');
+        }
+    });
+
+    const pickupGpsBtn = document.getElementById('pickup-gps-btn');
+    bindOnce(pickupGpsBtn, 'PickupGpsClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.useCurrentLocation === 'function') {
+            window.useCurrentLocation();
+        }
+    });
+
+    const destMapBtn = document.getElementById('dest-map-btn');
+    bindOnce(destMapBtn, 'DestinationMapClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.startMapSelection === 'function') {
+            window.startMapSelection('destination');
+        }
+    });
+
+    const pickupHubsToggleBtn = document.getElementById('pickup-hubs-toggle-btn');
+    bindOnce(pickupHubsToggleBtn, 'PickupHubToggleClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.togglePickupHubSuggestions === 'function') {
+            window.togglePickupHubSuggestions();
+        }
+    });
+
+    const destinationContinueBtn = document.getElementById('destination-continue-btn');
+    bindOnce(destinationContinueBtn, 'DestinationContinueClick', 'click', (e) => {
+        e.preventDefault();
+        const destInputEl = document.getElementById('dest-input');
+        const destinationLabel = String(destInputEl?.value || '').trim();
+        if (!destinationLabel) {
+            showToast('اكتب الوجهة أو اخترها من الخريطة أولاً');
+            return;
+        }
+        if (typeof window.confirmDestination === 'function') {
+            window.confirmDestination(destinationLabel);
+        }
+    });
+
+    const savedHomeBtn = document.getElementById('saved-place-home-btn');
+    bindOnce(savedHomeBtn, 'SavedHomeClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.selectSavedPlace === 'function') {
+            window.selectSavedPlace('home');
+        }
+    });
+
+    const savedWorkBtn = document.getElementById('saved-place-work-btn');
+    bindOnce(savedWorkBtn, 'SavedWorkClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.selectSavedPlace === 'function') {
+            window.selectSavedPlace('work');
+        }
+    });
+
+    const savedCustomBtn = document.getElementById('saved-place-custom-btn');
+    bindOnce(savedCustomBtn, 'SavedCustomClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.openSavedPlacesList === 'function') {
+            window.openSavedPlacesList();
+        }
+    });
+
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.addEventListener('click', window.resetApp);
 
