@@ -11320,6 +11320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const rideSelectDragHandle = document.getElementById('ride-select-drag-handle');
+    const rideSelectState = document.getElementById('state-ride-select');
     bindOnce(rideSelectDragHandle, 'PanelMouseDown', 'mousedown', (e) => {
         if (typeof window.startDragPanel === 'function') {
             window.startDragPanel(e);
@@ -11330,6 +11331,17 @@ document.addEventListener('DOMContentLoaded', () => {
             window.startDragPanel(e);
         }
     }, { passive: false });
+
+    bindOnce(rideSelectState, 'PanelStateMouseDown', 'mousedown', (e) => {
+        if (typeof window.startDragPanel === 'function') {
+            window.startDragPanel(e);
+        }
+    });
+    bindOnce(rideSelectState, 'PanelStateTouchStart', 'touchstart', (e) => {
+        if (typeof window.startDragPanel === 'function') {
+            window.startDragPanel(e);
+        }
+    }, { passive: true });
 
     const scrollUpBtn = document.getElementById('ride-select-scroll-up');
     const scrollDownBtn = document.getElementById('ride-select-scroll-down');
@@ -12189,6 +12201,7 @@ let isDraggingPanel = false;
 let panelDragStartHeight = 50;
 let panelDragHasMoved = false;
 const PANEL_DRAG_THRESHOLD_PX = 10;
+const PANEL_DRAG_TOP_ZONE_PX = 170;
 
 let panelMinHeight = 10;
 let panelMidHeight = 30;
@@ -12257,11 +12270,27 @@ window.startDragPanel = function(e) {
     if (isDraggingPanel) return;
 
     const handle = document.getElementById('ride-select-drag-handle');
+    const rideSelectState = document.getElementById('state-ride-select');
     const target = e && e.target && e.target.nodeType === 1 ? e.target : null;
     const startedFromHandle = handle && target ? handle.contains(target) : false;
+    const isRideSelectVisible = rideSelectState && !rideSelectState.classList.contains('hidden');
 
-    // In ride selection, allow panel drag only from the top drag handle to avoid conflict with list scrolling.
-    if (panelDragPreset === 'ride-select' && !startedFromHandle) return;
+    const pointY = e && e.type === 'touchstart' && e.touches && e.touches[0]
+        ? e.touches[0].clientY
+        : (e && typeof e.clientY === 'number' ? e.clientY : null);
+
+    let startedFromTopZone = false;
+    if (isRideSelectVisible && rideSelectState && pointY !== null) {
+        const rect = rideSelectState.getBoundingClientRect();
+        startedFromTopZone = pointY <= (rect.top + PANEL_DRAG_TOP_ZONE_PX);
+    }
+
+    const rideSelectAtTop = !rideSelectState || rideSelectState.scrollTop <= 4;
+
+    // In ride selection, allow drag only from handle OR top zone while content is already at the top.
+    if (panelDragPreset === 'ride-select' && !startedFromHandle) {
+        if (!(startedFromTopZone && rideSelectAtTop)) return;
+    }
 
     // Prevent accidental drag starts from interactive elements.
     if (target && target.closest('button, input, textarea, select, a') && !startedFromHandle) return;
@@ -12282,6 +12311,7 @@ window.startDragPanel = function(e) {
     document.addEventListener('touchmove', dragPanel, { passive: false });
     document.addEventListener('mouseup', endDragPanel);
     document.addEventListener('touchend', endDragPanel);
+    document.addEventListener('touchcancel', endDragPanel);
 };
 
 function dragPanel(e) {
@@ -12327,6 +12357,7 @@ function endDragPanel(e) {
             document.removeEventListener('touchmove', dragPanel);
             document.removeEventListener('mouseup', endDragPanel);
             document.removeEventListener('touchend', endDragPanel);
+            document.removeEventListener('touchcancel', endDragPanel);
             return;
         }
         
@@ -12364,6 +12395,7 @@ function endDragPanel(e) {
     document.removeEventListener('touchmove', dragPanel);
     document.removeEventListener('mouseup', endDragPanel);
     document.removeEventListener('touchend', endDragPanel);
+    document.removeEventListener('touchcancel', endDragPanel);
 }
 
 window.scrollRideSelectPanel = function(direction) {
