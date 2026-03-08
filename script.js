@@ -12200,21 +12200,35 @@ let panelDragPreset = 'default';
 function applyPanelHeightVh(vh, animate = true) {
     const panel = document.getElementById('main-panel');
     if (!panel) return;
+    const safeVh = Math.max(18, Math.min(96, Number(vh) || 50));
     panel.style.transition = animate ? 'max-height 0.3s ease-in-out' : 'none';
-    panel.style.maxHeight = `${vh}vh`;
-    panelCurrentHeight = vh;
+    panel.style.maxHeight = `min(${safeVh}dvh, ${safeVh}vh)`;
+    panelCurrentHeight = safeVh;
 }
 
 function setPanelDragPreset(preset) {
     const rideSelectState = document.getElementById('state-ride-select');
     const panel = document.getElementById('main-panel');
+    const viewportWidth = window.innerWidth || 0;
+    const isSmallMobile = viewportWidth > 0 && viewportWidth < 640;
+    const isDesktop = viewportWidth >= 1024;
 
     if (preset === 'ride-select') {
         panelDragPreset = 'ride-select';
-        panelMinHeight = 22;
-        panelMidHeight = 55;
-        panelMaxHeight = 88;
-        const preferredOpenHeight = 72;
+        if (isSmallMobile) {
+            panelMinHeight = 44;
+            panelMidHeight = 72;
+            panelMaxHeight = 94;
+        } else if (isDesktop) {
+            panelMinHeight = 28;
+            panelMidHeight = 50;
+            panelMaxHeight = 80;
+        } else {
+            panelMinHeight = 32;
+            panelMidHeight = 60;
+            panelMaxHeight = 88;
+        }
+        const preferredOpenHeight = isSmallMobile ? 84 : (isDesktop ? 66 : 74);
         const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, preferredOpenHeight));
         applyPanelHeightVh(next, true);
 
@@ -12239,9 +12253,19 @@ function setPanelDragPreset(preset) {
     }
 
     panelDragPreset = 'default';
-    panelMinHeight = 10;
-    panelMidHeight = 30;
-    panelMaxHeight = 50;
+    if (isSmallMobile) {
+        panelMinHeight = 28;
+        panelMidHeight = 46;
+        panelMaxHeight = 72;
+    } else if (isDesktop) {
+        panelMinHeight = 14;
+        panelMidHeight = 28;
+        panelMaxHeight = 52;
+    } else {
+        panelMinHeight = 18;
+        panelMidHeight = 34;
+        panelMaxHeight = 58;
+    }
 
     if (rideSelectState) {
         rideSelectState.style.maxHeight = '';
@@ -12251,6 +12275,25 @@ function setPanelDragPreset(preset) {
     const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMaxHeight));
     applyPanelHeightVh(next, true);
 }
+
+let panelResponsiveResizeTimer = null;
+
+window.addEventListener('resize', () => {
+    if (panelResponsiveResizeTimer) {
+        clearTimeout(panelResponsiveResizeTimer);
+    }
+    panelResponsiveResizeTimer = setTimeout(() => {
+        if (panelDragPreset === 'ride-select') {
+            setPanelDragPreset('ride-select');
+            return;
+        }
+        if (panelDragPreset === 'trip-completion') {
+            setPanelDragPreset('trip-completion');
+            return;
+        }
+        setPanelDragPreset('default');
+    }, 140);
+});
 
 function configurePassengerMainPanelForSection(name) {
     const panel = document.getElementById('main-panel');

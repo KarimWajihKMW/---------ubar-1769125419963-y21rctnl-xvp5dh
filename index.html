@@ -447,6 +447,16 @@
                 touch-action: pan-y;
             }
 
+            #main-panel {
+                width: min(100%, 34rem);
+                max-height: min(78dvh, 78vh);
+                min-height: 16rem;
+            }
+
+            #state-ride-select {
+                padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+            }
+
             #main-panel.ride-select-active {
                 display: flex;
                 flex-direction: column;
@@ -487,6 +497,27 @@
             #main-panel::-webkit-scrollbar-thumb:hover,
             #state-ride-select::-webkit-scrollbar-thumb:hover {
                 background: #64748b;
+            }
+
+            @media (max-width: 640px) {
+                #main-panel {
+                    width: 100%;
+                    max-width: 100%;
+                    border-top-left-radius: 1.5rem;
+                    border-top-right-radius: 1.5rem;
+                    max-height: min(86dvh, 86vh);
+                }
+
+                #state-ride-select .grid.grid-cols-2 {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            @media (min-width: 1024px) {
+                #main-panel {
+                    width: min(100%, 32rem);
+                    max-height: min(74dvh, 74vh);
+                }
             }
     </style>
 </head>
@@ -965,7 +996,7 @@
         </div>
 
         <!-- Panel Container -->
-        <div class="bg-white rounded-t-[2.5rem] shadow-[0_-10px_60px_-15px_rgba(0,0,0,0.15)] w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out border-t border-gray-50 touch-pan-y" id="main-panel" style="max-height: 50vh;">
+        <div class="bg-white rounded-t-[2.5rem] shadow-[0_-10px_60px_-15px_rgba(0,0,0,0.15)] w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out border-t border-gray-50 touch-pan-y" id="main-panel">
             
             <!-- Draggable Handle -->
             <div class="sticky top-0 z-30 py-3 bg-white/95 backdrop-blur-sm cursor-grab active:cursor-grabbing" id="panel-drag-handle" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
@@ -3162,6 +3193,6 @@
     <!-- Script loaded at the end -->
     <script src="/socket.io/socket.io.js"></script>
     <script src="api-service.js?v=20260308-2"></script>
-    <script src="script.js?v=20260308-4"></script>
+    <script src="script.js?v=20260308-5"></script>
 </body>
 </html>
