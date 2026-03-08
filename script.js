@@ -7062,6 +7062,11 @@ window.selectCar = function(element, type) {
     });
     element.classList.add('selected');
     currentCarType = type;
+
+    // Keep the selected option visible when the car list is in its own scroll area.
+    if (typeof element.scrollIntoView === 'function') {
+        element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
     
     const est = computeTripEstimates();
     currentTripPrice = computePrice(type, est.distanceKm);
@@ -12451,10 +12456,16 @@ function endDragPanel(e) {
 
 window.scrollRideSelectPanel = function(direction) {
     const rideSelectState = document.getElementById('state-ride-select');
+    const carOptionsList = document.getElementById('car-options-list');
     const panel = document.getElementById('main-panel');
-    const scrollTarget = rideSelectState && rideSelectState.scrollHeight > rideSelectState.clientHeight
-        ? rideSelectState
-        : panel;
+    const canScrollCars = carOptionsList
+        && !carOptionsList.classList.contains('hidden')
+        && carOptionsList.scrollHeight > carOptionsList.clientHeight;
+    const scrollTarget = canScrollCars
+        ? carOptionsList
+        : (rideSelectState && rideSelectState.scrollHeight > rideSelectState.clientHeight
+            ? rideSelectState
+            : panel);
     if (!scrollTarget) return;
 
     const step = 260;
