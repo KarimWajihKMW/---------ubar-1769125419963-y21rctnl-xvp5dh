@@ -446,6 +446,33 @@
                 overscroll-behavior-y: contain;
                 touch-action: pan-y;
             }
+
+            #main-panel,
+            #state-ride-select {
+                scrollbar-gutter: stable;
+            }
+
+            #main-panel::-webkit-scrollbar,
+            #state-ride-select::-webkit-scrollbar {
+                width: 8px;
+            }
+
+            #main-panel::-webkit-scrollbar-track,
+            #state-ride-select::-webkit-scrollbar-track {
+                background: #eef2f7;
+                border-radius: 10px;
+            }
+
+            #main-panel::-webkit-scrollbar-thumb,
+            #state-ride-select::-webkit-scrollbar-thumb {
+                background: #94a3b8;
+                border-radius: 10px;
+            }
+
+            #main-panel::-webkit-scrollbar-thumb:hover,
+            #state-ride-select::-webkit-scrollbar-thumb:hover {
+                background: #64748b;
+            }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">

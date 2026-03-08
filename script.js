@@ -11332,17 +11332,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, { passive: false });
 
-    bindOnce(rideSelectState, 'PanelStateMouseDown', 'mousedown', (e) => {
-        if (typeof window.startDragPanel === 'function') {
-            window.startDragPanel(e);
-        }
-    });
-    bindOnce(rideSelectState, 'PanelStateTouchStart', 'touchstart', (e) => {
-        if (typeof window.startDragPanel === 'function') {
-            window.startDragPanel(e);
-        }
-    }, { passive: true });
-
     const scrollUpBtn = document.getElementById('ride-select-scroll-up');
     const scrollDownBtn = document.getElementById('ride-select-scroll-down');
     bindOnce(scrollUpBtn, 'ScrollUpClick', 'click', (e) => {
@@ -11366,14 +11355,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    document.querySelectorAll('.car-select[data-car-type]').forEach((card) => {
+    bindOnce(rideSelectState, 'RideSelectDelegatedClick', 'click', (e) => {
+        const card = e.target && e.target.closest ? e.target.closest('.car-select[data-car-type]') : null;
+        if (!card) return;
+        e.preventDefault();
         const type = card.getAttribute('data-car-type');
-        bindOnce(card, 'CarSelectClick', 'click', (e) => {
-            e.preventDefault();
-            if (typeof window.selectCar === 'function' && type) {
-                window.selectCar(card, type);
-            }
-        });
+        if (typeof window.selectCar === 'function' && type) {
+            window.selectCar(card, type);
+        }
     });
 
     const splitFareCheck = document.getElementById('split-fare-check');
@@ -12217,6 +12206,8 @@ function applyPanelHeightVh(vh, animate = true) {
 }
 
 function setPanelDragPreset(preset) {
+    const rideSelectState = document.getElementById('state-ride-select');
+
     if (preset === 'ride-select') {
         panelDragPreset = 'ride-select';
         panelMinHeight = 22;
@@ -12225,6 +12216,13 @@ function setPanelDragPreset(preset) {
         const preferredOpenHeight = 72;
         const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, preferredOpenHeight));
         applyPanelHeightVh(next, true);
+
+        // Force a dedicated inner scroll area so ride options remain controllable on all devices.
+        if (rideSelectState) {
+            rideSelectState.style.overflowY = 'auto';
+            rideSelectState.style.webkitOverflowScrolling = 'touch';
+            rideSelectState.style.maxHeight = 'calc(72vh - 56px)';
+        }
         return;
     }
 
@@ -12241,6 +12239,10 @@ function setPanelDragPreset(preset) {
     panelMinHeight = 10;
     panelMidHeight = 30;
     panelMaxHeight = 50;
+
+    if (rideSelectState) {
+        rideSelectState.style.maxHeight = '';
+    }
 
     const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMaxHeight));
     applyPanelHeightVh(next, true);
