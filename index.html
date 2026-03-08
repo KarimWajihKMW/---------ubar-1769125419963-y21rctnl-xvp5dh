@@ -439,6 +439,13 @@
             #driver-panel-expand-floating:hover {
                 animation: none;
             }
+
+            #main-panel,
+            #state-ride-select {
+                -webkit-overflow-scrolling: touch;
+                overscroll-behavior-y: contain;
+                touch-action: pan-y;
+            }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
@@ -916,7 +923,7 @@
         </div>
 
         <!-- Panel Container -->
-        <div class="bg-white rounded-t-[2.5rem] shadow-[0_-10px_60px_-15px_rgba(0,0,0,0.15)] w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out border-t border-gray-50" id="main-panel" style="max-height: 50vh;">
+        <div class="bg-white rounded-t-[2.5rem] shadow-[0_-10px_60px_-15px_rgba(0,0,0,0.15)] w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out border-t border-gray-50 touch-pan-y" id="main-panel" style="max-height: 50vh;">
             
             <!-- Draggable Handle -->
             <div class="sticky top-0 z-30 py-3 bg-white/95 backdrop-blur-sm cursor-grab active:cursor-grabbing" id="panel-drag-handle" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
@@ -1036,7 +1043,7 @@
             </div>
 
             <!-- State 2: Select Car -->
-            <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-8 ride-select-sheet">
+            <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-8 ride-select-sheet overflow-y-auto touch-pan-y">
                 <div class="pt-1 pb-2 cursor-grab active:cursor-grabbing select-none" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
                     <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-4"></div>
                 </div>

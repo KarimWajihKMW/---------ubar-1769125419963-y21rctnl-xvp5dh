@@ -12056,6 +12056,16 @@ function applyPanelHeightVh(vh, animate = true) {
 }
 
 function setPanelDragPreset(preset) {
+    if (preset === 'ride-select') {
+        panelDragPreset = 'ride-select';
+        panelMinHeight = 22;
+        panelMidHeight = 55;
+        panelMaxHeight = 88;
+        const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMidHeight));
+        applyPanelHeightVh(next, true);
+        return;
+    }
+
     if (preset === 'trip-completion') {
         panelDragPreset = 'trip-completion';
         panelMinHeight = 60;
@@ -12083,13 +12093,14 @@ function configurePassengerMainPanelForSection(name) {
         return;
     }
 
-    if (panelDragPreset === 'trip-completion') {
-        setPanelDragPreset('default');
+    if (name === 'rideSelect') {
+        // Allow a wider draggable range in ride selection so users can scroll and control the panel easily.
+        setPanelDragPreset('ride-select');
+        return;
     }
 
-    if (name === 'rideSelect') {
-        // Keep ride selection anchored at half screen so map remains visible.
-        applyPanelHeightVh(panelMaxHeight, true);
+    if (panelDragPreset === 'trip-completion' || panelDragPreset === 'ride-select') {
+        setPanelDragPreset('default');
     }
 }
 
