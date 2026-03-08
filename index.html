@@ -137,25 +137,6 @@
 
             .ride-select-sheet {
                 background: linear-gradient(180deg, #f9fafb 0%, #ffffff 28%);
-                display: flex;
-                flex-direction: column;
-                gap: 0.85rem;
-                min-height: 100%;
-            }
-
-            .ride-select-header {
-                position: sticky;
-                top: 0;
-                z-index: 20;
-                background: linear-gradient(180deg, rgba(249, 250, 251, 0.98) 0%, rgba(255, 255, 255, 0.98) 78%, rgba(255, 255, 255, 0) 100%);
-                backdrop-filter: blur(3px);
-                padding-bottom: 0.75rem;
-            }
-
-            .ride-select-scroll-tools {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 0.5rem;
             }
 
             .ride-cards-stack .ride-option-card {
@@ -173,36 +154,6 @@
                 background: linear-gradient(180deg, #ffffff 0%, #f0fdfa 100%);
                 box-shadow: 0 12px 26px -16px rgba(20, 184, 166, 0.65);
                 transform: translateY(-1px);
-            }
-
-            #car-options-list {
-                max-height: clamp(14rem, 36vh, 24rem);
-                overflow-y: auto;
-                overscroll-behavior-y: contain;
-                padding-right: 0.25rem;
-            }
-
-            #car-options-list::-webkit-scrollbar {
-                width: 8px;
-            }
-
-            #car-options-list::-webkit-scrollbar-track {
-                background: #f1f5f9;
-                border-radius: 99px;
-            }
-
-            #car-options-list::-webkit-scrollbar-thumb {
-                background: #94a3b8;
-                border-radius: 99px;
-            }
-
-            .ride-select-footer {
-                position: sticky;
-                bottom: 0;
-                z-index: 25;
-                padding-top: 0.75rem;
-                padding-bottom: calc(0.35rem + env(safe-area-inset-bottom));
-                background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.97) 26%, #ffffff 100%);
             }
       
       .no-scrollbar::-webkit-scrollbar {
@@ -488,98 +439,6 @@
             #driver-panel-expand-floating:hover {
                 animation: none;
             }
-
-            #main-panel,
-            #state-ride-select {
-                -webkit-overflow-scrolling: touch;
-                overscroll-behavior-y: contain;
-                touch-action: pan-y;
-            }
-
-            #main-panel {
-                width: min(100%, 34rem);
-                max-height: min(78dvh, 78vh);
-                min-height: 16rem;
-            }
-
-            #state-ride-select {
-                padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
-            }
-
-            #main-panel.ride-select-active {
-                display: flex;
-                flex-direction: column;
-                overflow-y: hidden;
-            }
-
-            #main-panel.ride-select-active #state-ride-select {
-                flex: 1 1 auto;
-                min-height: 0;
-                height: auto;
-                max-height: none;
-                overflow-y: auto;
-                overscroll-behavior-y: contain;
-            }
-
-            #main-panel,
-            #state-ride-select {
-                scrollbar-gutter: stable;
-            }
-
-            #main-panel::-webkit-scrollbar,
-            #state-ride-select::-webkit-scrollbar {
-                width: 8px;
-            }
-
-            #main-panel::-webkit-scrollbar-track,
-            #state-ride-select::-webkit-scrollbar-track {
-                background: #eef2f7;
-                border-radius: 10px;
-            }
-
-            #main-panel::-webkit-scrollbar-thumb,
-            #state-ride-select::-webkit-scrollbar-thumb {
-                background: #94a3b8;
-                border-radius: 10px;
-            }
-
-            #main-panel::-webkit-scrollbar-thumb:hover,
-            #state-ride-select::-webkit-scrollbar-thumb:hover {
-                background: #64748b;
-            }
-
-            @media (max-width: 640px) {
-                #main-panel {
-                    width: 100%;
-                    max-width: 100%;
-                    border-top-left-radius: 1.5rem;
-                    border-top-right-radius: 1.5rem;
-                    max-height: min(90dvh, 90vh);
-                }
-
-                #state-ride-select .grid.grid-cols-2 {
-                    grid-template-columns: 1fr;
-                }
-
-                #car-options-list {
-                    max-height: clamp(16rem, 38vh, 26rem);
-                }
-
-                .ride-select-scroll-tools {
-                    grid-template-columns: 1fr;
-                }
-            }
-
-            @media (min-width: 1024px) {
-                #main-panel {
-                    width: min(100%, 32rem);
-                    max-height: min(80dvh, 80vh);
-                }
-
-                #car-options-list {
-                    max-height: clamp(15rem, 30vh, 22rem);
-                }
-            }
     </style>
 </head>
 <body class="bg-gray-100 h-screen overflow-hidden flex flex-col">
@@ -845,15 +704,15 @@
         </div>
 
         <!-- Map Controls -->
-        <div class="absolute bottom-80 left-4 flex flex-col space-y-2.5 pointer-events-auto z-20">
-            <button id="zoom-in" class="w-9 h-9 bg-white rounded-xl shadow-lg text-gray-600 hover:text-indigo-600 hover:bg-gray-50 flex items-center justify-center transition-all active:scale-90 hover:shadow-xl">
-                <i class="fas fa-plus text-xs"></i>
+        <div class="absolute bottom-80 left-4 flex flex-col space-y-3 pointer-events-auto z-20">
+            <button id="zoom-in" class="w-11 h-11 bg-white rounded-2xl shadow-lg text-gray-600 hover:text-indigo-600 hover:bg-gray-50 flex items-center justify-center transition-all active:scale-90 hover:shadow-xl">
+                <i class="fas fa-plus"></i>
             </button>
-            <button id="zoom-out" class="w-9 h-9 bg-white rounded-xl shadow-lg text-gray-600 hover:text-indigo-600 hover:bg-gray-50 flex items-center justify-center transition-all active:scale-90 hover:shadow-xl">
-                <i class="fas fa-minus text-xs"></i>
+            <button id="zoom-out" class="w-11 h-11 bg-white rounded-2xl shadow-lg text-gray-600 hover:text-indigo-600 hover:bg-gray-50 flex items-center justify-center transition-all active:scale-90 hover:shadow-xl">
+                <i class="fas fa-minus"></i>
             </button>
-            <button id="center-map" class="w-9 h-9 bg-white rounded-xl shadow-lg text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-all active:scale-90 mt-3 hover:shadow-xl">
-                <i class="fas fa-crosshairs text-xs"></i>
+            <button id="center-map" class="w-11 h-11 bg-white rounded-2xl shadow-lg text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-all active:scale-90 mt-4 hover:shadow-xl">
+                <i class="fas fa-crosshairs"></i>
             </button>
         </div>
 
@@ -1057,12 +916,11 @@
         </div>
 
         <!-- Panel Container -->
-        <div class="bg-white rounded-t-[2.5rem] shadow-[0_-10px_60px_-15px_rgba(0,0,0,0.15)] w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out border-t border-gray-50 touch-pan-y" id="main-panel">
+        <div class="bg-white rounded-t-[2.5rem] shadow-[0_-10px_60px_-15px_rgba(0,0,0,0.15)] w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out border-t border-gray-50" id="main-panel" style="max-height: 50vh;">
             
             <!-- Draggable Handle -->
-            <div class="sticky top-0 z-30 py-3 bg-white/95 backdrop-blur-sm cursor-grab active:cursor-grabbing" id="panel-drag-handle" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
-                <div class="w-14 h-1.5 bg-gray-300 rounded-full mx-auto"></div>
-                <p class="text-[10px] text-gray-400 font-bold text-center mt-2">اسحب لأعلى أو لأسفل</p>
+            <div class="py-3 cursor-grab active:cursor-grabbing" id="panel-drag-handle" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
+                <div class="w-12 h-1.5 bg-gray-300 rounded-full mx-auto"></div>
             </div>
             
             <!-- State 1: Where to? -->
@@ -1127,21 +985,21 @@
 
                 <!-- Saved Places (Horizontal Scroll) -->
                 <div class="mt-6 sm:mt-8 flex space-x-3 sm:space-x-4 space-x-reverse overflow-x-auto no-scrollbar pb-2">
-                    <button id="saved-place-home-btn" onclick="selectSavedPlace('home')" oncontextmenu="savePlaceAs(event, 'home')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
+                    <button onclick="selectSavedPlace('home')" oncontextmenu="savePlaceAs(event, 'home')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
                         <div class="w-14 h-14 sm:w-16 sm:h-16 bg-indigo-50 rounded-xl sm:rounded-2xl flex items-center justify-center text-indigo-600 mb-2 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm group-hover:shadow-indigo-300 group-hover:shadow-lg">
                             <i class="fas fa-home text-lg sm:text-xl"></i>
                         </div>
                         <span class="text-xs sm:text-sm text-gray-600 font-bold group-hover:text-indigo-600 transition-colors">المنزل</span>
                         <span id="home-set-indicator" class="hidden absolute top-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></span>
                     </button>
-                    <button id="saved-place-work-btn" onclick="selectSavedPlace('work')" oncontextmenu="savePlaceAs(event, 'work')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
+                    <button onclick="selectSavedPlace('work')" oncontextmenu="savePlaceAs(event, 'work')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
                         <div class="w-14 h-14 sm:w-16 sm:h-16 bg-gray-50 rounded-xl sm:rounded-2xl flex items-center justify-center text-gray-600 mb-2 group-hover:bg-gray-800 group-hover:text-white transition-all shadow-sm group-hover:shadow-lg">
                             <i class="fas fa-briefcase text-lg sm:text-xl"></i>
                         </div>
                         <span class="text-xs sm:text-sm text-gray-600 font-bold group-hover:text-gray-800 transition-colors">العمل</span>
                         <span id="work-set-indicator" class="hidden absolute top-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></span>
                     </button>
-                    <button id="saved-place-custom-btn" onclick="openSavedPlacesList()" oncontextmenu="savePlaceAs(event, 'custom')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
+                    <button onclick="openSavedPlacesList()" oncontextmenu="savePlaceAs(event, 'custom')" class="flex flex-col items-center min-w-[75px] sm:min-w-[85px] group relative active:scale-95 transition-transform">
                         <div class="w-14 h-14 sm:w-16 sm:h-16 bg-gray-50 rounded-xl sm:rounded-2xl flex items-center justify-center text-indigo-600 mb-2 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm group-hover:shadow-lg">
                             <i class="fas fa-bookmark text-lg sm:text-xl"></i>
                         </div>
@@ -1173,48 +1031,31 @@
                          </div>
                      </div>
                 </div>
-
-                <button id="destination-continue-btn" type="button" class="mt-5 w-full bg-gradient-to-r from-indigo-600 to-indigo-700 text-white py-3.5 rounded-2xl font-extrabold shadow-lg shadow-indigo-200 hover:from-indigo-700 hover:to-indigo-800 transition-all">
-                    التالي: اختر نوع السيارة
-                </button>
             </div>
             </div>
 
             <!-- State 2: Select Car -->
-            <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-8 ride-select-sheet overflow-y-auto touch-pan-y">
-                <div id="ride-select-drag-handle" class="pt-1 pb-2 cursor-grab active:cursor-grabbing select-none ride-select-header">
-                    <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-4"></div>
-                    <div class="text-center mb-4 select-none">
-                        <h3 class="text-2xl font-extrabold text-gray-800">اختر الرحلة</h3>
-                        <div class="flex justify-center items-center mt-2 space-x-2 space-x-reverse">
-                            <span id="ride-distance-badge" class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold">-- كم</span>
-                            <span id="ride-time-badge" class="bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-xs font-bold">-- دقيقة</span>
-                        </div>
-                        <div class="mt-2">
-                            <span id="ride-price-summary" class="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold hidden">السعر: -- ر.س</span>
-                        </div>
+            <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-8 h-full overflow-y-auto no-scrollbar ride-select-sheet">
+                <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
+                <div class="text-center mb-6">
+                    <h3 class="text-2xl font-extrabold text-gray-800">اختر الرحلة</h3>
+                    <div class="flex justify-center items-center mt-2 space-x-2 space-x-reverse">
+                        <span id="ride-distance-badge" class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold">-- كم</span>
+                        <span id="ride-time-badge" class="bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-xs font-bold">-- دقيقة</span>
                     </div>
-
-                    <div class="ride-select-scroll-tools mb-4">
-                        <button id="ride-select-scroll-up" type="button" class="w-full bg-white text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm hover:bg-gray-50 transition-colors">
-                            <i class="fas fa-chevron-up ml-1"></i>
-                            طلع لفوق
-                        </button>
-                        <button id="ride-select-scroll-down" type="button" class="w-full bg-white text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm hover:bg-gray-50 transition-colors">
-                            <i class="fas fa-chevron-down ml-1"></i>
-                            انزل لتحت
-                        </button>
+                    <div class="mt-2">
+                        <span id="ride-price-summary" class="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold hidden">السعر: -- ر.س</span>
                     </div>
                 </div>
 
-                <button id="car-options-toggle" type="button" class="w-full mb-4 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors" aria-expanded="true">
+                <button id="car-options-toggle" type="button" onclick="toggleCarOptions()" class="w-full mb-4 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors" aria-expanded="true">
                     <i id="car-options-toggle-icon" class="fas fa-chevron-up"></i>
                     <span id="car-options-toggle-text">إخفاء أنواع السيارات</span>
                 </button>
 
                 <div id="car-options-list" class="space-y-4 mb-8 ride-cards-stack">
                     <!-- Economy -->
-                    <div data-car-type="economy" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform">
+                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'economy')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-car-side text-3xl sm:text-4xl text-gray-600"></i>
@@ -1230,7 +1071,7 @@
                     </div>
 
                     <!-- Family -->
-                    <div data-car-type="family" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform">
+                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'family')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-shuttle-van text-3xl sm:text-4xl text-indigo-600"></i>
@@ -1246,7 +1087,7 @@
                     </div>
 
                     <!-- Luxury -->
-                    <div data-car-type="luxury" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform">
+                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'luxury')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-gem text-3xl sm:text-4xl text-black drop-shadow-md"></i>
@@ -1262,7 +1103,7 @@
                     </div>
 
                     <!-- Delivery -->
-                    <div data-car-type="delivery" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform">
+                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'delivery')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-box text-3xl sm:text-4xl text-orange-500"></i>
@@ -1387,12 +1228,10 @@
                     </div>
                 </div>
 
-                <div class="ride-select-footer">
-                    <button id="request-btn" onclick="requestRide()" class="w-full bg-gradient-to-r from-gray-900 to-black text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-400/50 hover:shadow-2xl transform hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex justify-center items-center" disabled>
-                        <span>اطلب سيارة</span>
-                        <i class="fas fa-arrow-left mr-2 opacity-0 transition-opacity group-hover:opacity-100"></i>
-                    </button>
-                </div>
+                <button id="request-btn" onclick="requestRide()" class="w-full bg-gradient-to-r from-gray-900 to-black text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-400/50 hover:shadow-2xl transform hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex justify-center items-center" disabled>
+                    <span>اطلب سيارة</span>
+                    <i class="fas fa-arrow-left mr-2 opacity-0 transition-opacity group-hover:opacity-100"></i>
+                </button>
             </div>
 
             <!-- State 3: Finding Driver -->
@@ -3255,7 +3094,7 @@
     
     <!-- Script loaded at the end -->
     <script src="/socket.io/socket.io.js"></script>
-    <script src="api-service.js?v=20260308-2"></script>
-    <script src="script.js?v=20260308-5"></script>
+    <script src="api-service.js?v=20260205-1"></script>
+    <script src="script.js?v=20260205-1"></script>
 </body>
 </html>

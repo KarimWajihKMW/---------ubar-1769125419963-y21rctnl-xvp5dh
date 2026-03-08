@@ -2589,7 +2589,7 @@ let etaSeconds = 0;
 let driverToPassengerAnim = null;
 let driverToDestinationAnim = null;
 let passengerToDestinationAnim = null;
-let mapSelectionMode = null;
+let mapSelectionMode = 'destination';
 let isDriverInfoCollapsed = false;
 let isDriverPanelCollapsed = false;
 let isPassengerPanelHidden = false;
@@ -4651,19 +4651,18 @@ async function initLeafletMap() {
     // Destination/Pickup select by click
     leafletMap.on('click', e => {
         if (!isPassengerMapSelectionEnabled()) return;
-        if (!mapSelectionMode) return;
         if (mapSelectionMode === 'pickup') {
             reverseGeocode(e.latlng.lat, e.latlng.lng, (address) => {
                 setPickup({ lat: e.latlng.lat, lng: e.latlng.lng }, address);
                 leafletMap.setView([e.latlng.lat, e.latlng.lng], Math.max(leafletMap.getZoom(), 14));
                 showToast('تم تحديد موقع الالتقاط');
             });
-            clearMapSelectionMode();
+            mapSelectionMode = 'destination';
+            updateMapSelectionButtons();
             return;
         }
 
         setDestination({ lat: e.latlng.lat, lng: e.latlng.lng }, 'وجهة محددة');
-        clearMapSelectionMode();
     });
 
     // Hook destination search input
@@ -4966,23 +4965,6 @@ function updateMapSelectionButtons() {
         destBtn.classList.toggle('ring-2', mapSelectionMode === 'destination');
         destBtn.classList.toggle('ring-indigo-500', mapSelectionMode === 'destination');
     }
-}
-
-function clearMapSelectionMode() {
-    mapSelectionMode = null;
-    updateMapSelectionButtons();
-}
-
-function isRideSelectStateVisible() {
-    const rideSelectState = document.getElementById('state-ride-select');
-    return !!(rideSelectState && !rideSelectState.classList.contains('hidden'));
-}
-
-function shouldBlockMapWorldInteraction() {
-    // While user is selecting ride options, ignore fallback-map gestures
-    // unless map selection was explicitly enabled from a map button.
-    if (!isRideSelectStateVisible()) return false;
-    return !mapSelectionMode;
 }
 
 function isPassengerMapSelectionEnabled() {
@@ -7080,11 +7062,6 @@ window.selectCar = function(element, type) {
     });
     element.classList.add('selected');
     currentCarType = type;
-
-    // Keep the selected option visible when the car list is in its own scroll area.
-    if (typeof element.scrollIntoView === 'function') {
-        element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
     
     const est = computeTripEstimates();
     currentTripPrice = computePrice(type, est.distanceKm);
@@ -7310,7 +7287,6 @@ window.switchSection = function(name) {
     }
 
     if (name === 'rideSelect') {
-        clearMapSelectionMode();
         try { window.refreshFamilyUI && window.refreshFamilyUI(); } catch (e) { /* ignore */ }
         try { window.refreshNoteTemplatesUI && window.refreshNoteTemplatesUI(); } catch (e) { /* ignore */ }
         try { updatePriceLockUI(); } catch (e) { /* ignore */ }
@@ -10805,7 +10781,6 @@ function toggleAdminMenu() {
 // --- Map Drag Logic (Enhanced for Mobile Touch) ---
 function startDrag(e) {
     if (!isMapWorldActive()) return;
-    if (shouldBlockMapWorldInteraction()) return;
     if (e.target.closest('.pointer-events-auto')) return;
     const mapContainer = document.getElementById('map-container');
     
@@ -10889,8 +10864,6 @@ function handleMapClick(cx, cy) {
     // Only handle click for destination setting in Passenger Mode
     if (currentUserRole !== 'passenger') return;
     if (!isMapWorldActive()) return;
-    if (!isPassengerMapSelectionEnabled()) return;
-    if (!mapSelectionMode) return;
 
     const mapWorld = document.getElementById('map-world');
     const destMarker = document.getElementById('dest-marker');
@@ -10908,7 +10881,6 @@ function handleMapClick(cx, cy) {
     
     if (destInput) destInput.value = "تم تحديد موقع على الخريطة";
     window.confirmDestination("Map Point");
-    clearMapSelectionMode();
 }
 
 // --- Driver Tracking Logic (Visuals) ---
@@ -11330,153 +11302,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Bind passenger ride-select controls even if inline onclick/ontouchstart is blocked by CSP.
-    const bindOnce = (el, key, eventName, handler, options) => {
-        if (!el) return;
-        const flag = `bound${key}`;
-        if (el.dataset && el.dataset[flag] === '1') return;
-        el.addEventListener(eventName, handler, options);
-        if (el.dataset) el.dataset[flag] = '1';
-    };
-
-    const requestBtn = document.getElementById('request-btn');
-    bindOnce(requestBtn, 'RequestRideClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.requestRide === 'function') {
-            window.requestRide();
-        }
-    });
-
-    const rideSelectDragHandle = document.getElementById('ride-select-drag-handle');
-    const rideSelectState = document.getElementById('state-ride-select');
-    bindOnce(rideSelectDragHandle, 'PanelMouseDown', 'mousedown', (e) => {
-        if (typeof window.startDragPanel === 'function') {
-            window.startDragPanel(e);
-        }
-    });
-    bindOnce(rideSelectDragHandle, 'PanelTouchStart', 'touchstart', (e) => {
-        if (typeof window.startDragPanel === 'function') {
-            window.startDragPanel(e);
-        }
-    }, { passive: false });
-
-    const scrollUpBtn = document.getElementById('ride-select-scroll-up');
-    const scrollDownBtn = document.getElementById('ride-select-scroll-down');
-    bindOnce(scrollUpBtn, 'ScrollUpClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.scrollRideSelectPanel === 'function') {
-            window.scrollRideSelectPanel('up');
-        }
-    });
-    bindOnce(scrollDownBtn, 'ScrollDownClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.scrollRideSelectPanel === 'function') {
-            window.scrollRideSelectPanel('down');
-        }
-    });
-
-    const carToggleBtn = document.getElementById('car-options-toggle');
-    bindOnce(carToggleBtn, 'CarToggleClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.toggleCarOptions === 'function') {
-            window.toggleCarOptions();
-        }
-    });
-
-    bindOnce(rideSelectState, 'RideSelectDelegatedClick', 'click', (e) => {
-        const card = e.target && e.target.closest ? e.target.closest('.car-select[data-car-type]') : null;
-        if (!card) return;
-        e.preventDefault();
-        const type = card.getAttribute('data-car-type');
-        if (typeof window.selectCar === 'function' && type) {
-            window.selectCar(card, type);
-        }
-    });
-
-    const splitFareCheck = document.getElementById('split-fare-check');
-    bindOnce(splitFareCheck, 'SplitFareChange', 'change', () => {
-        if (typeof window.toggleSplitFareUI === 'function') {
-            window.toggleSplitFareUI();
-        }
-    });
-
-    const extraOptionsToggleBtn = document.getElementById('extra-options-toggle-btn');
-    bindOnce(extraOptionsToggleBtn, 'ExtraOptionsClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.toggleRideExtraOptions === 'function') {
-            window.toggleRideExtraOptions();
-        }
-    });
-
-    const pickupMapBtn = document.getElementById('pickup-map-btn');
-    bindOnce(pickupMapBtn, 'PickupMapClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.startMapSelection === 'function') {
-            window.startMapSelection('pickup');
-        }
-    });
-
-    const pickupGpsBtn = document.getElementById('pickup-gps-btn');
-    bindOnce(pickupGpsBtn, 'PickupGpsClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.useCurrentLocation === 'function') {
-            window.useCurrentLocation();
-        }
-    });
-
-    const destMapBtn = document.getElementById('dest-map-btn');
-    bindOnce(destMapBtn, 'DestinationMapClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.startMapSelection === 'function') {
-            window.startMapSelection('destination');
-        }
-    });
-
-    const pickupHubsToggleBtn = document.getElementById('pickup-hubs-toggle-btn');
-    bindOnce(pickupHubsToggleBtn, 'PickupHubToggleClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.togglePickupHubSuggestions === 'function') {
-            window.togglePickupHubSuggestions();
-        }
-    });
-
-    const destinationContinueBtn = document.getElementById('destination-continue-btn');
-    bindOnce(destinationContinueBtn, 'DestinationContinueClick', 'click', (e) => {
-        e.preventDefault();
-        const destInputEl = document.getElementById('dest-input');
-        const destinationLabel = String(destInputEl?.value || '').trim();
-        if (!destinationLabel) {
-            showToast('اكتب الوجهة أو اخترها من الخريطة أولاً');
-            return;
-        }
-        if (typeof window.confirmDestination === 'function') {
-            window.confirmDestination(destinationLabel);
-        }
-    });
-
-    const savedHomeBtn = document.getElementById('saved-place-home-btn');
-    bindOnce(savedHomeBtn, 'SavedHomeClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.selectSavedPlace === 'function') {
-            window.selectSavedPlace('home');
-        }
-    });
-
-    const savedWorkBtn = document.getElementById('saved-place-work-btn');
-    bindOnce(savedWorkBtn, 'SavedWorkClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.selectSavedPlace === 'function') {
-            window.selectSavedPlace('work');
-        }
-    });
-
-    const savedCustomBtn = document.getElementById('saved-place-custom-btn');
-    bindOnce(savedCustomBtn, 'SavedCustomClick', 'click', (e) => {
-        e.preventDefault();
-        if (typeof window.openSavedPlacesList === 'function') {
-            window.openSavedPlacesList();
-        }
-    });
+    // request button handled by inline onclick="requestRide()"; avoid double-binding here
 
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.addEventListener('click', window.resetApp);
@@ -12215,10 +12041,6 @@ window.initPaymentFlow = function() {
 let panelDragStartY = 0;
 let panelCurrentHeight = 50; // in vh
 let isDraggingPanel = false;
-let panelDragStartHeight = 50;
-let panelDragHasMoved = false;
-const PANEL_DRAG_THRESHOLD_PX = 10;
-const PANEL_DRAG_TOP_ZONE_PX = 170;
 
 let panelMinHeight = 10;
 let panelMidHeight = 30;
@@ -12228,49 +12050,12 @@ let panelDragPreset = 'default';
 function applyPanelHeightVh(vh, animate = true) {
     const panel = document.getElementById('main-panel');
     if (!panel) return;
-    const safeVh = Math.max(18, Math.min(96, Number(vh) || 50));
     panel.style.transition = animate ? 'max-height 0.3s ease-in-out' : 'none';
-    panel.style.maxHeight = `min(${safeVh}dvh, ${safeVh}vh)`;
-    panelCurrentHeight = safeVh;
+    panel.style.maxHeight = `${vh}vh`;
+    panelCurrentHeight = vh;
 }
 
 function setPanelDragPreset(preset) {
-    const rideSelectState = document.getElementById('state-ride-select');
-    const panel = document.getElementById('main-panel');
-    const viewportWidth = window.innerWidth || 0;
-    const isSmallMobile = viewportWidth > 0 && viewportWidth < 640;
-    const isDesktop = viewportWidth >= 1024;
-
-    if (preset === 'ride-select') {
-        panelDragPreset = 'ride-select';
-        if (isSmallMobile) {
-            panelMinHeight = 44;
-            panelMidHeight = 72;
-            panelMaxHeight = 94;
-        } else if (isDesktop) {
-            panelMinHeight = 28;
-            panelMidHeight = 50;
-            panelMaxHeight = 80;
-        } else {
-            panelMinHeight = 32;
-            panelMidHeight = 60;
-            panelMaxHeight = 88;
-        }
-        const preferredOpenHeight = isSmallMobile ? 84 : (isDesktop ? 66 : 74);
-        const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, preferredOpenHeight));
-        applyPanelHeightVh(next, true);
-
-        // Force a dedicated inner scroll area so ride options remain controllable on all devices.
-        if (rideSelectState) {
-            rideSelectState.style.overflowY = 'auto';
-            rideSelectState.style.webkitOverflowScrolling = 'touch';
-            rideSelectState.style.maxHeight = '';
-            rideSelectState.style.height = '';
-        }
-        if (panel) panel.scrollTop = 0;
-        return;
-    }
-
     if (preset === 'trip-completion') {
         panelDragPreset = 'trip-completion';
         panelMinHeight = 60;
@@ -12281,106 +12066,37 @@ function setPanelDragPreset(preset) {
     }
 
     panelDragPreset = 'default';
-    if (isSmallMobile) {
-        panelMinHeight = 28;
-        panelMidHeight = 46;
-        panelMaxHeight = 72;
-    } else if (isDesktop) {
-        panelMinHeight = 14;
-        panelMidHeight = 28;
-        panelMaxHeight = 52;
-    } else {
-        panelMinHeight = 18;
-        panelMidHeight = 34;
-        panelMaxHeight = 58;
-    }
-
-    if (rideSelectState) {
-        rideSelectState.style.maxHeight = '';
-        rideSelectState.style.height = '';
-    }
+    panelMinHeight = 10;
+    panelMidHeight = 30;
+    panelMaxHeight = 50;
 
     const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMaxHeight));
     applyPanelHeightVh(next, true);
 }
 
-let panelResponsiveResizeTimer = null;
-
-window.addEventListener('resize', () => {
-    if (panelResponsiveResizeTimer) {
-        clearTimeout(panelResponsiveResizeTimer);
-    }
-    panelResponsiveResizeTimer = setTimeout(() => {
-        if (panelDragPreset === 'ride-select') {
-            setPanelDragPreset('ride-select');
-            return;
-        }
-        if (panelDragPreset === 'trip-completion') {
-            setPanelDragPreset('trip-completion');
-            return;
-        }
-        setPanelDragPreset('default');
-    }, 140);
-});
-
 function configurePassengerMainPanelForSection(name) {
     const panel = document.getElementById('main-panel');
     if (!panel) return;
-
-    panel.classList.toggle('ride-select-active', name === 'rideSelect');
 
     if (name === 'payment-success') {
         setPanelDragPreset('trip-completion');
         return;
     }
 
-    if (name === 'rideSelect') {
-        // Allow a wider draggable range in ride selection so users can scroll and control the panel easily.
-        setPanelDragPreset('ride-select');
-        return;
+    if (panelDragPreset === 'trip-completion') {
+        setPanelDragPreset('default');
     }
 
-    if (panelDragPreset === 'trip-completion' || panelDragPreset === 'ride-select') {
-        setPanelDragPreset('default');
+    if (name === 'rideSelect') {
+        // Keep ride selection anchored at half screen so map remains visible.
+        applyPanelHeightVh(panelMaxHeight, true);
     }
 }
 
 window.startDragPanel = function(e) {
-    if (isDraggingPanel) return;
-
-    const handle = document.getElementById('ride-select-drag-handle');
-    const rideSelectState = document.getElementById('state-ride-select');
-    const target = e && e.target && e.target.nodeType === 1 ? e.target : null;
-    const startedFromHandle = handle && target ? handle.contains(target) : false;
-    const isRideSelectVisible = rideSelectState && !rideSelectState.classList.contains('hidden');
-
-    const pointY = e && e.type === 'touchstart' && e.touches && e.touches[0]
-        ? e.touches[0].clientY
-        : (e && typeof e.clientY === 'number' ? e.clientY : null);
-
-    let startedFromTopZone = false;
-    if (isRideSelectVisible && rideSelectState && pointY !== null) {
-        const rect = rideSelectState.getBoundingClientRect();
-        startedFromTopZone = pointY <= (rect.top + PANEL_DRAG_TOP_ZONE_PX);
-    }
-
-    const rideSelectAtTop = !rideSelectState || rideSelectState.scrollTop <= 4;
-
-    // In ride selection, allow drag only from handle OR top zone while content is already at the top.
-    if (panelDragPreset === 'ride-select' && !startedFromHandle) {
-        if (!(startedFromTopZone && rideSelectAtTop)) return;
-    }
-
-    // Prevent accidental drag starts from interactive elements.
-    if (target && target.closest('button, input, textarea, select, a') && !startedFromHandle) return;
-
-    if (e && e.type !== 'touchstart' && typeof e.preventDefault === 'function') e.preventDefault();
-
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     isDraggingPanel = true;
     panelDragStartY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
-    panelDragStartHeight = panelCurrentHeight;
-    panelDragHasMoved = false;
-
     const panel = document.getElementById('main-panel');
     if (panel) {
         panel.style.transition = 'none';
@@ -12390,30 +12106,21 @@ window.startDragPanel = function(e) {
     document.addEventListener('touchmove', dragPanel, { passive: false });
     document.addEventListener('mouseup', endDragPanel);
     document.addEventListener('touchend', endDragPanel);
-    document.addEventListener('touchcancel', endDragPanel);
 };
 
 function dragPanel(e) {
     if (!isDraggingPanel) return;
-
-    if (e && e.type === 'touchmove' && (!e.touches || !e.touches.length)) return;
+    if (e && e.type === 'touchmove' && typeof e.preventDefault === 'function') e.preventDefault();
     
     const currentY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
     const deltaY = currentY - panelDragStartY;
-
-    // Apply a small movement threshold so taps on the handle don't instantly resize the panel.
-    if (!panelDragHasMoved && Math.abs(deltaY) < PANEL_DRAG_THRESHOLD_PX) return;
-    panelDragHasMoved = true;
-
-    if (e && e.type === 'touchmove' && typeof e.preventDefault === 'function') e.preventDefault();
-
     const panel = document.getElementById('main-panel');
     
     if (!panel) return;
     
     // Calculate new height (dragging down decreases height)
     const windowHeight = window.innerHeight;
-    const newHeightPx = (panelDragStartHeight / 100 * windowHeight) - deltaY;
+    const newHeightPx = (panelCurrentHeight / 100 * windowHeight) - deltaY;
     const newHeightVh = (newHeightPx / windowHeight) * 100;
     
     // Constrain based on current preset
@@ -12429,16 +12136,6 @@ function endDragPanel(e) {
     
     if (panel) {
         panel.style.transition = 'max-height 0.3s ease-in-out';
-
-        if (!panelDragHasMoved) {
-            panel.style.maxHeight = `${panelCurrentHeight}vh`;
-            document.removeEventListener('mousemove', dragPanel);
-            document.removeEventListener('touchmove', dragPanel);
-            document.removeEventListener('mouseup', endDragPanel);
-            document.removeEventListener('touchend', endDragPanel);
-            document.removeEventListener('touchcancel', endDragPanel);
-            return;
-        }
         
         // Get current height
         const currentMaxHeight = parseFloat(panel.style.maxHeight);
@@ -12474,101 +12171,6 @@ function endDragPanel(e) {
     document.removeEventListener('touchmove', dragPanel);
     document.removeEventListener('mouseup', endDragPanel);
     document.removeEventListener('touchend', endDragPanel);
-    document.removeEventListener('touchcancel', endDragPanel);
-}
-
-window.scrollRideSelectPanel = function(direction) {
-    const rideSelectState = document.getElementById('state-ride-select');
-    const carOptionsList = document.getElementById('car-options-list');
-    const panel = document.getElementById('main-panel');
-    const canScrollCars = carOptionsList
-        && !carOptionsList.classList.contains('hidden')
-        && carOptionsList.scrollHeight > carOptionsList.clientHeight;
-    const scrollTarget = canScrollCars
-        ? carOptionsList
-        : (rideSelectState && rideSelectState.scrollHeight > rideSelectState.clientHeight
-            ? rideSelectState
-            : panel);
-    if (!scrollTarget) return;
-
-    const step = 260;
-    const offset = direction === 'up' ? -step : step;
-    scrollTarget.scrollBy({ top: offset, behavior: 'smooth' });
-};
-
-let rideSelectGlobalBindingsReady = false;
-
-function bindRideSelectGlobalFallbacks() {
-    if (rideSelectGlobalBindingsReady) return;
-
-    const rideSelectState = document.getElementById('state-ride-select');
-    if (!rideSelectState) return;
-
-    rideSelectGlobalBindingsReady = true;
-
-    document.addEventListener('click', (e) => {
-        const target = e.target;
-        if (!target || !target.closest) return;
-
-        const upBtn = target.closest('#ride-select-scroll-up');
-        if (upBtn) {
-            e.preventDefault();
-            if (typeof window.scrollRideSelectPanel === 'function') {
-                window.scrollRideSelectPanel('up');
-            }
-            return;
-        }
-
-        const downBtn = target.closest('#ride-select-scroll-down');
-        if (downBtn) {
-            e.preventDefault();
-            if (typeof window.scrollRideSelectPanel === 'function') {
-                window.scrollRideSelectPanel('down');
-            }
-            return;
-        }
-
-        const toggleCarsBtn = target.closest('#car-options-toggle');
-        if (toggleCarsBtn) {
-            e.preventDefault();
-            if (typeof window.toggleCarOptions === 'function') {
-                window.toggleCarOptions();
-            }
-            return;
-        }
-
-        const extraOptionsBtn = target.closest('#extra-options-toggle-btn');
-        if (extraOptionsBtn) {
-            e.preventDefault();
-            if (typeof window.toggleRideExtraOptions === 'function') {
-                window.toggleRideExtraOptions();
-            }
-            return;
-        }
-
-        const carCard = target.closest('#state-ride-select .car-select[data-car-type]');
-        if (carCard) {
-            const type = carCard.getAttribute('data-car-type');
-            if (type && typeof window.selectCar === 'function') {
-                e.preventDefault();
-                window.selectCar(carCard, type);
-            }
-        }
-    });
-
-    document.addEventListener('change', (e) => {
-        const target = e.target;
-        if (!target || !target.matches) return;
-        if (target.matches('#split-fare-check') && typeof window.toggleSplitFareUI === 'function') {
-            window.toggleSplitFareUI();
-        }
-    });
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bindRideSelectGlobalFallbacks);
-} else {
-    bindRideSelectGlobalFallbacks();
 }
 
 // ========================================
