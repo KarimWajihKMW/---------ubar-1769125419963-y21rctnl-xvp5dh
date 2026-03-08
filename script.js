@@ -12186,6 +12186,9 @@ window.initPaymentFlow = function() {
 let panelDragStartY = 0;
 let panelCurrentHeight = 50; // in vh
 let isDraggingPanel = false;
+let panelDragStartHeight = 50;
+let panelDragHasMoved = false;
+const PANEL_DRAG_THRESHOLD_PX = 10;
 
 let panelMinHeight = 10;
 let panelMidHeight = 30;
@@ -12251,9 +12254,25 @@ function configurePassengerMainPanelForSection(name) {
 }
 
 window.startDragPanel = function(e) {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (isDraggingPanel) return;
+
+    const handle = document.getElementById('ride-select-drag-handle');
+    const target = e && e.target && e.target.nodeType === 1 ? e.target : null;
+    const startedFromHandle = handle && target ? handle.contains(target) : false;
+
+    // In ride selection, allow panel drag only from the top drag handle to avoid conflict with list scrolling.
+    if (panelDragPreset === 'ride-select' && !startedFromHandle) return;
+
+    // Prevent accidental drag starts from interactive elements.
+    if (target && target.closest('button, input, textarea, select, a') && !startedFromHandle) return;
+
+    if (e && e.type !== 'touchstart' && typeof e.preventDefault === 'function') e.preventDefault();
+
     isDraggingPanel = true;
     panelDragStartY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
+    panelDragStartHeight = panelCurrentHeight;
+    panelDragHasMoved = false;
+
     const panel = document.getElementById('main-panel');
     if (panel) {
         panel.style.transition = 'none';
@@ -12267,17 +12286,25 @@ window.startDragPanel = function(e) {
 
 function dragPanel(e) {
     if (!isDraggingPanel) return;
-    if (e && e.type === 'touchmove' && typeof e.preventDefault === 'function') e.preventDefault();
+
+    if (e && e.type === 'touchmove' && (!e.touches || !e.touches.length)) return;
     
     const currentY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
     const deltaY = currentY - panelDragStartY;
+
+    // Apply a small movement threshold so taps on the handle don't instantly resize the panel.
+    if (!panelDragHasMoved && Math.abs(deltaY) < PANEL_DRAG_THRESHOLD_PX) return;
+    panelDragHasMoved = true;
+
+    if (e && e.type === 'touchmove' && typeof e.preventDefault === 'function') e.preventDefault();
+
     const panel = document.getElementById('main-panel');
     
     if (!panel) return;
     
     // Calculate new height (dragging down decreases height)
     const windowHeight = window.innerHeight;
-    const newHeightPx = (panelCurrentHeight / 100 * windowHeight) - deltaY;
+    const newHeightPx = (panelDragStartHeight / 100 * windowHeight) - deltaY;
     const newHeightVh = (newHeightPx / windowHeight) * 100;
     
     // Constrain based on current preset
@@ -12293,6 +12320,15 @@ function endDragPanel(e) {
     
     if (panel) {
         panel.style.transition = 'max-height 0.3s ease-in-out';
+
+        if (!panelDragHasMoved) {
+            panel.style.maxHeight = `${panelCurrentHeight}vh`;
+            document.removeEventListener('mousemove', dragPanel);
+            document.removeEventListener('touchmove', dragPanel);
+            document.removeEventListener('mouseup', endDragPanel);
+            document.removeEventListener('touchend', endDragPanel);
+            return;
+        }
         
         // Get current height
         const currentMaxHeight = parseFloat(panel.style.maxHeight);
