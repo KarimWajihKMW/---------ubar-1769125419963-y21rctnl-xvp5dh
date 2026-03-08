@@ -12061,7 +12061,8 @@ function setPanelDragPreset(preset) {
         panelMinHeight = 22;
         panelMidHeight = 55;
         panelMaxHeight = 88;
-        const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMidHeight));
+        const preferredOpenHeight = 72;
+        const next = Math.max(panelMinHeight, Math.min(panelMaxHeight, preferredOpenHeight));
         applyPanelHeightVh(next, true);
         return;
     }
@@ -12183,6 +12184,15 @@ function endDragPanel(e) {
     document.removeEventListener('mouseup', endDragPanel);
     document.removeEventListener('touchend', endDragPanel);
 }
+
+window.scrollRideSelectPanel = function(direction) {
+    const panel = document.getElementById('main-panel');
+    if (!panel) return;
+
+    const step = 260;
+    const offset = direction === 'up' ? -step : step;
+    panel.scrollBy({ top: offset, behavior: 'smooth' });
+};
 
 // ========================================
 // TRIP HISTORY SYSTEM
