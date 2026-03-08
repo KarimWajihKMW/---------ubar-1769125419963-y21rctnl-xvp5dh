@@ -1044,7 +1044,7 @@
 
             <!-- State 2: Select Car -->
             <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-8 ride-select-sheet overflow-y-auto touch-pan-y">
-                <div class="pt-1 pb-2 cursor-grab active:cursor-grabbing select-none" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
+                <div id="ride-select-drag-handle" class="pt-1 pb-2 cursor-grab active:cursor-grabbing select-none" onmousedown="startDragPanel(event)" ontouchstart="startDragPanel(event)">
                     <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-4"></div>
                 </div>
                 <div class="text-center mb-6 select-none">
@@ -1059,11 +1059,11 @@
                 </div>
 
                 <div class="mb-4 grid grid-cols-2 gap-2">
-                    <button type="button" onclick="scrollRideSelectPanel('up')" class="w-full bg-white text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm hover:bg-gray-50 transition-colors">
+                    <button id="ride-select-scroll-up" type="button" onclick="scrollRideSelectPanel('up')" class="w-full bg-white text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm hover:bg-gray-50 transition-colors">
                         <i class="fas fa-chevron-up ml-1"></i>
                         طلع لفوق
                     </button>
-                    <button type="button" onclick="scrollRideSelectPanel('down')" class="w-full bg-white text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm hover:bg-gray-50 transition-colors">
+                    <button id="ride-select-scroll-down" type="button" onclick="scrollRideSelectPanel('down')" class="w-full bg-white text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm hover:bg-gray-50 transition-colors">
                         <i class="fas fa-chevron-down ml-1"></i>
                         انزل لتحت
                     </button>
@@ -1076,7 +1076,7 @@
 
                 <div id="car-options-list" class="space-y-4 mb-8 ride-cards-stack">
                     <!-- Economy -->
-                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'economy')">
+                    <div data-car-type="economy" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'economy')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-car-side text-3xl sm:text-4xl text-gray-600"></i>
@@ -1092,7 +1092,7 @@
                     </div>
 
                     <!-- Family -->
-                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'family')">
+                    <div data-car-type="family" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'family')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-shuttle-van text-3xl sm:text-4xl text-indigo-600"></i>
@@ -1108,7 +1108,7 @@
                     </div>
 
                     <!-- Luxury -->
-                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'luxury')">
+                    <div data-car-type="luxury" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'luxury')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-gem text-3xl sm:text-4xl text-black drop-shadow-md"></i>
@@ -1124,7 +1124,7 @@
                     </div>
 
                     <!-- Delivery -->
-                    <div class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'delivery')">
+                    <div data-car-type="delivery" class="car-select ride-option-card flex items-center justify-between p-3 sm:p-4 border border-gray-100 rounded-xl sm:rounded-2xl cursor-pointer bg-white shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'delivery')">
                         <div class="flex items-center">
                             <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
                                 <i class="fas fa-box text-3xl sm:text-4xl text-orange-500"></i>

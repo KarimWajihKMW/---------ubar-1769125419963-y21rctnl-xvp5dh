@@ -11302,7 +11302,82 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // request button handled by inline onclick="requestRide()"; avoid double-binding here
+    // Bind passenger ride-select controls even if inline onclick/ontouchstart is blocked by CSP.
+    const bindOnce = (el, key, eventName, handler, options) => {
+        if (!el) return;
+        const flag = `bound${key}`;
+        if (el.dataset && el.dataset[flag] === '1') return;
+        el.addEventListener(eventName, handler, options);
+        if (el.dataset) el.dataset[flag] = '1';
+    };
+
+    const requestBtn = document.getElementById('request-btn');
+    bindOnce(requestBtn, 'RequestRideClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.requestRide === 'function') {
+            window.requestRide();
+        }
+    });
+
+    const rideSelectDragHandle = document.getElementById('ride-select-drag-handle');
+    bindOnce(rideSelectDragHandle, 'PanelMouseDown', 'mousedown', (e) => {
+        if (typeof window.startDragPanel === 'function') {
+            window.startDragPanel(e);
+        }
+    });
+    bindOnce(rideSelectDragHandle, 'PanelTouchStart', 'touchstart', (e) => {
+        if (typeof window.startDragPanel === 'function') {
+            window.startDragPanel(e);
+        }
+    }, { passive: false });
+
+    const scrollUpBtn = document.getElementById('ride-select-scroll-up');
+    const scrollDownBtn = document.getElementById('ride-select-scroll-down');
+    bindOnce(scrollUpBtn, 'ScrollUpClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.scrollRideSelectPanel === 'function') {
+            window.scrollRideSelectPanel('up');
+        }
+    });
+    bindOnce(scrollDownBtn, 'ScrollDownClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.scrollRideSelectPanel === 'function') {
+            window.scrollRideSelectPanel('down');
+        }
+    });
+
+    const carToggleBtn = document.getElementById('car-options-toggle');
+    bindOnce(carToggleBtn, 'CarToggleClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.toggleCarOptions === 'function') {
+            window.toggleCarOptions();
+        }
+    });
+
+    document.querySelectorAll('.car-select[data-car-type]').forEach((card) => {
+        const type = card.getAttribute('data-car-type');
+        bindOnce(card, 'CarSelectClick', 'click', (e) => {
+            e.preventDefault();
+            if (typeof window.selectCar === 'function' && type) {
+                window.selectCar(card, type);
+            }
+        });
+    });
+
+    const splitFareCheck = document.getElementById('split-fare-check');
+    bindOnce(splitFareCheck, 'SplitFareChange', 'change', () => {
+        if (typeof window.toggleSplitFareUI === 'function') {
+            window.toggleSplitFareUI();
+        }
+    });
+
+    const extraOptionsToggleBtn = document.getElementById('extra-options-toggle-btn');
+    bindOnce(extraOptionsToggleBtn, 'ExtraOptionsClick', 'click', (e) => {
+        e.preventDefault();
+        if (typeof window.toggleRideExtraOptions === 'function') {
+            window.toggleRideExtraOptions();
+        }
+    });
 
     const backBtn = document.getElementById('back-btn');
     if (backBtn) backBtn.addEventListener('click', window.resetApp);
@@ -12186,12 +12261,16 @@ function endDragPanel(e) {
 }
 
 window.scrollRideSelectPanel = function(direction) {
+    const rideSelectState = document.getElementById('state-ride-select');
     const panel = document.getElementById('main-panel');
-    if (!panel) return;
+    const scrollTarget = rideSelectState && rideSelectState.scrollHeight > rideSelectState.clientHeight
+        ? rideSelectState
+        : panel;
+    if (!scrollTarget) return;
 
     const step = 260;
     const offset = direction === 'up' ? -step : step;
-    panel.scrollBy({ top: offset, behavior: 'smooth' });
+    scrollTarget.scrollBy({ top: offset, behavior: 'smooth' });
 };
 
 // ========================================
