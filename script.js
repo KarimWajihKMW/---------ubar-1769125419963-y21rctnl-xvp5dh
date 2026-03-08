@@ -12086,11 +12086,6 @@ function configurePassengerMainPanelForSection(name) {
     if (panelDragPreset === 'trip-completion') {
         setPanelDragPreset('default');
     }
-
-    if (name === 'rideSelect') {
-        // Keep ride selection anchored at half screen so map remains visible.
-        applyPanelHeightVh(panelMaxHeight, true);
-    }
 }
 
 window.startDragPanel = function(e) {
