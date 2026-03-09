@@ -1409,21 +1409,6 @@
                     </div>
                 </div>
 
-                <!-- Schedule Later Option -->
-                <div class="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-2xl p-4 border border-purple-100">
-                    <label class="flex items-center cursor-pointer">
-                        <input type="checkbox" id="schedule-later-check" class="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500">
-                        <div class="mr-3 flex-1">
-                            <span class="font-bold text-gray-800 block">جدولة الرحلة لاحقاً</span>
-                            <span class="text-xs text-gray-600">حدد موعد لاحق للرحلة</span>
-                        </div>
-                        <i class="fas fa-clock text-purple-400 text-2xl"></i>
-                    </label>
-                    <div id="schedule-time-picker" class="hidden mt-3 space-y-2">
-                        <input type="datetime-local" id="schedule-datetime" class="w-full px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 ring-indigo-500/50 outline-none">
-                    </div>
-                </div>
-
                 <!-- Extra Options: Price Lock / Family / Notes / Stops -->
                 <div class="mb-6 bg-gray-50 border border-gray-200 rounded-2xl p-4">
                     <button id="extra-options-toggle-btn" type="button" onclick="toggleRideExtraOptions()" class="w-full flex items-center justify-between text-right">
@@ -1515,6 +1500,21 @@
                             <p class="text-[11px] text-gray-500 mt-2">(MVP) أدخل `user_id` للمشاركين.</p>
                         </div>
                     </div>
+                    </div>
+                </div>
+
+                <!-- Schedule Later Option -->
+                <div class="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-2xl p-4 border border-purple-100">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="schedule-later-check" class="w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500">
+                        <div class="mr-3 flex-1">
+                            <span class="font-bold text-gray-800 block">جدولة الرحلة لاحقاً</span>
+                            <span class="text-xs text-gray-600">حدد موعد لاحق للرحلة</span>
+                        </div>
+                        <i class="fas fa-clock text-purple-400 text-2xl"></i>
+                    </label>
+                    <div id="schedule-time-picker" class="hidden mt-3 space-y-2">
+                        <input type="datetime-local" id="schedule-datetime" class="w-full px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 ring-indigo-500/50 outline-none">
                     </div>
                 </div>
 
