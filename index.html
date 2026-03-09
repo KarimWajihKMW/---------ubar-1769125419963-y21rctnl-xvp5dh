@@ -307,6 +307,9 @@
                 border: 1px solid #e5e7eb;
                 border-radius: 1rem;
                 padding: 0.625rem;
+                transition: max-height 0.3s ease, opacity 0.22s ease, transform 0.22s ease;
+                transform-origin: top;
+                will-change: max-height, opacity, transform;
             }
 
             #ride-select-quick-summary {
@@ -397,6 +400,10 @@
                 .car-select-activate,
                 .metric-value-updated {
                     animation: none !important;
+                    transition: none !important;
+                }
+
+                #car-options-list {
                     transition: none !important;
                 }
             }

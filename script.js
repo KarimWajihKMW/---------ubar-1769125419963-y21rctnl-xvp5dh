@@ -7126,7 +7126,60 @@ window.toggleCarOptions = function() {
 
     if (!list || !toggleBtn) return;
 
-    const isNowHidden = list.classList.toggle('hidden');
+    if (list.dataset.animating === 'true') return;
+
+    const shouldExpand = list.classList.contains('hidden');
+    const reduceMotion = typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (reduceMotion) {
+        list.classList.toggle('hidden', !shouldExpand);
+    } else if (shouldExpand) {
+        list.classList.remove('hidden');
+        list.dataset.animating = 'true';
+        list.style.overflow = 'hidden';
+        list.style.maxHeight = '0px';
+        list.style.opacity = '0';
+        list.style.transform = 'translateY(-6px)';
+
+        requestAnimationFrame(() => {
+            list.style.maxHeight = `${list.scrollHeight}px`;
+            list.style.opacity = '1';
+            list.style.transform = 'translateY(0)';
+        });
+
+        setTimeout(() => {
+            list.style.maxHeight = '';
+            list.style.opacity = '';
+            list.style.transform = '';
+            list.style.overflow = '';
+            list.dataset.animating = 'false';
+        }, 320);
+    } else {
+        list.dataset.animating = 'true';
+        list.style.overflow = 'hidden';
+        list.style.maxHeight = `${list.scrollHeight}px`;
+        list.style.opacity = '1';
+        list.style.transform = 'translateY(0)';
+
+        requestAnimationFrame(() => {
+            list.style.maxHeight = '0px';
+            list.style.opacity = '0';
+            list.style.transform = 'translateY(-6px)';
+        });
+
+        setTimeout(() => {
+            list.classList.add('hidden');
+            list.style.maxHeight = '';
+            list.style.opacity = '';
+            list.style.transform = '';
+            list.style.overflow = '';
+            list.dataset.animating = 'false';
+        }, 320);
+    }
+
+    const isNowHidden = !shouldExpand;
     if (toggleText) {
         toggleText.innerText = isNowHidden ? 'إظهار أنواع السيارات' : 'إخفاء أنواع السيارات';
     }
