@@ -141,6 +141,16 @@
         box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.1), 0 4px 6px -2px rgba(79, 70, 229, 0.05);
       }
 
+            .car-select.selected::before {
+                content: '';
+                position: absolute;
+                right: 0;
+                top: 0;
+                bottom: 0;
+                width: 4px;
+                background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+            }
+
             .car-select::after {
                 content: '';
                 position: absolute;
@@ -198,6 +208,19 @@
                 border: 1px solid #e5e7eb;
                 border-radius: 1rem;
                 padding: 0.625rem;
+            }
+
+            #ride-select-quick-summary {
+                border: 1px solid #dbeafe;
+                background: linear-gradient(180deg, #eff6ff 0%, #eef2ff 100%);
+            }
+
+            @media (min-width: 920px) {
+                #car-options-list {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 0.65rem;
+                }
             }
 
             #passenger-ui-container.passenger-ui-centered {
@@ -1102,6 +1125,16 @@
                     </div>
                     <div class="mt-2">
                         <span id="ride-price-summary" class="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold hidden">السعر: -- ر.س</span>
+                    </div>
+                </div>
+
+                <div id="ride-select-quick-summary" class="mb-4 rounded-xl px-3 py-2.5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-[11px] font-extrabold text-indigo-500">الاختيار الحالي</p>
+                            <p id="selected-car-label" class="text-sm font-extrabold text-slate-800">لم يتم اختيار نوع بعد</p>
+                        </div>
+                        <div id="selected-car-price-label" class="text-sm font-black text-indigo-700">-- ر.س</div>
                     </div>
                 </div>
 

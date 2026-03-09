@@ -457,7 +457,7 @@ function refreshRideSelectPriceUI() {
 
     const selectedEl = document.querySelector('.car-select.selected');
     if (selectedEl) {
-        const priceEl = selectedEl.querySelector('.text-xl');
+        const priceEl = selectedEl.querySelector('.car-price') || selectedEl.querySelector('.text-xl');
         if (priceEl) priceEl.innerText = `${currentTripPrice} ر.س`;
     }
 
@@ -465,6 +465,11 @@ function refreshRideSelectPriceUI() {
     if (reqBtn) {
         const names = { economy: 'اقتصادي', family: 'عائلي', luxury: 'فاخر', delivery: 'توصيل' };
         reqBtn.querySelector('span').innerText = `اطلب ${names[currentCarType] || 'سيارة'} — ${currentTripPrice} ر.س`;
+
+        const selectedCarLabel = document.getElementById('selected-car-label');
+        const selectedCarPriceLabel = document.getElementById('selected-car-price-label');
+        if (selectedCarLabel) selectedCarLabel.innerText = names[currentCarType] || 'لم يتم اختيار نوع بعد';
+        if (selectedCarPriceLabel) selectedCarPriceLabel.innerText = `${currentTripPrice} ر.س`;
     }
 
     updatePriceLockUI();
@@ -7082,6 +7087,11 @@ window.selectCar = function(element, type) {
         reqBtn.querySelector('span').innerText = `اطلب ${names[type]} — ${currentTripPrice} ر.س`;
         reqBtn.classList.add('animate-pulse');
         setTimeout(() => reqBtn.classList.remove('animate-pulse'), 500);
+
+        const selectedCarLabel = document.getElementById('selected-car-label');
+        const selectedCarPriceLabel = document.getElementById('selected-car-price-label');
+        if (selectedCarLabel) selectedCarLabel.innerText = names[type];
+        if (selectedCarPriceLabel) selectedCarPriceLabel.innerText = `${currentTripPrice} ر.س`;
     }
 
     // Enable price lock button + apply lock price if any
@@ -7290,6 +7300,11 @@ window.switchSection = function(name) {
         try { window.refreshFamilyUI && window.refreshFamilyUI(); } catch (e) { /* ignore */ }
         try { window.refreshNoteTemplatesUI && window.refreshNoteTemplatesUI(); } catch (e) { /* ignore */ }
         try { updatePriceLockUI(); } catch (e) { /* ignore */ }
+
+        const selectedCarLabel = document.getElementById('selected-car-label');
+        const selectedCarPriceLabel = document.getElementById('selected-car-price-label');
+        if (selectedCarLabel && !currentCarType) selectedCarLabel.innerText = 'لم يتم اختيار نوع بعد';
+        if (selectedCarPriceLabel && !currentCarType) selectedCarPriceLabel.innerText = '-- ر.س';
     }
 };
 
