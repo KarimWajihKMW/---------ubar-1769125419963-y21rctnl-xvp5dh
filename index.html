@@ -275,6 +275,17 @@
             .ride-metric-badge {
                 border: 1px solid #e2e8f0;
                 box-shadow: 0 4px 10px -9px rgba(15, 23, 42, 0.35);
+                transition: transform 0.22s ease, box-shadow 0.22s ease;
+            }
+
+            .metric-value-updated {
+                animation: metric-value-pop 0.24s ease;
+            }
+
+            @keyframes metric-value-pop {
+                0% { transform: scale(0.98); }
+                60% { transform: scale(1.04); }
+                100% { transform: scale(1); }
             }
 
             #ride-price-summary {
@@ -383,7 +394,8 @@
             @media (prefers-reduced-motion: reduce) {
                 .car-select,
                 .car-select::after,
-                .car-select-activate {
+                .car-select-activate,
+                .metric-value-updated {
                     animation: none !important;
                     transition: none !important;
                 }

@@ -434,6 +434,24 @@ function updatePriceLockUI() {
     }
 }
 
+function animateTextUpdate(el, nextText) {
+    if (!el) return;
+    const next = String(nextText);
+    if (el.innerText === next) return;
+    el.innerText = next;
+
+    const reduceMotion = typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) return;
+
+    el.classList.remove('metric-value-updated');
+    // Force reflow so animation can replay on subsequent updates.
+    void el.offsetWidth;
+    el.classList.add('metric-value-updated');
+    setTimeout(() => el.classList.remove('metric-value-updated'), 260);
+}
+
 function refreshRideSelectPriceUI() {
     if (currentUserRole !== 'passenger') return;
     if (!currentCarType) {
@@ -452,13 +470,13 @@ function refreshRideSelectPriceUI() {
     const priceSummary = document.getElementById('ride-price-summary');
     if (priceSummary) {
         priceSummary.classList.remove('hidden');
-        priceSummary.innerText = `السعر: ${currentTripPrice} ر.س`;
+        animateTextUpdate(priceSummary, `السعر: ${currentTripPrice} ر.س`);
     }
 
     const selectedEl = document.querySelector('.car-select.selected');
     if (selectedEl) {
         const priceEl = selectedEl.querySelector('.car-price') || selectedEl.querySelector('.text-xl');
-        if (priceEl) priceEl.innerText = `${currentTripPrice} ر.س`;
+        if (priceEl) animateTextUpdate(priceEl, `${currentTripPrice} ر.س`);
     }
 
     const reqBtn = document.getElementById('request-btn');
@@ -468,8 +486,8 @@ function refreshRideSelectPriceUI() {
 
         const selectedCarLabel = document.getElementById('selected-car-label');
         const selectedCarPriceLabel = document.getElementById('selected-car-price-label');
-        if (selectedCarLabel) selectedCarLabel.innerText = names[currentCarType] || 'لم يتم اختيار نوع بعد';
-        if (selectedCarPriceLabel) selectedCarPriceLabel.innerText = `${currentTripPrice} ر.س`;
+        if (selectedCarLabel) animateTextUpdate(selectedCarLabel, names[currentCarType] || 'لم يتم اختيار نوع بعد');
+        if (selectedCarPriceLabel) animateTextUpdate(selectedCarPriceLabel, `${currentTripPrice} ر.س`);
     }
 
     updatePriceLockUI();
@@ -7075,13 +7093,13 @@ window.selectCar = function(element, type) {
 
     // Update selected car price display in the card
     const priceEl = element.querySelector('.car-price') || element.querySelector('.text-xl');
-    if (priceEl) priceEl.innerText = `${currentTripPrice} ر.س`;
+    if (priceEl) animateTextUpdate(priceEl, `${currentTripPrice} ر.س`);
 
     const reqBtn = document.getElementById('request-btn');
     const priceSummary = document.getElementById('ride-price-summary');
     if (priceSummary) {
         priceSummary.classList.remove('hidden');
-        priceSummary.innerText = `السعر: ${currentTripPrice} ر.س`;
+        animateTextUpdate(priceSummary, `السعر: ${currentTripPrice} ر.س`);
     }
     if (reqBtn) {
         reqBtn.disabled = false;
@@ -7092,8 +7110,8 @@ window.selectCar = function(element, type) {
 
         const selectedCarLabel = document.getElementById('selected-car-label');
         const selectedCarPriceLabel = document.getElementById('selected-car-price-label');
-        if (selectedCarLabel) selectedCarLabel.innerText = names[type];
-        if (selectedCarPriceLabel) selectedCarPriceLabel.innerText = `${currentTripPrice} ر.س`;
+        if (selectedCarLabel) animateTextUpdate(selectedCarLabel, names[type]);
+        if (selectedCarPriceLabel) animateTextUpdate(selectedCarPriceLabel, `${currentTripPrice} ر.س`);
     }
 
     // Enable price lock button + apply lock price if any
@@ -8122,8 +8140,8 @@ function updateTripEstimatesUI() {
     const { distanceKm, etaMin } = computeTripEstimates();
     const dEl = document.getElementById('ride-distance-badge');
     const tEl = document.getElementById('ride-time-badge');
-    if (dEl) dEl.innerText = `${distanceKm} كم`;
-    if (tEl) tEl.innerText = `~${etaMin} دقيقة`;
+    if (dEl) animateTextUpdate(dEl, `${distanceKm} كم`);
+    if (tEl) animateTextUpdate(tEl, `~${etaMin} دقيقة`);
 
     // Keep extras in sync (price lock button, locked price override)
     refreshRideSelectPriceUI();
