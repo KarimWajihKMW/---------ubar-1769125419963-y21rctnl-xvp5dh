@@ -7067,7 +7067,7 @@ window.selectCar = function(element, type) {
     currentTripPrice = computePrice(type, est.distanceKm);
 
     // Update selected car price display in the card
-    const priceEl = element.querySelector('.text-xl');
+    const priceEl = element.querySelector('.car-price') || element.querySelector('.text-xl');
     if (priceEl) priceEl.innerText = `${currentTripPrice} ر.س`;
 
     const reqBtn = document.getElementById('request-btn');

@@ -125,7 +125,10 @@
       .car-select {
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 border: 1px solid #e5e7eb;
-                background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+                background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+                position: relative;
+                overflow: hidden;
+                animation: car-card-in 0.45s ease both;
       }
       .car-select:hover {
                 transform: translateY(-2px);
@@ -138,12 +141,60 @@
         box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.1), 0 4px 6px -2px rgba(79, 70, 229, 0.05);
       }
 
+            .car-select::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
+                transform: translateX(-120%);
+                transition: transform 0.55s ease;
+            }
+
+            .car-select:hover::after {
+                transform: translateX(120%);
+            }
+
+            #car-options-list .car-select:nth-child(1) { animation-delay: 0.03s; }
+            #car-options-list .car-select:nth-child(2) { animation-delay: 0.08s; }
+            #car-options-list .car-select:nth-child(3) { animation-delay: 0.13s; }
+            #car-options-list .car-select:nth-child(4) { animation-delay: 0.18s; }
+
+            .car-price {
+                font-weight: 900;
+                color: #0f172a;
+                letter-spacing: -0.02em;
+            }
+
+            .car-type-pill {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.25rem;
+                padding: 0.2rem 0.5rem;
+                border-radius: 999px;
+                font-size: 0.64rem;
+                font-weight: 800;
+                color: #475569;
+                background: #f1f5f9;
+                border: 1px solid #e2e8f0;
+            }
+
+            @keyframes car-card-in {
+                from {
+                    opacity: 0;
+                    transform: translateY(8px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
             #state-ride-select {
-                background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
+                background: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(248, 250, 252, 0.98) 100%);
             }
 
             #car-options-list {
-                background: #ffffff;
+                background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
                 border: 1px solid #e5e7eb;
                 border-radius: 1rem;
                 padding: 0.625rem;
@@ -1054,7 +1105,7 @@
                     </div>
                 </div>
 
-                <button id="car-options-toggle" type="button" onclick="toggleCarOptions()" class="w-full mb-4 bg-gray-50 text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors" aria-expanded="true">
+                <button id="car-options-toggle" type="button" onclick="toggleCarOptions()" class="w-full mb-4 bg-gradient-to-r from-slate-50 to-gray-100 text-gray-700 border border-gray-200 rounded-xl py-2.5 font-bold text-sm flex items-center justify-center gap-2 hover:from-indigo-50 hover:to-slate-100 transition-all" aria-expanded="true">
                     <i id="car-options-toggle-icon" class="fas fa-chevron-up"></i>
                     <span id="car-options-toggle-text">إخفاء أنواع السيارات</span>
                 </button>
@@ -1069,10 +1120,11 @@
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">اقتصادي</h4>
                                 <p class="text-xs text-gray-500 font-medium">توفير، 4 مقاعد</p>
+                                <span class="car-type-pill mt-1">الأكثر استخدامًا</span>
                             </div>
                         </div>
                         <div class="text-left ml-2">
-                            <div class="font-bold text-lg sm:text-xl text-gray-900">--</div>
+                            <div class="car-price text-lg sm:text-xl">--</div>
                         </div>
                     </div>
 
@@ -1085,10 +1137,11 @@
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">عائلي</h4>
                                 <p class="text-xs text-gray-500 font-medium">سعة أكبر، 6 مقاعد</p>
+                                <span class="car-type-pill mt-1">مناسب للعائلة</span>
                             </div>
                         </div>
                         <div class="text-left ml-2">
-                            <div class="font-bold text-lg sm:text-xl text-gray-900">--</div>
+                            <div class="car-price text-lg sm:text-xl">--</div>
                         </div>
                     </div>
 
@@ -1101,10 +1154,11 @@
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">فاخر</h4>
                                 <p class="text-xs text-gray-500 font-medium">سيارات فارهة VIP</p>
+                                <span class="car-type-pill mt-1">راحة أعلى</span>
                             </div>
                         </div>
                         <div class="text-left ml-2">
-                            <div class="font-bold text-lg sm:text-xl text-gray-900">--</div>
+                            <div class="car-price text-lg sm:text-xl">--</div>
                         </div>
                     </div>
 
@@ -1117,10 +1171,11 @@
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">توصيل طلبات</h4>
                                 <p class="text-xs text-gray-500 font-medium">توصيل سريع للبضائع</p>
+                                <span class="car-type-pill mt-1">بدون ركاب</span>
                             </div>
                         </div>
                         <div class="text-left ml-2">
-                            <div class="font-bold text-lg sm:text-xl text-gray-900">--</div>
+                            <div class="car-price text-lg sm:text-xl">--</div>
                         </div>
                     </div>
                 </div>
