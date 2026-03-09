@@ -8242,6 +8242,106 @@ function startPassengerMatchPolling(tripId) {
     passengerMatchInterval = setInterval(() => checkPassengerMatch(tripId), 4000);
 }
 
+function isPassengerTripResumable(trip) {
+    if (!trip) return false;
+    const status = String(trip.status || '').toLowerCase();
+    const tripStatus = String(trip.trip_status || '').toLowerCase();
+    if (status === 'cancelled' || status === 'completed') return false;
+    if (tripStatus === 'completed' || tripStatus === 'rated') return false;
+    return status === 'pending' || status === 'assigned' || status === 'ongoing';
+}
+
+async function getLatestPassengerActiveTrip() {
+    if (currentUserRole !== 'passenger') return null;
+
+    if (activePassengerTripId) {
+        try {
+            const byId = await ApiService.trips.getById(activePassengerTripId);
+            const tripById = byId?.data || null;
+            if (isPassengerTripResumable(tripById)) {
+                return tripById;
+            }
+        } catch (e) {
+            // ignore and continue with list query
+        }
+    }
+
+    try {
+        const list = await ApiService.trips.getAll({ limit: 25, offset: 0, source: 'passenger_app' });
+        const trips = Array.isArray(list?.data) ? list.data : [];
+        return trips.find(isPassengerTripResumable) || null;
+    } catch (e) {
+        console.warn('Failed to load latest active passenger trip:', e?.message || e);
+        return null;
+    }
+}
+
+function hydratePassengerTripLocalState(trip) {
+    if (!trip) return;
+
+    activePassengerTripId = trip.id || activePassengerTripId;
+
+    const pickupLat = Number(trip.pickup_lat);
+    const pickupLng = Number(trip.pickup_lng);
+    if (Number.isFinite(pickupLat) && Number.isFinite(pickupLng)) {
+        currentPickup = {
+            lat: pickupLat,
+            lng: pickupLng,
+            label: trip.pickup_location || 'نقطة الالتقاط'
+        };
+    }
+
+    const dropoffLat = Number(trip.dropoff_lat);
+    const dropoffLng = Number(trip.dropoff_lng);
+    if (Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng)) {
+        currentDestination = {
+            lat: dropoffLat,
+            lng: dropoffLng,
+            label: trip.dropoff_location || 'الوجهة'
+        };
+    }
+
+    if (trip.car_type) currentCarType = trip.car_type;
+    const tripCost = Number(trip.cost);
+    if (Number.isFinite(tripCost)) currentTripPrice = tripCost;
+}
+
+async function restorePassengerActiveTrip() {
+    if (currentUserRole !== 'passenger') return false;
+
+    const trip = await getLatestPassengerActiveTrip();
+    if (!trip) {
+        return false;
+    }
+
+    hydratePassengerTripLocalState(trip);
+    const status = String(trip.status || '').toLowerCase();
+
+    if (status === 'pending' && !trip.driver_id) {
+        switchSection('loading');
+        resetMatchTimelineUI();
+        startPassengerPickupLiveUpdates(activePassengerTripId);
+        startPassengerMatchPolling(activePassengerTripId);
+        showToast('🔄 رجعناك للرحلة الحالية');
+        return true;
+    }
+
+    await handlePassengerAssignedTrip(trip);
+
+    if (status === 'ongoing' || String(trip.trip_status || '').toLowerCase() === 'started') {
+        passengerLastTripStatus = 'ongoing';
+        switchSection('in-ride');
+        const destTextEl = document.getElementById('ride-dest-text');
+        if (destTextEl) {
+            destTextEl.innerText = trip.dropoff_location || currentDestination?.label || 'الوجهة';
+        }
+    }
+
+    startPassengerLiveTripTracking(activePassengerTripId, trip.driver_id || null);
+    showToast('🔄 رجعناك للرحلة الحالية');
+    return true;
+}
+
 async function loadAssignedDriverLocation(driverId) {
     if (!driverId) return null;
     try {
@@ -8659,6 +8759,11 @@ function initPassengerMode() {
 
     startLocationTracking();
     requestSingleLocationFix();
+
+    // Restore any pending/assigned/ongoing trip so passenger can continue after refresh/navigation.
+    restorePassengerActiveTrip().catch((error) => {
+        console.warn('Failed to restore active passenger trip:', error?.message || error);
+    });
 }
 
 window.switchToPassengerMode = function() {
