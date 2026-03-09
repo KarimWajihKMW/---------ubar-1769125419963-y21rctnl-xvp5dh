@@ -205,6 +205,53 @@
                 border: 1px solid #e2e8f0;
             }
 
+            .car-icon-wrap {
+                border-radius: 0.9rem;
+                border: 1px solid transparent;
+                transition: all 0.25s ease;
+            }
+
+            .car-select[data-car-type='economy'] .car-icon-wrap {
+                background: linear-gradient(180deg, #ecfeff 0%, #cffafe 100%);
+                border-color: #a5f3fc;
+            }
+
+            .car-select[data-car-type='economy'] .car-icon {
+                color: #0f766e;
+            }
+
+            .car-select[data-car-type='family'] .car-icon-wrap {
+                background: linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%);
+                border-color: #c7d2fe;
+            }
+
+            .car-select[data-car-type='family'] .car-icon {
+                color: #4338ca;
+            }
+
+            .car-select[data-car-type='luxury'] .car-icon-wrap {
+                background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+                border-color: #cbd5e1;
+            }
+
+            .car-select[data-car-type='luxury'] .car-icon {
+                color: #0f172a;
+            }
+
+            .car-select[data-car-type='delivery'] .car-icon-wrap {
+                background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
+                border-color: #fed7aa;
+            }
+
+            .car-select[data-car-type='delivery'] .car-icon {
+                color: #c2410c;
+            }
+
+            .car-select.selected .car-icon-wrap {
+                transform: translateY(-1px);
+                box-shadow: 0 8px 16px -12px rgba(15, 23, 42, 0.45);
+            }
+
             @keyframes car-card-in {
                 from {
                     opacity: 0;
@@ -1264,10 +1311,10 @@
 
                 <div id="car-options-list" class="space-y-2.5 mb-6">
                     <!-- Economy -->
-                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'economy')">
+                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" data-car-type="economy" onclick="selectCar(this, 'economy')">
                         <div class="flex items-center">
-                            <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
-                                <i class="fas fa-car-side text-3xl sm:text-4xl text-gray-600"></i>
+                            <div class="car-icon-wrap w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
+                                <i class="car-icon fas fa-car-side text-3xl sm:text-4xl"></i>
                             </div>
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">اقتصادي</h4>
@@ -1281,10 +1328,10 @@
                     </div>
 
                     <!-- Family -->
-                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'family')">
+                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" data-car-type="family" onclick="selectCar(this, 'family')">
                         <div class="flex items-center">
-                            <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
-                                <i class="fas fa-shuttle-van text-3xl sm:text-4xl text-indigo-600"></i>
+                            <div class="car-icon-wrap w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
+                                <i class="car-icon fas fa-shuttle-van text-3xl sm:text-4xl"></i>
                             </div>
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">عائلي</h4>
@@ -1298,10 +1345,10 @@
                     </div>
 
                     <!-- Luxury -->
-                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'luxury')">
+                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" data-car-type="luxury" onclick="selectCar(this, 'luxury')">
                         <div class="flex items-center">
-                            <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
-                                <i class="fas fa-gem text-3xl sm:text-4xl text-black drop-shadow-md"></i>
+                            <div class="car-icon-wrap w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
+                                <i class="car-icon fas fa-gem text-3xl sm:text-4xl drop-shadow-md"></i>
                             </div>
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">فاخر</h4>
@@ -1315,10 +1362,10 @@
                     </div>
 
                     <!-- Delivery -->
-                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" onclick="selectCar(this, 'delivery')">
+                    <div class="car-select flex items-center justify-between p-3 sm:p-3.5 rounded-xl sm:rounded-2xl cursor-pointer shadow-sm active:scale-95 transition-transform" data-car-type="delivery" onclick="selectCar(this, 'delivery')">
                         <div class="flex items-center">
-                            <div class="w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
-                                <i class="fas fa-box text-3xl sm:text-4xl text-orange-500"></i>
+                            <div class="car-icon-wrap w-14 h-10 sm:w-20 sm:h-14 relative mr-2 flex items-center justify-center">
+                                <i class="car-icon fas fa-box text-3xl sm:text-4xl"></i>
                             </div>
                             <div class="mr-2 sm:mr-4">
                                 <h4 class="font-bold text-base sm:text-lg text-gray-800">توصيل طلبات</h4>
