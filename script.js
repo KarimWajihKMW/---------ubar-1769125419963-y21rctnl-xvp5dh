@@ -12155,11 +12155,10 @@ function setPanelDragPreset(preset) {
 
     if (preset === 'ride-select') {
         panelDragPreset = 'ride-select';
-        panelMinHeight = 34;
-        panelMidHeight = 46;
-        panelMaxHeight = 64;
-        const target = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMidHeight));
-        applyPanelHeightVh(target, true);
+        panelMinHeight = 56;
+        panelMidHeight = 72;
+        panelMaxHeight = 88;
+        applyPanelHeightVh(panelMidHeight, true);
         return;
     }
 
