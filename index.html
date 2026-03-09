@@ -421,6 +421,10 @@
                 box-shadow: 0 24px 60px -26px rgba(15, 23, 42, 0.45);
             }
 
+            #passenger-ui-container.passenger-ui-centered #back-btn {
+                display: none !important;
+            }
+
             @media (max-width: 640px) {
                 #passenger-ui-container.passenger-ui-centered {
                     padding-top: 4.5rem;
@@ -1296,12 +1300,17 @@
                      </div>
                 </div>
             </div>
-                </div>
-            </div>
 
             <!-- State 2: Select Car -->
             <div id="state-ride-select" class="hidden px-4 sm:px-6 pb-5 sm:pb-6 max-h-[80vh] overflow-y-auto no-scrollbar rounded-2xl">
-                <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
+                <div class="flex items-center justify-between mb-3">
+                    <button type="button" onclick="resetApp()" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-200 text-gray-700 text-xs font-extrabold hover:bg-gray-50 transition-colors">
+                        <i class="fas fa-arrow-right text-[11px]"></i>
+                        رجوع
+                    </button>
+                    <div class="w-16 h-1.5 bg-gray-200 rounded-full"></div>
+                    <div class="w-[62px]"></div>
+                </div>
                 <div class="text-center mb-6">
                     <h3 class="text-2xl font-extrabold text-gray-800">اختر الرحلة</h3>
                     <div class="flex justify-center items-center mt-2 space-x-2 space-x-reverse">
