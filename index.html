@@ -158,10 +158,27 @@
                 background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
                 transform: translateX(-120%);
                 transition: transform 0.55s ease;
+                pointer-events: none;
             }
 
             .car-select:hover::after {
                 transform: translateX(120%);
+            }
+
+            .car-select-activate {
+                animation: car-select-pop 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+            }
+
+            @keyframes car-select-pop {
+                0% {
+                    transform: scale(0.98);
+                }
+                60% {
+                    transform: scale(1.03);
+                }
+                100% {
+                    transform: scale(1.02);
+                }
             }
 
             #car-options-list .car-select:nth-child(1) { animation-delay: 0.03s; }
@@ -220,6 +237,15 @@
                     display: grid;
                     grid-template-columns: repeat(2, minmax(0, 1fr));
                     gap: 0.65rem;
+                }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .car-select,
+                .car-select::after,
+                .car-select-activate {
+                    animation: none !important;
+                    transition: none !important;
                 }
             }
 

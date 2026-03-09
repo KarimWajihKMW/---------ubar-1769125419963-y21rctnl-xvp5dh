@@ -7063,9 +7063,11 @@ window.addEventListener('message', (event) => {
 
 window.selectCar = function(element, type) {
     document.querySelectorAll('.car-select').forEach(el => {
-        el.classList.remove('selected', 'ring-2', 'ring-indigo-500');
+        el.classList.remove('selected', 'ring-2', 'ring-indigo-500', 'car-select-activate');
     });
     element.classList.add('selected');
+    element.classList.add('car-select-activate');
+    setTimeout(() => element.classList.remove('car-select-activate'), 320);
     currentCarType = type;
     
     const est = computeTripEstimates();
