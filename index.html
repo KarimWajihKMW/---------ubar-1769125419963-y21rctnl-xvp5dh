@@ -671,33 +671,44 @@
                 box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
             }
 
+            :root {
+                --captain-accent: #0f766e;
+                --captain-accent-soft: #14b8a6;
+            }
+
             .driver-map-expanded {
-                height: 75vh;
+                height: 80vh;
             }
 
             #driver-panel-card {
                 transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
                 will-change: transform;
-                max-height: 88vh;
+                width: min(94vw, 560px);
+                max-height: 84vh;
                 overflow-y: auto;
                 overflow-x: hidden;
                 -webkit-overflow-scrolling: touch;
                 touch-action: pan-y;
+                border-radius: 2rem;
+                border: 1px solid rgba(255, 255, 255, 0.75);
+                backdrop-filter: blur(8px);
+                background: linear-gradient(180deg, rgba(248, 250, 252, 0.96) 0%, rgba(241, 245, 249, 0.94) 100%);
+                box-shadow: 0 28px 60px rgba(15, 23, 42, 0.24);
             }
 
             #driver-panel-card.driver-panel-collapsed {
-                transform: translateY(62%);
+                transform: translateY(74%) scale(0.98);
             }
 
             @media (min-width: 768px) {
                 #driver-panel-card.driver-panel-collapsed {
-                    transform: translateY(48%);
+                    transform: translateY(66%) scale(0.98);
                 }
             }
 
             @media (min-width: 1024px) {
                 #driver-panel-card.driver-panel-collapsed {
-                    transform: translateY(38%);
+                    transform: translateY(58%) scale(0.98);
                 }
             }
 
@@ -713,6 +724,10 @@
             /* Floating expand button animation */
             #driver-panel-expand-floating {
                 animation: float-bounce 2s ease-in-out infinite;
+                background: linear-gradient(120deg, #f0fdfa 0%, #ccfbf1 100%);
+                color: var(--captain-accent);
+                border: 1px solid rgba(15, 118, 110, 0.4);
+                box-shadow: 0 12px 30px rgba(13, 148, 136, 0.22);
             }
 
             @keyframes float-bounce {
@@ -722,6 +737,13 @@
 
             #driver-panel-expand-floating:hover {
                 animation: none;
+            }
+
+            @media (max-width: 767px) {
+                #driver-panel-card {
+                    width: min(95vw, 520px);
+                    max-height: 86vh;
+                }
             }
     </style>
 </head>
@@ -2611,39 +2633,41 @@
     <!-- =============================================
          DRIVER UI COMPONENTS
     ============================================== -->
-    <div id="driver-ui-container" class="absolute bottom-0 w-full z-20 pointer-events-none hidden">
-        <div id="driver-panel-card" class="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-lg mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden">
+    <div id="driver-ui-container" class="fixed inset-0 z-20 pointer-events-none hidden flex items-center justify-center px-3 sm:px-5 py-6">
+        <div id="driver-panel-card" class="bg-white rounded-[2rem] shadow-2xl w-full mx-auto pointer-events-auto overflow-y-auto overflow-x-hidden">
             <!-- Captain Header -->
-            <div class="px-6 pt-6 pb-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+            <div class="relative px-6 pt-6 pb-5 bg-gradient-to-br from-teal-700 via-teal-600 to-cyan-600 text-white overflow-hidden">
+                <div class="absolute -top-10 -left-8 w-40 h-40 rounded-full bg-white/10 blur-xl"></div>
+                <div class="absolute -bottom-12 -right-6 w-44 h-44 rounded-full bg-cyan-200/20 blur-2xl"></div>
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-xs text-emerald-100 font-bold">واجهة الكابتن</p>
+                        <p class="text-xs text-teal-100 font-bold">واجهة الكابتن</p>
                         <h2 class="text-lg font-extrabold" id="driver-home-name">أهلاً، كابتن</h2>
-                        <div class="flex items-center gap-2 text-emerald-100 text-xs mt-1">
+                        <div class="flex items-center gap-2 text-teal-100 text-xs mt-1">
                             <i class="fas fa-star text-yellow-300"></i>
                             <span id="driver-home-rating">4.8</span>
                             <span class="mx-1">•</span>
                             <span id="driver-home-status">متصل</span>
                         </div>
                     </div>
-                    <div class="bg-white/15 rounded-2xl p-3 text-center">
+                    <div class="bg-white/15 rounded-2xl p-3 text-center border border-white/20">
                         <i class="fas fa-taxi text-2xl"></i>
-                        <p class="text-[10px] mt-1 text-emerald-100 font-bold" id="driver-home-car-type">اقتصادي</p>
-                        <p class="text-[10px] mt-0.5 text-emerald-100 font-bold" id="driver-home-car-color">لون: غير محدد</p>
+                        <p class="text-[10px] mt-1 text-teal-100 font-bold" id="driver-home-car-type">اقتصادي</p>
+                        <p class="text-[10px] mt-0.5 text-teal-100 font-bold" id="driver-home-car-color">لون: غير محدد</p>
                     </div>
                 </div>
                 <div class="mt-4 grid grid-cols-2 gap-2 text-center">
-                    <div class="bg-white/10 rounded-xl p-2">
-                        <p class="text-[10px] text-emerald-100 font-bold">رحلات اليوم</p>
+                    <div class="bg-white/10 rounded-xl p-2 border border-white/10">
+                        <p class="text-[10px] text-teal-100 font-bold">رحلات اليوم</p>
                         <p class="text-sm font-extrabold" id="driver-home-today-trips">0</p>
                     </div>
-                    <div class="bg-white/10 rounded-xl p-2">
-                        <p class="text-[10px] text-emerald-100 font-bold">أرباح اليوم (ر.س)</p>
+                    <div class="bg-white/10 rounded-xl p-2 border border-white/10">
+                        <p class="text-[10px] text-teal-100 font-bold">أرباح اليوم (ر.س)</p>
                         <p class="text-sm font-extrabold" id="driver-home-today-earnings">0</p>
                     </div>
                 </div>
                 <div class="mt-4">
-                    <button id="driver-panel-collapse" type="button" onclick="collapseDriverPanel()" class="w-full flex items-center justify-center gap-2 bg-white text-emerald-600 font-bold py-3 rounded-2xl border-2 border-white shadow-lg hover:bg-emerald-50 transition-all">
+                    <button id="driver-panel-collapse" type="button" onclick="collapseDriverPanel()" class="w-full flex items-center justify-center gap-2 bg-white text-teal-700 font-bold py-3 rounded-2xl border border-white shadow-lg hover:bg-teal-50 transition-all">
                         <i class="fas fa-chevron-down text-lg"></i>
                         <span>إنزال اللوحة لرؤية الخريطة</span>
                         <i class="fas fa-map ml-2"></i>
@@ -2737,9 +2761,9 @@
             </div>
             
             <!-- Driver Status: Waiting -->
-            <div id="driver-status-waiting" class="p-6 text-center">
+            <div id="driver-status-waiting" class="p-6 text-center bg-white/75">
                 <div class="w-16 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
-                <div class="inline-flex items-center justify-center p-4 bg-green-50 rounded-full text-green-600 mb-4 animate-pulse">
+                <div class="inline-flex items-center justify-center p-4 bg-teal-50 rounded-full text-teal-600 mb-4 animate-pulse">
                     <i class="fas fa-wifi text-3xl"></i>
                 </div>
                 <h2 class="text-2xl font-bold text-gray-800 mb-2">أنت متصل الآن</h2>
@@ -2753,7 +2777,7 @@
                     <p id="driver-swap-inbox-status" class="text-[11px] text-amber-700 mt-2"></p>
                 </div>
 
-                <button type="button" onclick="driverShowEarningsAssistant()" class="mt-4 w-full py-3 bg-emerald-50 text-emerald-700 font-bold rounded-xl hover:bg-emerald-100 transition-colors">
+                <button type="button" onclick="driverShowEarningsAssistant()" class="mt-4 w-full py-3 bg-teal-50 text-teal-700 font-bold rounded-xl hover:bg-teal-100 transition-colors">
                     💡 مساعد الربح للكابتن
                 </button>
                 <p id="driver-earnings-assistant-status" class="text-[11px] text-gray-500 mt-2"></p>
@@ -2769,13 +2793,13 @@
                 <p id="driver-road-reports-status" class="text-[11px] text-gray-500 mt-2"></p>
 
                 <!-- Reposition Coach (Captain) -->
-                <button type="button" onclick="driverFetchRepositionSuggestions()" class="mt-4 w-full py-3 bg-indigo-50 text-indigo-700 font-bold rounded-xl hover:bg-indigo-100 transition-colors">
+                <button type="button" onclick="driverFetchRepositionSuggestions()" class="mt-4 w-full py-3 bg-cyan-50 text-cyan-700 font-bold rounded-xl hover:bg-cyan-100 transition-colors">
                     🧭 هات توصيات تمركز الآن
                 </button>
                 <p id="driver-reposition-status" class="text-[11px] text-gray-500 mt-2"></p>
                 <div id="driver-reposition-list" class="mt-3 space-y-2 text-right"></div>
 
-                <button type="button" onclick="switchToPassengerMode()" class="mt-4 w-full py-3 bg-indigo-50 text-indigo-700 font-bold rounded-xl hover:bg-indigo-100 transition-colors">
+                <button type="button" onclick="switchToPassengerMode()" class="mt-4 w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors">
                     طلب رحلة كراكب
                 </button>
                 <button type="button" onclick="driverStopReceiving()" class="mt-6 w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl hover:bg-red-100 transition-colors">
@@ -3129,7 +3153,7 @@
     </div>
     
     <!-- Floating Expand Button (shown when collapsed) -->
-    <button id="driver-panel-expand-floating" type="button" onclick="expandDriverPanel()" class="hidden fixed bottom-24 left-1/2 transform -translate-x-1/2 z-40 bg-white text-emerald-600 px-6 py-3 rounded-full shadow-2xl font-bold pointer-events-auto hover:bg-emerald-50 transition-all border-2 border-emerald-600">
+    <button id="driver-panel-expand-floating" type="button" onclick="expandDriverPanel()" class="hidden fixed bottom-20 left-1/2 transform -translate-x-1/2 z-40 px-6 py-3 rounded-full shadow-2xl font-bold pointer-events-auto transition-all">
         <i class="fas fa-chevron-up text-lg ml-2"></i>
         <span>رفع اللوحة</span>
     </button>
