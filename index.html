@@ -220,6 +220,30 @@
                 background: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(248, 250, 252, 0.98) 100%);
             }
 
+            #state-ride-select h3 {
+                letter-spacing: -0.02em;
+                line-height: 1.15;
+            }
+
+            .ride-metric-badge {
+                border: 1px solid #e2e8f0;
+                box-shadow: 0 4px 10px -9px rgba(15, 23, 42, 0.35);
+            }
+
+            #ride-price-summary {
+                border: 1px solid #fde68a;
+                box-shadow: 0 8px 20px -16px rgba(202, 138, 4, 0.7);
+            }
+
+            #car-options-list h4 {
+                letter-spacing: -0.01em;
+                line-height: 1.2;
+            }
+
+            #car-options-list p {
+                line-height: 1.45;
+            }
+
             #car-options-list {
                 background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
                 border: 1px solid #e5e7eb;
@@ -1215,8 +1239,8 @@
                 <div class="text-center mb-6">
                     <h3 class="text-2xl font-extrabold text-gray-800">اختر الرحلة</h3>
                     <div class="flex justify-center items-center mt-2 space-x-2 space-x-reverse">
-                        <span id="ride-distance-badge" class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold">-- كم</span>
-                        <span id="ride-time-badge" class="bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-xs font-bold">-- دقيقة</span>
+                        <span id="ride-distance-badge" class="ride-metric-badge bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-xs font-bold">-- كم</span>
+                        <span id="ride-time-badge" class="ride-metric-badge bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-xs font-bold">-- دقيقة</span>
                     </div>
                     <div class="mt-2">
                         <span id="ride-price-summary" class="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold hidden">السعر: -- ر.س</span>
