@@ -12065,6 +12065,16 @@ function setPanelDragPreset(preset) {
         return;
     }
 
+    if (preset === 'ride-select') {
+        panelDragPreset = 'ride-select';
+        panelMinHeight = 34;
+        panelMidHeight = 46;
+        panelMaxHeight = 64;
+        const target = Math.max(panelMinHeight, Math.min(panelMaxHeight, Number(panelCurrentHeight) || panelMidHeight));
+        applyPanelHeightVh(target, true);
+        return;
+    }
+
     panelDragPreset = 'default';
     panelMinHeight = 10;
     panelMidHeight = 30;
@@ -12076,11 +12086,28 @@ function setPanelDragPreset(preset) {
 
 function configurePassengerMainPanelForSection(name) {
     const panel = document.getElementById('main-panel');
+    const container = document.getElementById('passenger-ui-container');
     if (!panel) return;
+
+    if (container) {
+        container.classList.toggle('passenger-ui-centered', name === 'rideSelect');
+    }
 
     if (name === 'payment-success') {
         setPanelDragPreset('trip-completion');
         return;
+    }
+
+    if (name === 'rideSelect') {
+        if (panelDragPreset === 'trip-completion') {
+            setPanelDragPreset('default');
+        }
+        setPanelDragPreset('ride-select');
+        return;
+    }
+
+    if (panelDragPreset === 'ride-select') {
+        setPanelDragPreset('default');
     }
 
     if (panelDragPreset === 'trip-completion') {
