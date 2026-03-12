@@ -12368,10 +12368,27 @@ function applyPanelHeightVh(vh, animate = true) {
 
 function setPanelDragPreset(preset) {
     if (preset === 'driver-tracking') {
+        const viewportHeight = Number(window.innerHeight || 0);
+        const viewportWidth = Number(window.innerWidth || 0);
+        const isMobile = viewportWidth > 0 && viewportWidth <= 768;
+
         panelDragPreset = 'driver-tracking';
-        panelMinHeight = 52;
-        panelMidHeight = 64;
-        panelMaxHeight = 78;
+
+        if (isMobile && viewportHeight > 0 && viewportHeight <= 680) {
+            // Small phones: keep enough space for controls.
+            panelMinHeight = 56;
+            panelMidHeight = 66;
+            panelMaxHeight = 74;
+        } else if (isMobile && viewportHeight > 680 && viewportHeight <= 820) {
+            panelMinHeight = 54;
+            panelMidHeight = 65;
+            panelMaxHeight = 76;
+        } else {
+            panelMinHeight = 52;
+            panelMidHeight = 64;
+            panelMaxHeight = 78;
+        }
+
         applyPanelHeightVh(panelMidHeight, true);
         return;
     }
