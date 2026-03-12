@@ -12367,6 +12367,15 @@ function applyPanelHeightVh(vh, animate = true) {
 }
 
 function setPanelDragPreset(preset) {
+    if (preset === 'driver-tracking') {
+        panelDragPreset = 'driver-tracking';
+        panelMinHeight = 90;
+        panelMidHeight = 96;
+        panelMaxHeight = 100;
+        applyPanelHeightVh(panelMaxHeight, true);
+        return;
+    }
+
     if (preset === 'trip-completion') {
         panelDragPreset = 'trip-completion';
         panelMinHeight = 60;
@@ -12394,6 +12403,27 @@ function setPanelDragPreset(preset) {
     applyPanelHeightVh(next, true);
 }
 
+function setPassengerDriverMapFullscreen(enabled) {
+    const panel = document.getElementById('main-panel');
+    if (!panel) return;
+
+    const shouldFullscreen = !!enabled && window.innerWidth <= 768;
+    panel.classList.toggle('passenger-driver-map-fullscreen', shouldFullscreen);
+
+    if (!shouldFullscreen) {
+        resetDriverInfoPanel();
+        return;
+    }
+
+    const infoSection = document.getElementById('driver-info-section');
+    const mapSection = document.getElementById('driver-map-section');
+    const toggleBtn = document.getElementById('driver-info-toggle');
+    if (infoSection) infoSection.classList.add('hidden');
+    if (mapSection) mapSection.classList.add('driver-map-expanded');
+    if (toggleBtn) toggleBtn.textContent = 'إظهار التفاصيل';
+    isDriverInfoCollapsed = true;
+}
+
 function configurePassengerMainPanelForSection(name) {
     const panel = document.getElementById('main-panel');
     const container = document.getElementById('passenger-ui-container');
@@ -12401,6 +12431,13 @@ function configurePassengerMainPanelForSection(name) {
 
     if (container) {
         container.classList.toggle('passenger-ui-centered', name === 'rideSelect');
+    }
+
+    setPassengerDriverMapFullscreen(name === 'driver');
+
+    if (name === 'driver') {
+        setPanelDragPreset('driver-tracking');
+        return;
     }
 
     if (name === 'payment-success') {
@@ -12942,7 +12979,9 @@ window.switchSection = function(section) {
     originalSwitchSection(section);
 
     if (section === 'driver') {
-        resetDriverInfoPanel();
+        if (window.innerWidth > 768) {
+            resetDriverInfoPanel();
+        }
     }
     
     const user = DB.getUser();

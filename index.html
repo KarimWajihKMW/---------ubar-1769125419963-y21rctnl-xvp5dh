@@ -624,6 +624,29 @@
           max-height: 85vh;
           overflow-y: auto;
         }
+
+                #main-panel.passenger-driver-map-fullscreen {
+                    width: 100vw !important;
+                    max-width: none !important;
+                    max-height: 100vh !important;
+                    height: 100vh !important;
+                    border-radius: 0 !important;
+                    margin: 0 !important;
+                }
+
+                #main-panel.passenger-driver-map-fullscreen #panel-drag-handle {
+                    display: none !important;
+                }
+
+                #main-panel.passenger-driver-map-fullscreen #state-driver {
+                    height: 100vh !important;
+                }
+
+                #main-panel.passenger-driver-map-fullscreen #driver-map-section,
+                #main-panel.passenger-driver-map-fullscreen #driver-map-section.driver-map-expanded {
+                    height: 100vh !important;
+                    min-height: 100vh !important;
+                }
       }
 
       /* Safe area insets for notched devices */
