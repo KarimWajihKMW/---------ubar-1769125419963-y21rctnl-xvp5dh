@@ -12369,10 +12369,10 @@ function applyPanelHeightVh(vh, animate = true) {
 function setPanelDragPreset(preset) {
     if (preset === 'driver-tracking') {
         panelDragPreset = 'driver-tracking';
-        panelMinHeight = 90;
-        panelMidHeight = 96;
-        panelMaxHeight = 100;
-        applyPanelHeightVh(panelMaxHeight, true);
+        panelMinHeight = 52;
+        panelMidHeight = 64;
+        panelMaxHeight = 78;
+        applyPanelHeightVh(panelMidHeight, true);
         return;
     }
 
@@ -12433,7 +12433,7 @@ function configurePassengerMainPanelForSection(name) {
         container.classList.toggle('passenger-ui-centered', name === 'rideSelect');
     }
 
-    setPassengerDriverMapFullscreen(name === 'driver');
+    setPassengerDriverMapFullscreen(false);
 
     if (name === 'driver') {
         setPanelDragPreset('driver-tracking');
@@ -12979,9 +12979,7 @@ window.switchSection = function(section) {
     originalSwitchSection(section);
 
     if (section === 'driver') {
-        if (window.innerWidth > 768) {
-            resetDriverInfoPanel();
-        }
+        resetDriverInfoPanel();
     }
     
     const user = DB.getUser();
