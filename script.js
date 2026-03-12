@@ -4625,6 +4625,15 @@ function resetDriverInfoPanel() {
     }
 }
 
+function scheduleLeafletResize(delays = [100, 320, 700]) {
+    if (!leafletMap) return;
+    delays.forEach((delay) => {
+        setTimeout(() => {
+            if (leafletMap) leafletMap.invalidateSize();
+        }, delay);
+    });
+}
+
 function toggleDriverInfoPanel() {
     const infoSection = document.getElementById('driver-info-section');
     const mapSection = document.getElementById('driver-map-section');
@@ -4666,9 +4675,7 @@ function setDriverPanelCollapsed(collapsed) {
     isDriverPanelCollapsed = collapsed;
     panelCard.classList.toggle('driver-panel-collapsed', collapsed);
     updateDriverPanelCollapseUI();
-    if (leafletMap) {
-        setTimeout(() => leafletMap.invalidateSize(), 350);
-    }
+    scheduleLeafletResize([140, 360, 720]);
 }
 
 window.collapseDriverPanel = function() {
@@ -5635,9 +5642,7 @@ function preparePassengerDriverMapView() {
         leafletMapEl.style.height = '100%';
     }
 
-    setTimeout(() => {
-        if (leafletMap) leafletMap.invalidateSize();
-    }, 100);
+    scheduleLeafletResize([100, 320, 700]);
 }
 
 function ensurePassengerDriverMarker(location) {
@@ -12384,9 +12389,9 @@ function setPanelDragPreset(preset) {
             panelMidHeight = 65;
             panelMaxHeight = 76;
         } else {
-            panelMinHeight = 52;
-            panelMidHeight = 64;
-            panelMaxHeight = 78;
+            panelMinHeight = 70;
+            panelMidHeight = 84;
+            panelMaxHeight = 94;
         }
 
         applyPanelHeightVh(panelMidHeight, true);
@@ -12429,6 +12434,7 @@ function setPassengerDriverMapFullscreen(enabled) {
 
     if (!shouldFullscreen) {
         resetDriverInfoPanel();
+        scheduleLeafletResize([120, 360]);
         return;
     }
 
@@ -12439,6 +12445,8 @@ function setPassengerDriverMapFullscreen(enabled) {
     if (mapSection) mapSection.classList.add('driver-map-expanded');
     if (toggleBtn) toggleBtn.textContent = 'إظهار التفاصيل';
     isDriverInfoCollapsed = true;
+
+    scheduleLeafletResize([120, 360]);
 }
 
 function configurePassengerMainPanelForSection(name) {
@@ -12446,16 +12454,21 @@ function configurePassengerMainPanelForSection(name) {
     const container = document.getElementById('passenger-ui-container');
     if (!panel) return;
 
-    if (container) {
-        container.classList.toggle('passenger-ui-centered', name === 'rideSelect');
-    }
+    const isDesktopDriverTracking = name === 'driver' && window.innerWidth > 768;
+    panel.classList.toggle('passenger-driver-tracking-desktop', isDesktopDriverTracking);
 
-    setPassengerDriverMapFullscreen(false);
+    if (container) {
+        const shouldCenter = name === 'rideSelect' || isDesktopDriverTracking;
+        container.classList.toggle('passenger-ui-centered', shouldCenter);
+    }
 
     if (name === 'driver') {
         setPanelDragPreset('driver-tracking');
+        setPassengerDriverMapFullscreen(true);
         return;
     }
+
+    setPassengerDriverMapFullscreen(false);
 
     if (name === 'payment-success') {
         setPanelDragPreset('trip-completion');

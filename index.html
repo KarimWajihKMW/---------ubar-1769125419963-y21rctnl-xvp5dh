@@ -427,6 +427,24 @@
                 display: none !important;
             }
 
+            @media (min-width: 769px) {
+                #passenger-ui-container.passenger-ui-centered #main-panel.passenger-driver-tracking-desktop {
+                    width: min(96vw, 980px);
+                    max-width: 980px;
+                    max-height: 92vh !important;
+                }
+
+                #main-panel.passenger-driver-tracking-desktop #state-driver {
+                    min-height: 84vh;
+                }
+
+                #main-panel.passenger-driver-tracking-desktop #driver-map-section,
+                #main-panel.passenger-driver-tracking-desktop #driver-map-section.driver-map-expanded {
+                    height: 54vh;
+                    min-height: 430px;
+                }
+            }
+
             @media (max-width: 640px) {
                 #passenger-ui-container.passenger-ui-centered {
                     padding-top: 4.5rem;
