@@ -9215,6 +9215,48 @@ async function triggerDriverRequestPolling() {
         if (!currentDriverProfile) return;
     }
 
+    // Fallback sync: if realtime event is missed, still close the active trip when it is ended server-side.
+    if (activeDriverTripId) {
+        try {
+            const activeRes = await ApiService.trips.getById(activeDriverTripId);
+            const activeTrip = activeRes?.data || null;
+            if (activeTrip) {
+                const status = String(activeTrip.status || '').toLowerCase();
+                const tripStatus = String(activeTrip.trip_status || '').toLowerCase();
+                if (status === 'completed' || tripStatus === 'completed' || tripStatus === 'rated') {
+                    handleTripCompletedRealtime({
+                        trip_id: String(activeTrip.id || activeDriverTripId),
+                        duration: activeTrip.duration,
+                        distance: activeTrip.distance,
+                        price: activeTrip.cost,
+                        payment_method: activeTrip.payment_method
+                    });
+                    return;
+                }
+
+                if (status === 'cancelled') {
+                    stopDriverTripSocketLocationUpdates();
+                    document.getElementById('driver-active-trip').classList.add('hidden');
+                    document.getElementById('driver-status-waiting').classList.remove('hidden');
+                    clearDriverPassengerRoute();
+                    setDriverAwaitingPayment(false);
+                    setDriverStartReady(false);
+                    setDriverTripStarted(false);
+
+                    const cancelledTripId = activeDriverTripId;
+                    activeDriverTripId = null;
+                    currentIncomingTrip = null;
+                    if (cancelledTripId) unsubscribeTripRealtime(cancelledTripId);
+                    showToast('⚠️ تم إلغاء الرحلة');
+                    triggerDriverRequestPolling();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('Active trip sync failed:', e?.message || e);
+        }
+    }
+
     const incomingPanel = document.getElementById('driver-incoming-request');
     const activePanel = document.getElementById('driver-active-trip');
     if (activePanel && !activePanel.classList.contains('hidden')) return;
