@@ -12441,10 +12441,10 @@ function setPassengerDriverMapFullscreen(enabled) {
     const infoSection = document.getElementById('driver-info-section');
     const mapSection = document.getElementById('driver-map-section');
     const toggleBtn = document.getElementById('driver-info-toggle');
-    if (infoSection) infoSection.classList.add('hidden');
-    if (mapSection) mapSection.classList.add('driver-map-expanded');
-    if (toggleBtn) toggleBtn.textContent = 'إظهار التفاصيل';
-    isDriverInfoCollapsed = true;
+    if (infoSection) infoSection.classList.remove('hidden');
+    if (mapSection) mapSection.classList.remove('driver-map-expanded');
+    if (toggleBtn) toggleBtn.textContent = 'إخفاء التفاصيل';
+    isDriverInfoCollapsed = false;
 
     scheduleLeafletResize([120, 360]);
 }
