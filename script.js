@@ -1811,10 +1811,13 @@ window.refreshPickupHandshake = async function() {
         if (!d) return;
         const card = document.getElementById('passenger-pickup-handshake-card');
         const codeEl = document.getElementById('passenger-pickup-handshake-code');
+        const inlineCodeEl = document.getElementById('passenger-trip-start-code-inline');
         const expEl = document.getElementById('passenger-pickup-handshake-expires');
         const qrEl = document.getElementById('passenger-pickup-handshake-qr');
 
-        if (codeEl) codeEl.textContent = String(d.pickup_phrase || '------');
+        const codeText = String(d.pickup_phrase || '------');
+        if (codeEl) codeEl.textContent = codeText;
+        if (inlineCodeEl) inlineCodeEl.textContent = codeText;
         if (expEl) {
             const dt = d.expires_at ? new Date(d.expires_at) : null;
             expEl.textContent = dt && Number.isFinite(dt.getTime())
@@ -5654,10 +5657,7 @@ function ensurePassengerDriverMarker(location) {
         iconAnchor: [16, 16]
     });
 
-    if (driverMarkerL) {
-        driverMarkerL.setLatLng([location.lat, location.lng]);
-        return;
-    }
+    if (driverMarkerL) return;
 
     driverMarkerL = L.marker([location.lat, location.lng], { icon: carIcon }).addTo(leafletMap);
     driverMarkerL.bindPopup('🚗 الكابتن').openPopup();
@@ -5666,7 +5666,7 @@ function ensurePassengerDriverMarker(location) {
 function updatePassengerDriverRoute(driverCoords, targetCoords) {
     if (!leafletMap || !driverCoords || !targetCoords) return;
     updateRouteOnRoad(driverCoords, targetCoords, {
-        style: { color: '#4f46e5', weight: 4, opacity: 0.75, dashArray: '10, 10' },
+        style: { color: '#2D8CFF', weight: 5, opacity: 0.95 },
         fitBounds: !routePolyline,
         forceFetch: false
     });
@@ -5677,14 +5677,14 @@ function updateDriverDistance(distanceMeters) {
     if (!el) return;
     const meters = Number(distanceMeters);
     if (!Number.isFinite(meters) || meters < 0) {
-        el.innerText = 'على بُعد -- متر';
+        el.innerText = 'Distance: -- km';
         return;
     }
     if (meters >= 1000) {
-        el.innerText = `على بُعد ${(meters / 1000).toFixed(1)} كم`;
+        el.innerText = `Distance: ${(meters / 1000).toFixed(1)} km`;
         return;
     }
-    el.innerText = `على بُعد ${Math.round(meters)} متر`;
+    el.innerText = `Distance: ${(meters / 1000).toFixed(2)} km`;
 }
 
 function renderPassengerEtaValue(seconds, target = 'pickup') {
@@ -5698,8 +5698,37 @@ function renderPassengerEtaValue(seconds, target = 'pickup') {
         return;
     }
     const etaEl = document.getElementById('eta-display');
-    if (etaEl) etaEl.innerText = formatETA(s);
+    if (etaEl) {
+        const mins = Math.max(1, Math.round(s / 60));
+        etaEl.innerText = `${mins} min`;
+    }
 }
+
+function updatePassengerDriverInfoCard(trip) {
+    const driverNameEl = document.getElementById('passenger-driver-name');
+    const driverRatingEl = document.getElementById('passenger-driver-rating');
+    const carModelEl = document.getElementById('passenger-driver-car-model');
+    const plateEl = document.getElementById('passenger-driver-plate');
+
+    const driverName = trip?.driver_name || trip?.driver_live_name || 'الكابتن';
+    const rating = Number(trip?.driver_rating || trip?.rating);
+    const carModel = trip?.car_name || trip?.driver_car_name || trip?.car_type || 'سيارة خاصة';
+    const plate = trip?.car_plate || trip?.driver_car_plate || '---';
+
+    if (driverNameEl) driverNameEl.innerText = String(driverName);
+    if (driverRatingEl) driverRatingEl.innerText = Number.isFinite(rating) ? rating.toFixed(1) : '4.8';
+    if (carModelEl) carModelEl.innerText = String(carModel);
+    if (plateEl) plateEl.innerText = String(plate);
+}
+
+window.passengerTrackCarNow = function() {
+    if (!leafletMap || !driverLocation) {
+        showToast('لا يوجد موقع مباشر للكابتن الآن');
+        return;
+    }
+    const currentZoom = Math.max(leafletMap.getZoom() || 14, 15);
+    leafletMap.setView([driverLocation.lat, driverLocation.lng], currentZoom, { animate: true });
+};
 
 function stopPassengerLiveEtaTicker() {
     if (passengerLiveEtaTicker) {
@@ -5787,6 +5816,7 @@ async function refreshPassengerLiveTripTracking() {
                 driverLabelText.innerText = `${driverName} قادم إليك`;
             }
         }
+        updatePassengerDriverInfoCard(trip);
 
         // Resolve coordinates
         const driverLat = trip.driver_last_lat !== null && trip.driver_last_lat !== undefined ? Number(trip.driver_last_lat) : null;
@@ -5837,7 +5867,13 @@ async function refreshPassengerLiveTripTracking() {
 
         preparePassengerDriverMapView();
         ensurePassengerDriverMarker(newDriverCoords);
+        smoothMoveDriverMarker(newDriverCoords);
         updatePassengerDriverRoute(newDriverCoords, targetCoords);
+
+        if (leafletMap) {
+            const zoom = Math.max(leafletMap.getZoom() || 14, 14);
+            leafletMap.setView([newDriverCoords.lat, newDriverCoords.lng], zoom, { animate: true });
+        }
 
         // Center once when trip starts (ongoing)
         if (trip.status === 'ongoing' && !passengerTripCenteredOnce && leafletMap) {
@@ -6000,7 +6036,9 @@ window.focusCaptainOnMap = function() {
     if (!leafletMap) {
         initLeafletMap();
     }
-    moveLeafletMapToContainer('map-container');
+    const trackingView = document.getElementById('driver-map-view');
+    const targetContainerId = trackingView ? 'driver-map-view' : 'map-container';
+    moveLeafletMapToContainer(targetContainerId);
 
     const mapWorld = document.getElementById('map-world');
     if (mapWorld) mapWorld.style.display = 'none';
@@ -6022,7 +6060,7 @@ window.focusCaptainOnMap = function() {
             const bounds = L.latLngBounds(points.map(p => [p.lat, p.lng]));
             leafletMap.fitBounds(bounds, { padding: [50, 50] });
         } else {
-            leafletMap.setView([baseLocation.lat, baseLocation.lng], Math.max(leafletMap.getZoom(), 14));
+            leafletMap.setView([baseLocation.lat, baseLocation.lng], Math.max(leafletMap.getZoom(), 14), { animate: true });
         }
     }
 
@@ -12429,23 +12467,8 @@ function setPassengerDriverMapFullscreen(enabled) {
     const panel = document.getElementById('main-panel');
     if (!panel) return;
 
-    const shouldFullscreen = !!enabled && window.innerWidth <= 768;
-    panel.classList.toggle('passenger-driver-map-fullscreen', shouldFullscreen);
-
-    if (!shouldFullscreen) {
-        resetDriverInfoPanel();
-        scheduleLeafletResize([120, 360]);
-        return;
-    }
-
-    const infoSection = document.getElementById('driver-info-section');
-    const mapSection = document.getElementById('driver-map-section');
-    const toggleBtn = document.getElementById('driver-info-toggle');
-    if (infoSection) infoSection.classList.remove('hidden');
-    if (mapSection) mapSection.classList.remove('driver-map-expanded');
-    if (toggleBtn) toggleBtn.textContent = 'إخفاء التفاصيل';
-    isDriverInfoCollapsed = false;
-
+    panel.classList.remove('passenger-driver-map-fullscreen');
+    resetDriverInfoPanel();
     scheduleLeafletResize([120, 360]);
 }
 

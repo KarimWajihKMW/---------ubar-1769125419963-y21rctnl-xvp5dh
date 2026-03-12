@@ -643,38 +643,6 @@
           overflow-y: auto;
         }
 
-                #main-panel.passenger-driver-map-fullscreen {
-                    width: 100vw !important;
-                    max-width: none !important;
-                    max-height: 100vh !important;
-                    height: 100vh !important;
-                    border-radius: 0 !important;
-                    margin: 0 !important;
-                }
-
-                #main-panel.passenger-driver-map-fullscreen #panel-drag-handle {
-                    display: none !important;
-                }
-
-                #main-panel.passenger-driver-map-fullscreen #state-driver {
-                    height: 100vh !important;
-                }
-
-                #main-panel.passenger-driver-map-fullscreen #driver-map-section {
-                    height: 52vh !important;
-                    min-height: 320px !important;
-                }
-
-                #main-panel.passenger-driver-map-fullscreen #driver-map-section.driver-map-expanded {
-                    height: 100vh !important;
-                    min-height: 100vh !important;
-                }
-
-                #main-panel.passenger-driver-map-fullscreen #driver-info-section {
-                    flex: 1 1 auto;
-                    min-height: 0;
-                    overflow-y: auto;
-                }
       }
 
       /* Safe area insets for notched devices */
@@ -1629,7 +1597,7 @@
             <!-- State 4: Driver Found -->
             <div id="state-driver" class="hidden p-0 bg-white flex flex-col h-full">
                 <!-- Map Section - Top Half -->
-                <div id="driver-map-section" class="relative h-[45vh] bg-gray-200 overflow-hidden">
+                <div id="driver-map-section" class="relative h-[42vh] min-h-[280px] bg-gray-200 overflow-hidden border-b border-gray-100">
                     <!-- Map will show here -->
                     <div id="driver-map-view" class="absolute inset-0 z-1"></div>
 
@@ -1638,12 +1606,12 @@
                     </button>
                     
                     <!-- Floating ETA Card -->
-                    <div class="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/95 backdrop-blur px-6 py-3 rounded-2xl shadow-xl border-2 border-indigo-200">
+                    <div class="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/95 backdrop-blur px-5 py-3 rounded-2xl shadow-xl border border-blue-200">
                         <div class="text-center">
-                            <p class="text-xs text-indigo-600 font-bold mb-1">⏱️ الكابتن يصل خلال</p>
-                            <h3 class="text-2xl font-extrabold text-indigo-600" id="eta-display">-- د -- ث</h3>
+                            <p class="text-xs text-blue-600 font-bold mb-1">Driver arriving in</p>
+                            <h3 class="text-2xl font-extrabold text-blue-600" id="eta-display">-- min</h3>
                             <p class="text-[11px] text-gray-600 mt-1 hidden" id="eta-reason-display"></p>
-                            <p class="text-xs text-gray-600 mt-1" id="driver-distance">على بُعد -- متر</p>
+                            <p class="text-xs text-gray-700 mt-1 font-bold" id="driver-distance">Distance: -- km</p>
                         </div>
                     </div>
                     
@@ -1664,26 +1632,39 @@
 
                     <div id="passenger-driver-details-content" class="mt-4">
                     <!-- Driver Info Card -->
-                    <div class="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                    <div class="flex items-center justify-between mb-4 bg-gray-50 p-4 rounded-2xl border border-gray-200 shadow-sm">
                         <div class="flex items-center">
                             <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 border-4 border-white shadow-lg overflow-hidden relative">
                                 <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AhmedDriver" alt="Driver" class="w-full h-full">
                                 <div class="absolute bottom-0 right-0 w-5 h-5 sm:w-6 sm:h-6 bg-green-500 border-2 border-white rounded-full"></div>
                             </div>
                             <div class="mr-3 sm:mr-4">
-                                <h4 class="font-bold text-lg sm:text-xl text-gray-800">أحمد محمد</h4>
+                                <h4 id="passenger-driver-name" class="font-bold text-lg sm:text-xl text-gray-800">أحمد محمد</h4>
                                 <div class="flex items-center text-yellow-500 text-xs sm:text-sm mt-1">
                                     <i class="fas fa-star"></i>
-                                    <span class="text-gray-600 font-bold mr-1">4.9</span>
-                                    <span class="text-gray-400 text-xs mr-1">(1,230)</span>
+                                    <span id="passenger-driver-rating" class="text-gray-600 font-bold mr-1">4.9</span>
+                                    <span class="text-gray-400 text-xs mr-1">التقييم</span>
                                 </div>
                             </div>
                         </div>
                         <div class="text-center">
                             <div class="bg-white px-3 sm:px-4 py-2 rounded-xl border-2 border-indigo-200 shadow-sm">
-                                <p class="text-[10px] sm:text-xs text-gray-500 font-bold">تويوتا كامري</p>
-                                <p class="text-sm sm:text-lg font-bold text-gray-800">أ ب د 1234</p>
+                                <p id="passenger-driver-car-model" class="text-[10px] sm:text-xs text-gray-500 font-bold">تويوتا كامري</p>
+                                <p id="passenger-driver-plate" class="text-sm sm:text-lg font-bold text-gray-800">أ ب د 1234</p>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-6 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-xs text-gray-500 font-bold">Trip start code</p>
+                                <p id="passenger-trip-start-code-inline" class="text-xl font-extrabold text-indigo-700 tracking-widest">------</p>
+                            </div>
+                            <button type="button" onclick="passengerTrackCarNow()" class="px-4 py-3 rounded-xl bg-blue-600 text-white font-extrabold hover:bg-blue-700 transition-colors">
+                                <i class="fas fa-location-crosshairs ml-1"></i>
+                                Track Car
+                            </button>
                         </div>
                     </div>
 
