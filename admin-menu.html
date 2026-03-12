@@ -37,12 +37,14 @@
 
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
             <h2 class="text-base font-extrabold text-gray-800 mb-3">إجراء سريع: إلغاء رحلة جارية</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <input id="quick-cancel-trip-id" type="text" placeholder="رقم الرحلة" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
-                <input id="quick-cancel-note" type="text" placeholder="سبب الإلغاء (اختياري)" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold" />
-                <button id="quick-cancel-btn" onclick="quickCancelTrip()" class="w-full bg-red-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-red-700">إلغاء الرحلة الآن</button>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                <input id="quick-cancel-note" type="text" placeholder="سبب الإلغاء (اختياري)" class="w-full px-3 py-2.5 rounded-xl border border-gray-200 font-bold md:col-span-2" />
+                <button id="refresh-active-trips-btn" onclick="loadActiveTripsForCancel()" class="w-full bg-gray-800 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-black">تحديث الرحلات الجارية</button>
             </div>
-            <p class="text-xs text-gray-500 font-bold mt-2">يمكنك أيضًا من صفحة Pending Rides إلغاء الرحلة من الكارت مباشرة.</p>
+            <div id="active-trips-cancel-list" class="space-y-2">
+                <div class="text-center py-5 text-gray-500 font-bold">جاري تحميل الرحلات...</div>
+            </div>
+            <p class="text-xs text-gray-500 font-bold mt-2">اضغط "إلغاء الرحلة" أمام الرحلة مباشرة بدون كتابة رقمها.</p>
         </div>
 
         <div class="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-8">
@@ -109,17 +111,32 @@
             window.location.href = page;
         }
 
-        async function quickCancelTrip() {
-            const tripId = String(document.getElementById('quick-cancel-trip-id')?.value || '').trim();
-            const note = String(document.getElementById('quick-cancel-note')?.value || '').trim();
-            const btn = document.getElementById('quick-cancel-btn');
+        function escapeHtml(value) {
+            return String(value === undefined || value === null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
-            if (!tripId) {
-                alert('اكتب رقم الرحلة أولاً');
+        function formatTripTime(value) {
+            if (!value) return '--';
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return '--';
+            return d.toLocaleString('ar-SA');
+        }
+
+        async function quickCancelTripById(tripId) {
+            const id = String(tripId || '').trim();
+            const note = String(document.getElementById('quick-cancel-note')?.value || '').trim();
+            const btn = document.getElementById(`cancel-trip-btn-${id}`);
+
+            if (!id) {
                 return;
             }
 
-            const ok = window.confirm(`تأكيد إلغاء الرحلة رقم ${tripId}؟`);
+            const ok = window.confirm(`تأكيد إلغاء الرحلة رقم ${id}؟`);
             if (!ok) return;
 
             try {
@@ -127,17 +144,75 @@
                     btn.disabled = true;
                     btn.textContent = 'جاري الإلغاء...';
                 }
-                await ApiService.admin.cancelTrip(tripId, note);
+                await ApiService.admin.cancelTrip(id, note);
                 alert('تم إلغاء الرحلة بنجاح');
-                document.getElementById('quick-cancel-trip-id').value = '';
-                document.getElementById('quick-cancel-note').value = '';
+                await loadActiveTripsForCancel();
             } catch (e) {
                 console.error(e);
                 alert(`تعذر إلغاء الرحلة: ${e.message}`);
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = 'إلغاء الرحلة الآن';
+                    btn.textContent = 'إلغاء الرحلة';
+                }
+            }
+        }
+
+        async function loadActiveTripsForCancel() {
+            const listEl = document.getElementById('active-trips-cancel-list');
+            const refreshBtn = document.getElementById('refresh-active-trips-btn');
+            if (!listEl) return;
+
+            try {
+                if (refreshBtn) {
+                    refreshBtn.disabled = true;
+                    refreshBtn.textContent = 'جاري التحديث...';
+                }
+                listEl.innerHTML = '<div class="text-center py-5 text-gray-500 font-bold">جاري تحميل الرحلات...</div>';
+
+                const response = await ApiService.trips.getAll({ limit: 200, offset: 0 });
+                const rows = Array.isArray(response?.data) ? response.data : [];
+                const active = rows.filter((t) => {
+                    const st = String(t?.status || '').toLowerCase();
+                    return st && !['completed', 'cancelled', 'rated'].includes(st);
+                });
+
+                if (!active.length) {
+                    listEl.innerHTML = '<div class="text-center py-5 text-gray-500 font-bold">لا توجد رحلات جارية حالياً</div>';
+                    return;
+                }
+
+                listEl.innerHTML = active.slice(0, 20).map((t) => {
+                    const tripId = String(t.id || '').trim();
+                    const status = escapeHtml(t.status || '--');
+                    const passenger = escapeHtml(t.user_id || '--');
+                    const driver = escapeHtml(t.driver_id || '--');
+                    const pickup = escapeHtml(t.pickup_location || '--');
+                    const dropoff = escapeHtml(t.dropoff_location || '--');
+                    const createdAt = formatTripTime(t.created_at);
+                    return `
+                        <div class="border border-gray-200 rounded-xl p-3 bg-gray-50">
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <p class="font-extrabold text-gray-800">رحلة: ${escapeHtml(tripId)}</p>
+                                <span class="text-xs font-extrabold px-2 py-1 rounded-full bg-amber-100 text-amber-800">${status}</span>
+                            </div>
+                            <p class="text-xs text-gray-600 font-bold">راكب: ${passenger} • سائق: ${driver}</p>
+                            <p class="text-xs text-gray-600 font-bold truncate">من: ${pickup}</p>
+                            <p class="text-xs text-gray-600 font-bold truncate">إلى: ${dropoff}</p>
+                            <p class="text-xs text-gray-500 font-bold">تاريخ الإنشاء: ${createdAt}</p>
+                            <div class="mt-2 flex justify-end">
+                                <button id="cancel-trip-btn-${escapeHtml(tripId)}" onclick="quickCancelTripById('${tripId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" class="bg-red-600 text-white px-3 py-2 rounded-lg font-extrabold hover:bg-red-700">إلغاء الرحلة</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error(e);
+                listEl.innerHTML = `<div class="text-center py-5 text-red-600 font-extrabold">تعذر تحميل الرحلات: ${escapeHtml(e.message)}</div>`;
+            } finally {
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = 'تحديث الرحلات الجارية';
                 }
             }
         }
@@ -163,6 +238,8 @@
                 });
             }
         })();
+
+        loadActiveTripsForCancel();
     </script>
     <script src="api-service.js"></script>
 </body>
