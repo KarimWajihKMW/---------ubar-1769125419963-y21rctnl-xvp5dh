@@ -2652,7 +2652,10 @@ let googleDirectionsService = null;
 let googleGeocoderService = null;
 let googlePlacesAutocompleteService = null;
 let googleMapsReady = false;
+let leafletLoadPromise = null;
 const GOOGLE_MAPS_KEY_STORAGE_KEY = 'akwadra_google_maps_key';
+const LEAFLET_CSS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+const LEAFLET_JS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
 
 function setMapFallbackMode(enabled, reasonText = '') {
     const world = document.getElementById('map-world');
@@ -2773,6 +2776,64 @@ async function ensureGoogleMapsLoaded() {
     });
 
     return googleMapsBootstrapPromise;
+}
+
+function loadStylesheetOnce(url, markerName) {
+    if (document.querySelector(`link[${markerName}="1"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.setAttribute(markerName, '1');
+    document.head.appendChild(link);
+}
+
+function loadScriptOnce(url, markerName) {
+    return new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[${markerName}="1"]`);
+        if (existing) {
+            if (existing.getAttribute('data-loaded') === '1') {
+                resolve();
+                return;
+            }
+            existing.addEventListener('load', () => resolve(), { once: true });
+            existing.addEventListener('error', () => reject(new Error('Failed to load script')), { once: true });
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = url;
+        script.async = true;
+        script.defer = true;
+        script.setAttribute(markerName, '1');
+        script.onload = () => {
+            script.setAttribute('data-loaded', '1');
+            resolve();
+        };
+        script.onerror = () => reject(new Error('Failed to load script'));
+        document.head.appendChild(script);
+    });
+}
+
+async function ensureNativeLeafletLoaded() {
+    if (window.L && !window.L.__akwadraGoogleCompat && typeof window.L.map === 'function') {
+        return window.L;
+    }
+
+    if (!leafletLoadPromise) {
+        leafletLoadPromise = (async () => {
+            loadStylesheetOnce(LEAFLET_CSS_URL, 'data-akwadra-leaflet-css');
+            await loadScriptOnce(LEAFLET_JS_URL, 'data-akwadra-leaflet-js');
+            if (!window.L || typeof window.L.map !== 'function') {
+                throw new Error('Leaflet failed to initialize');
+            }
+            return window.L;
+        })().catch((error) => {
+            leafletLoadPromise = null;
+            throw error;
+        });
+    }
+
+    return leafletLoadPromise;
 }
 
 function ensureGoogleServices() {
@@ -4639,12 +4700,20 @@ async function initLeafletMap() {
     } catch (e) {
         console.error('Failed to initialize Google Maps:', e);
         googleMapsReady = false;
-        setMapFallbackMode(true, 'الخريطة غير متاحة الآن: أضف مفتاح Google Maps في إعدادات السيرفر.');
-        showToast('❌ تعذر تحميل Google Maps');
-        return;
+        try {
+            await ensureNativeLeafletLoaded();
+            setMapFallbackMode(false);
+            showToast('تم تشغيل الخريطة الاحتياطية (OpenStreetMap)');
+        } catch (leafletError) {
+            console.error('Failed to initialize Leaflet fallback:', leafletError);
+            setMapFallbackMode(true, 'الخريطة غير متاحة الآن: تعذر تحميل Google Maps وOpenStreetMap.');
+            showToast('❌ تعذر تحميل الخريطة');
+            return;
+        }
     }
 
-    console.log('Initializing map with Google Maps...');
+    const usingGoogleCompat = !!(window.L && window.L.__akwadraGoogleCompat);
+    console.log(`Initializing map with ${usingGoogleCompat ? 'Google Maps compatibility' : 'Leaflet OpenStreetMap'}...`);
     
     const alexandriaCenter = [31.2001, 29.9187];
     const initialCenter = alexandriaCenter;
@@ -4653,9 +4722,16 @@ async function initLeafletMap() {
         attributionControl: true
     }).setView(initialCenter, 12);
     
-    L.tileLayer('', {}).addTo(leafletMap);
-
-    console.log('✅ Google map initialized successfully');
+    if (usingGoogleCompat) {
+        L.tileLayer('', {}).addTo(leafletMap);
+        console.log('✅ Google map initialized successfully');
+    } else {
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(leafletMap);
+        console.log('✅ Leaflet OpenStreetMap fallback initialized successfully');
+    }
 
     // Custom controls hookup
     const zi = document.getElementById('zoom-in');
