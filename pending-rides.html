@@ -423,6 +423,8 @@
 
             <button onclick="loadRequests()">🔄 تحديث</button>
             <button onclick="cleanupExpired()">🧹 تنظيف المنتهية</button>
+            <input id="cancelTripIdInput" type="text" placeholder="رقم الرحلة لإلغائها" style="min-width:220px; padding:12px 14px; border-radius:10px; border:2px solid #e5e7eb; font-size:1em; font-weight:700;" />
+            <button onclick="cancelTripById()" style="background:#dc2626;">🛑 إلغاء رحلة</button>
         </div>
 
         <div id="requestsContainer">
@@ -544,6 +546,15 @@
                 `;
             }
 
+            const hasTripId = req.trip_id !== undefined && req.trip_id !== null && String(req.trip_id).trim() !== '';
+            const cancelActionHtml = hasTripId
+                ? `
+                    <div style="margin-top: 14px; display:flex; justify-content:flex-end;">
+                        <button onclick="cancelTripById('${String(req.trip_id).replace(/'/g, "\\'")}')" style="background:#dc2626; color:white; border:none; border-radius:10px; padding:10px 14px; font-weight:800; cursor:pointer;">إلغاء هذه الرحلة</button>
+                    </div>
+                `
+                : '';
+
             return `
                 <div class="request-card ${req.status}">
                     <div class="request-header">
@@ -599,8 +610,35 @@
                             <span>⏰ تنتهي في: ${expiresAt}</span>
                         </div>
                     ` : ''}
+                    ${cancelActionHtml}
                 </div>
             `;
+        }
+
+        async function cancelTripById(tripIdFromCard = '') {
+            const input = document.getElementById('cancelTripIdInput');
+            const tripId = String(tripIdFromCard || (input ? input.value : '') || '').trim();
+            if (!tripId) {
+                alert('اكتب رقم الرحلة أولاً');
+                return;
+            }
+
+            const noteRaw = window.prompt('سبب إلغاء الرحلة (اختياري):', 'تم الإلغاء بواسطة الإدارة');
+            if (noteRaw === null) return;
+            const note = String(noteRaw || '').trim();
+
+            const ok = window.confirm(`تأكيد إلغاء الرحلة رقم ${tripId}؟`);
+            if (!ok) return;
+
+            try {
+                await ApiService.admin.cancelTrip(tripId, note);
+                if (input) input.value = '';
+                alert('✅ تم إلغاء الرحلة');
+                await loadRequests();
+            } catch (error) {
+                console.error('Error cancelling trip:', error);
+                alert(`❌ تعذر إلغاء الرحلة: ${error.message}`);
+            }
         }
 
         async function cleanupExpired() {

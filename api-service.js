@@ -1174,6 +1174,18 @@ const ApiService = {
             return ApiService.request(`/admin/trips/${encodeURIComponent(tripId)}/payment-ledger`);
         },
 
+        async cancelTrip(tripId, note = '') {
+            const payload = { status: 'cancelled' };
+            const normalizedNote = note !== undefined && note !== null ? String(note).trim() : '';
+            if (normalizedNote) {
+                payload.review = normalizedNote;
+            }
+            return ApiService.request(`/trips/${encodeURIComponent(tripId)}/status`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        },
+
         async getTripEvidenceBundle(tripId, params = {}, grantId = null) {
             const qs = new URLSearchParams(params).toString();
             return ApiService.request(`/admin/trips/${encodeURIComponent(tripId)}/evidence-bundle${qs ? `?${qs}` : ''}`, {

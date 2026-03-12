@@ -114,6 +114,7 @@
             </div>
             <div class="flex gap-2">
               <button id="evidence-btn" onclick="loadEvidence()" class="hidden bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-indigo-700">Evidence Bundle</button>
+              <button id="cancel-trip-btn" onclick="cancelSelectedTrip()" class="hidden bg-red-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-red-700">إلغاء الرحلة</button>
               <button id="reveal-btn" onclick="revealSensitive()" class="hidden bg-amber-600 text-white px-4 py-2.5 rounded-xl font-extrabold hover:bg-amber-700">Reveal Sensitive</button>
             </div>
           </div>
@@ -631,6 +632,7 @@
       document.getElementById('actions').classList.add('hidden');
       document.getElementById('evidence').classList.add('hidden');
       document.getElementById('evidence-btn').classList.toggle('hidden', !selected.trip_id);
+      document.getElementById('cancel-trip-btn').classList.toggle('hidden', !selected.trip_id);
       document.getElementById('reveal-btn').classList.remove('hidden');
       sensitiveGrant = null;
       cachedTimeline = null;
@@ -770,6 +772,39 @@
       } catch (e) {
         console.error(e);
         alert(`تعذر تنفيذ الإجراء: ${e.message}`);
+      }
+    }
+
+    async function cancelSelectedTrip() {
+      if (!selected || !selected.trip_id) return;
+
+      const noteInput = window.prompt('سبب إلغاء الرحلة (اختياري):', 'تم الإلغاء بواسطة الإدارة');
+      if (noteInput === null) return;
+      const note = String(noteInput || '').trim();
+
+      const ok = window.confirm(`تأكيد إلغاء الرحلة رقم ${selected.trip_id}؟`);
+      if (!ok) return;
+
+      const btn = document.getElementById('cancel-trip-btn');
+      const oldText = btn ? btn.textContent : '';
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'جاري الإلغاء...';
+        }
+        await ApiService.admin.cancelTrip(selected.trip_id, note);
+        alert('تم إلغاء الرحلة بنجاح');
+        await refreshAll();
+        await selectCase(selected.case_type, selected.case_id, selected.trip_id || '');
+      } catch (e) {
+        console.error(e);
+        alert(`تعذر إلغاء الرحلة: ${e.message}`);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = oldText || 'إلغاء الرحلة';
+        }
       }
     }
 
