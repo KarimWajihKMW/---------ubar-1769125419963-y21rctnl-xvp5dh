@@ -1374,6 +1374,50 @@ function initRealtimeSocket() {
             }
         });
 
+        realtimeSocket.on('trip_pickup_distance', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            const distanceMeters = Number.isFinite(Number(payload?.distance_to_pickup_m)) ? Number(payload.distance_to_pickup_m) : null;
+            const reachedPickup = !!payload?.reached_pickup;
+
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                if (Number.isFinite(distanceMeters)) {
+                    updateDriverDistance(distanceMeters);
+                    if (reachedPickup || distanceMeters <= 100) {
+                        updatePassengerEtaUI(0, 'pickup', { smooth: false, distanceMeters });
+                    }
+                }
+            }
+
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                if (!driverTripStarted && (reachedPickup || (Number.isFinite(distanceMeters) && distanceMeters <= 100))) {
+                    if (currentIncomingTrip) currentIncomingTrip.status = 'arrived';
+                    setDriverStartReady(true);
+                }
+            }
+        });
+
+        realtimeSocket.on('captain_not_moving', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            const samePassengerTrip = currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId);
+            const sameDriverTrip = currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId);
+            if (!samePassengerTrip && !sameDriverTrip) return;
+
+            const stoppedFor = Number.isFinite(Number(payload?.stopped_for_seconds)) ? Number(payload.stopped_for_seconds) : null;
+            const tail = Number.isFinite(stoppedFor) ? ` (${Math.round(stoppedFor)}ث)` : '';
+            showToast(`⚠️ الكابتن لا يتحرك حالياً${tail}`);
+        });
+
+        realtimeSocket.on('captain_moving_again', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            const samePassengerTrip = currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId);
+            const sameDriverTrip = currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId);
+            if (!samePassengerTrip && !sameDriverTrip) return;
+            showToast('✅ الكابتن تحرك مرة أخرى');
+        });
+
         realtimeSocket.on('trip_message', (payload) => {
             const tripId = payload?.trip_id;
             const msg = payload?.message;
@@ -2165,9 +2209,15 @@ function startDriverTripSocketLocationUpdates() {
         const currentStatus = String(currentIncomingTrip?.status || '').toLowerCase();
         const canShare = driverTripStarted || currentStatus === 'assigned' || currentStatus === 'arrived';
         if (!canShare) return;
-        if (!lastGeoCoords || !Number.isFinite(Number(lastGeoCoords.lat)) || !Number.isFinite(Number(lastGeoCoords.lng))) return;
 
         const now = Date.now();
+        const lastFixTs = Number(lastGeoTimestamp || 0);
+        const staleGps = !Number.isFinite(lastFixTs) || (now - lastFixTs > 5500);
+        if (staleGps && !driverGpsProbeInFlight && (now - driverLastFreshGpsAt > 2500)) {
+            requestDriverFreshGpsFix();
+        }
+
+        if (!lastGeoCoords || !Number.isFinite(Number(lastGeoCoords.lat)) || !Number.isFinite(Number(lastGeoCoords.lng))) return;
         if (now - lastDriverSocketEmitAt < 2800) return;
         lastDriverSocketEmitAt = now;
 
@@ -2682,6 +2732,8 @@ let lastReverseGeocodeAt = 0;
 let lastGeoToastAt = 0;
 let hasCenteredOnGeo = false;
 let geoPermissionDenied = false;
+let driverGpsProbeInFlight = false;
+let driverLastFreshGpsAt = 0;
 
 let passengerPickupUpdateInterval = null;
 let driverIncomingTripUpdateInterval = null;
@@ -5158,6 +5210,32 @@ function canUseGeolocation() {
     return typeof navigator !== 'undefined' && !!navigator.geolocation;
 }
 
+function requestDriverFreshGpsFix() {
+    if (currentUserRole !== 'driver') return;
+    if (!canUseGeolocation()) return;
+    if (driverGpsProbeInFlight) return;
+
+    driverGpsProbeInFlight = true;
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            driverGpsProbeInFlight = false;
+            driverLastFreshGpsAt = Date.now();
+            handleGeoSuccess(position);
+        },
+        (error) => {
+            driverGpsProbeInFlight = false;
+            if (error?.code !== 1) {
+                console.warn('Failed to refresh driver GPS fix:', error?.message || error);
+            }
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 7000
+        }
+    );
+}
+
 function shouldShowGeoToast() {
     const now = Date.now();
     if (now - lastGeoToastAt < 8000) return false;
@@ -5229,6 +5307,7 @@ function handleGeoSuccess(position) {
         applyPassengerLocation(coords, !hasCenteredOnGeo);
         maybeReverseGeocodePickup(coords);
     } else if (currentUserRole === 'driver') {
+        driverLastFreshGpsAt = Date.now();
         applyDriverLocation(coords, !hasCenteredOnGeo);
         updateDriverRealTripProgress(coords);
         updateDriverActiveRouteFromGps(coords);
@@ -5458,8 +5537,8 @@ function startLocationTracking() {
         handleGeoError,
         {
             enableHighAccuracy: true,
-            maximumAge: 5000,
-            timeout: 15000
+            maximumAge: 0,
+            timeout: 12000
         }
     );
 }

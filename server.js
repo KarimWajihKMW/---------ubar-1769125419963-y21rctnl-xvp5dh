@@ -510,6 +510,9 @@ const PICKUP_ARRIVAL_RADIUS_METERS = process.env.PICKUP_ARRIVAL_RADIUS_METERS !=
 const PICKUP_ETA_DEFAULT_SPEED_MPS = process.env.PICKUP_ETA_DEFAULT_SPEED_MPS !== undefined ? Number(process.env.PICKUP_ETA_DEFAULT_SPEED_MPS) : 9;
 const PICKUP_ETA_SMOOTHING_ALPHA = process.env.PICKUP_ETA_SMOOTHING_ALPHA !== undefined ? Number(process.env.PICKUP_ETA_SMOOTHING_ALPHA) : 0.32;
 const PICKUP_ETA_UPWARD_TOLERANCE_SECONDS = process.env.PICKUP_ETA_UPWARD_TOLERANCE_SECONDS !== undefined ? Number(process.env.PICKUP_ETA_UPWARD_TOLERANCE_SECONDS) : 75;
+const CAPTAIN_NOT_MOVING_WINDOW_SECONDS = process.env.CAPTAIN_NOT_MOVING_WINDOW_SECONDS !== undefined ? Number(process.env.CAPTAIN_NOT_MOVING_WINDOW_SECONDS) : 45;
+const CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS = process.env.CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS !== undefined ? Number(process.env.CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS) : 12;
+const CAPTAIN_NOT_MOVING_REEMIT_SECONDS = process.env.CAPTAIN_NOT_MOVING_REEMIT_SECONDS !== undefined ? Number(process.env.CAPTAIN_NOT_MOVING_REEMIT_SECONDS) : 20;
 
 // Night Safety Policy (defaults)
 const NIGHT_POLICY_START_HOUR = process.env.NIGHT_POLICY_START_HOUR !== undefined ? Number(process.env.NIGHT_POLICY_START_HOUR) : 22;
@@ -815,7 +818,72 @@ const lastTripDriverWriteAt = new Map();
 const lastTripSafetyCheckAt = new Map();
 const lastTripDeviationEventAt = new Map();
 const lastTripPickupProgressAt = new Map();
+const tripPickupMovementState = new Map();
 const tripStopState = new Map();
+
+function trackCaptainPickupMovement(tripId, coords, options = {}) {
+    const key = String(tripId);
+    const now = Date.now();
+    const lat = Number(coords?.lat);
+    const lng = Number(coords?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const windowMs = Math.max(30000, (Number.isFinite(CAPTAIN_NOT_MOVING_WINDOW_SECONDS) ? Number(CAPTAIN_NOT_MOVING_WINDOW_SECONDS) : 45) * 1000);
+    const minMoveMeters = Math.max(3, Number.isFinite(CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS) ? Number(CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS) : 12);
+    const reemitMs = Math.max(10000, (Number.isFinite(CAPTAIN_NOT_MOVING_REEMIT_SECONDS) ? Number(CAPTAIN_NOT_MOVING_REEMIT_SECONDS) : 20) * 1000);
+    const reachedPickup = !!options.reachedPickup;
+    const distanceToPickupMeters = Number.isFinite(Number(options.distanceToPickupMeters)) ? Math.max(0, Math.round(Number(options.distanceToPickupMeters))) : null;
+
+    const prev = tripPickupMovementState.get(key) || {
+        last_lat: null,
+        last_lng: null,
+        last_moved_at_ms: now,
+        not_moving: false,
+        last_not_moving_emit_at_ms: 0
+    };
+
+    let movedMeters = null;
+    if (Number.isFinite(prev.last_lat) && Number.isFinite(prev.last_lng)) {
+        movedMeters = haversineKm({ lat: prev.last_lat, lng: prev.last_lng }, { lat, lng }) * 1000;
+    }
+
+    const movedEnough = !Number.isFinite(movedMeters) || movedMeters >= minMoveMeters;
+    if (movedEnough || reachedPickup) {
+        const wasNotMoving = !!prev.not_moving;
+        prev.last_moved_at_ms = now;
+        prev.not_moving = false;
+        prev.last_lat = lat;
+        prev.last_lng = lng;
+        if (wasNotMoving) {
+            io.to(tripRoom(key)).emit('captain_moving_again', {
+                trip_id: key,
+                distance_to_pickup_m: distanceToPickupMeters,
+                timestamp: now
+            });
+        }
+        tripPickupMovementState.set(key, prev);
+        return;
+    }
+
+    prev.last_lat = lat;
+    prev.last_lng = lng;
+    const stoppedForMs = Math.max(0, now - (Number(prev.last_moved_at_ms) || now));
+    if (!reachedPickup && stoppedForMs >= windowMs) {
+        prev.not_moving = true;
+        const shouldEmit = !prev.last_not_moving_emit_at_ms || (now - prev.last_not_moving_emit_at_ms >= reemitMs);
+        if (shouldEmit) {
+            prev.last_not_moving_emit_at_ms = now;
+            io.to(tripRoom(key)).emit('captain_not_moving', {
+                trip_id: key,
+                stopped_for_seconds: Math.round(stoppedForMs / 1000),
+                distance_to_pickup_m: distanceToPickupMeters,
+                timestamp: now
+            });
+        }
+    }
+
+    tripPickupMovementState.set(key, prev);
+}
 
 function estimatePickupEtaSeconds(distanceMeters) {
     const speedMps = Number.isFinite(PICKUP_ETA_DEFAULT_SPEED_MPS) && PICKUP_ETA_DEFAULT_SPEED_MPS > 0
@@ -885,7 +953,20 @@ async function syncTripPickupProgressFromLocation(tripId, coords, options = {}) 
     const arrivalRadius = Number.isFinite(PICKUP_ARRIVAL_RADIUS_METERS)
         ? Math.max(30, Math.min(200, Number(PICKUP_ARRIVAL_RADIUS_METERS)))
         : 80;
-    const reachedPickup = distanceMeters <= arrivalRadius || rawEtaSeconds <= 25;
+    const reachedPickup = distanceMeters <= arrivalRadius;
+
+    io.to(tripRoom(key)).emit('trip_pickup_distance', {
+        trip_id: String(key),
+        distance_to_pickup_m: Math.round(distanceMeters),
+        arrival_radius_m: Math.round(arrivalRadius),
+        reached_pickup: reachedPickup,
+        timestamp: Date.now()
+    });
+
+    trackCaptainPickupMovement(key, { lat, lng }, {
+        reachedPickup,
+        distanceToPickupMeters: distanceMeters
+    });
 
     const nextStatus = reachedPickup ? 'arrived' : 'assigned';
     const nextTripStatus = reachedPickup ? 'arrived' : 'accepted';
@@ -15305,7 +15386,7 @@ app.patch('/api/drivers/:id/location', requireRole('driver', 'admin'), async (re
                 `SELECT id
                  FROM trips
                  WHERE driver_id = $1
-                   AND status IN ('assigned', 'arrived')
+                                     AND status IN ('assigned', 'arrived', 'ongoing')
                  ORDER BY updated_at DESC
                  LIMIT 1`,
                 [id]
@@ -15319,6 +15400,7 @@ app.patch('/api/drivers/:id/location', requireRole('driver', 'admin'), async (re
                     timestamp: Date.now()
                 });
                 await syncTripPickupProgressFromLocation(activeTripId, { lat: latitude, lng: longitude }, { force: true });
+                checkTripSafetyFromDriverLocationUpdate(activeTripId, { lat: latitude, lng: longitude });
             }
         } catch (e) {
             // non-blocking
