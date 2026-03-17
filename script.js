@@ -1327,6 +1327,53 @@ function initRealtimeSocket() {
             }
         });
 
+        realtimeSocket.on('trip_status_update', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+            const status = String(payload?.status || '').toLowerCase();
+
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                passengerLastTripStatus = status || passengerLastTripStatus;
+                const driverLabelText = document.getElementById('driver-label-text');
+                if (driverLabelText) {
+                    if (status === 'arrived') {
+                        driverLabelText.innerText = 'الكابتن وصل إلى نقطة الالتقاط';
+                    } else if (status === 'assigned') {
+                        driverLabelText.innerText = 'تم قبول الرحلة والكابتن في الطريق إليك';
+                    }
+                }
+                if (status === 'arrived') {
+                    passengerArrivalToastShown = true;
+                    updatePassengerEtaUI(0, 'pickup', { smooth: false });
+                }
+            }
+
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                if (currentIncomingTrip) currentIncomingTrip.status = status || currentIncomingTrip.status;
+                if (status === 'arrived') {
+                    setDriverStartReady(true);
+                }
+            }
+        });
+
+        realtimeSocket.on('trip_arrived', (payload) => {
+            const tripId = payload?.trip_id;
+            if (!tripId) return;
+
+            if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+                passengerLastTripStatus = 'arrived';
+                passengerArrivalToastShown = true;
+                updatePassengerEtaUI(0, 'pickup', { smooth: false });
+                showToast('📍 الكابتن وصل إلى نقطة الالتقاط');
+            }
+
+            if (currentUserRole === 'driver' && activeDriverTripId && String(activeDriverTripId) === String(tripId)) {
+                if (currentIncomingTrip) currentIncomingTrip.status = 'arrived';
+                setDriverStartReady(true);
+                showToast('✅ وصلت إلى موقع الراكب');
+            }
+        });
+
         realtimeSocket.on('trip_message', (payload) => {
             const tripId = payload?.trip_id;
             const msg = payload?.message;
@@ -2114,8 +2161,10 @@ function startDriverTripSocketLocationUpdates() {
     driverTripLocationInterval = setInterval(() => {
         if (!realtimeSocket || !realtimeConnected) return;
         if (currentUserRole !== 'driver') return;
-        if (!driverTripStarted) return;
         if (!activeDriverTripId) return;
+        const currentStatus = String(currentIncomingTrip?.status || '').toLowerCase();
+        const canShare = driverTripStarted || currentStatus === 'assigned' || currentStatus === 'arrived';
+        if (!canShare) return;
         if (!lastGeoCoords || !Number.isFinite(Number(lastGeoCoords.lat)) || !Number.isFinite(Number(lastGeoCoords.lng))) return;
 
         const now = Date.now();
@@ -2197,9 +2246,14 @@ function handleDriverLiveLocationRealtime(tripId, coords) {
         updateDriverDistance(distanceMeters);
         const etaSecondsLive = metrics.etaSeconds;
         if (passengerLastTripStatus === 'ongoing') {
-            updatePassengerEtaUI(etaSecondsLive, 'ride', { smooth: true });
+            updatePassengerEtaUI(etaSecondsLive, 'ride', { smooth: true, distanceMeters });
         } else {
-            updatePassengerEtaUI(etaSecondsLive, 'pickup', { smooth: true });
+            const serverPickupEtaSeconds = getServerPickupEtaSeconds(tripId, null);
+            updatePassengerEtaUI(
+                Number.isFinite(serverPickupEtaSeconds) ? serverPickupEtaSeconds : etaSecondsLive,
+                'pickup',
+                { smooth: true, distanceMeters }
+            );
         }
     }
 }
@@ -2632,7 +2686,7 @@ let geoPermissionDenied = false;
 let passengerPickupUpdateInterval = null;
 let driverIncomingTripUpdateInterval = null;
 let passengerLiveEtaTicker = null;
-let passengerLiveEtaState = { target: null, seconds: 0 };
+let passengerLiveEtaState = { target: null, seconds: 0, distanceMeters: null };
 
 let pickupHubSuggestRequestAt = 0;
 let destinationSuggestTimer = null;
@@ -5340,7 +5394,13 @@ function updateDriverRealTripProgress(coords) {
             const distToPickup = calculateDistance(coords.lat, coords.lng, pickup.lat, pickup.lng);
             if (distToPickup <= 80) {
                 setDriverStartReady(true);
+                if (currentIncomingTrip) currentIncomingTrip.status = 'arrived';
                 showToast('✅ وصلت إلى موقع الراكب');
+                ApiService.trips.updateStatus(activeDriverTripId, 'arrived', {
+                    trip_status: 'arrived'
+                }).catch(() => {
+                    // non-blocking fallback
+                });
             }
         }
     }
@@ -5623,7 +5683,7 @@ function stopPassengerLiveTripTracking() {
     passengerLastTripStatus = null;
     passengerArrivalToastShown = false;
     passengerOngoingToastShown = false;
-    passengerLiveEtaState = { target: null, seconds: 0 };
+    passengerLiveEtaState = { target: null, seconds: 0, distanceMeters: null };
     stopPassengerLiveEtaTicker();
 }
 
@@ -5756,18 +5816,62 @@ function startPassengerLiveEtaTicker() {
 
 function updatePassengerEtaUI(seconds, target = 'pickup', options = {}) {
     const s = Math.max(0, Math.round(Number(seconds) || 0));
-    renderPassengerEtaValue(s, target);
 
     if (options?.smooth !== true) {
+        renderPassengerEtaValue(s, target);
         if (target === 'pickup') {
-            passengerLiveEtaState = { target: null, seconds: 0 };
+            passengerLiveEtaState = { target: null, seconds: 0, distanceMeters: null };
             stopPassengerLiveEtaTicker();
         }
         return;
     }
 
-    passengerLiveEtaState = { target, seconds: s };
+    const prev = passengerLiveEtaState || { target: null, seconds: 0, distanceMeters: null };
+    const distanceMeters = Number.isFinite(Number(options?.distanceMeters)) ? Number(options.distanceMeters) : null;
+
+    let nextSeconds = s;
+    const sameTarget = prev.target === target;
+    if (sameTarget && Number.isFinite(prev.seconds)) {
+        const prevSeconds = Math.max(0, Math.round(prev.seconds));
+        if (nextSeconds > prevSeconds) {
+            const prevDistance = Number.isFinite(Number(prev.distanceMeters)) ? Number(prev.distanceMeters) : null;
+            const routeLikelyChanged = Number.isFinite(prevDistance)
+                && Number.isFinite(distanceMeters)
+                && (distanceMeters - prevDistance) > 180;
+
+            if (!routeLikelyChanged) {
+                const jump = nextSeconds - prevSeconds;
+                nextSeconds = jump <= 45 ? prevSeconds : (prevSeconds + 12);
+            }
+        }
+    }
+
+    passengerLiveEtaState = { target, seconds: nextSeconds, distanceMeters };
+    renderPassengerEtaValue(nextSeconds, target);
     startPassengerLiveEtaTicker();
+}
+
+function getServerPickupEtaSeconds(tripId, tripRow = null) {
+    if (tripRow && String(tripRow.status || '').toLowerCase() === 'arrived') {
+        return 0;
+    }
+
+    const rowEta = tripRow && tripRow.eta_minutes !== undefined && tripRow.eta_minutes !== null
+        ? Number(tripRow.eta_minutes)
+        : null;
+    if (Number.isFinite(rowEta) && rowEta >= 0) {
+        return Math.round(rowEta * 60);
+    }
+
+    const cached = getTripEtaCache(tripId);
+    const cachedEta = cached && cached.eta_minutes !== undefined && cached.eta_minutes !== null
+        ? Number(cached.eta_minutes)
+        : null;
+    if (Number.isFinite(cachedEta) && cachedEta >= 0) {
+        return Math.round(cachedEta * 60);
+    }
+
+    return null;
 }
 
 async function refreshPassengerLiveTripTracking() {
@@ -5812,8 +5916,12 @@ async function refreshPassengerLiveTripTracking() {
         if (driverLabelText) {
             if (trip.status === 'ongoing') {
                 driverLabelText.innerText = `${driverName} في الطريق إلى الوجهة`;
+            } else if (trip.status === 'arrived') {
+                driverLabelText.innerText = `${driverName} وصل إلى نقطة الالتقاط`;
+            } else if (trip.status === 'assigned') {
+                driverLabelText.innerText = `${driverName} قبل الرحلة وهو في الطريق إليك`;
             } else {
-                driverLabelText.innerText = `${driverName} قادم إليك`;
+                driverLabelText.innerText = `${driverName} جاري التوجه إلى نقطة الالتقاط`;
             }
         }
         updatePassengerDriverInfoCard(trip);
@@ -5835,11 +5943,16 @@ async function refreshPassengerLiveTripTracking() {
         // Enter correct passenger state
         if (passengerLastTripStatus !== trip.status) {
             passengerLastTripStatus = trip.status;
-            if (trip.status === 'assigned') {
+            if (trip.status === 'assigned' || trip.status === 'arrived') {
                 switchSection('driver');
                 preparePassengerDriverMapView();
                 // Show pickup handshake code for the driver
                 try { window.refreshPickupHandshake(); } catch (e) {}
+            }
+            if (trip.status === 'arrived') {
+                passengerArrivalToastShown = true;
+                updatePassengerEtaUI(0, 'pickup', { smooth: false });
+                showToast('📍 الكابتن وصل إلى نقطة الالتقاط');
             }
             if (trip.status === 'ongoing') {
                 if (!passengerOngoingToastShown) {
@@ -5897,9 +6010,14 @@ async function refreshPassengerLiveTripTracking() {
 
         const etaSecondsLive = metrics.etaSeconds;
         if (trip.status === 'ongoing') {
-            updatePassengerEtaUI(etaSecondsLive, 'ride', { smooth: true });
+            updatePassengerEtaUI(etaSecondsLive, 'ride', { smooth: true, distanceMeters });
         } else {
-            updatePassengerEtaUI(etaSecondsLive, 'pickup', { smooth: true });
+            const serverPickupEtaSeconds = getServerPickupEtaSeconds(tripId, trip);
+            updatePassengerEtaUI(
+                Number.isFinite(serverPickupEtaSeconds) ? serverPickupEtaSeconds : etaSecondsLive,
+                'pickup',
+                { smooth: true, distanceMeters }
+            );
         }
 
         // Arrival toast near pickup
@@ -7642,13 +7760,16 @@ window.driverAcceptRequest = async function() {
                 currentIncomingTrip.request_id,
                 currentDriverProfile.id
             );
+            const assignedTripId = acceptResponse?.data?.assigned_trip_id || currentIncomingTrip.trip_id || tripId;
             assignResponse = {
                 success: !!acceptResponse?.success,
                 data: {
                     ...currentIncomingTrip,
                     status: 'assigned',
                     driver_id: currentDriverProfile.id,
-                    id: currentIncomingTrip.trip_id || tripId
+                    trip_id: assignedTripId,
+                    assigned_trip_id: assignedTripId,
+                    id: assignedTripId
                 }
             };
         } else if (currentIncomingTrip.status === 'assigned') {
@@ -7674,7 +7795,18 @@ window.driverAcceptRequest = async function() {
             return;
         }
 
-        activeDriverTripId = assignResponse.data?.id || tripId;
+        activeDriverTripId = assignResponse.data?.assigned_trip_id
+            || assignResponse.data?.trip_id
+            || assignResponse.data?.id
+            || tripId;
+
+        currentIncomingTrip = {
+            ...currentIncomingTrip,
+            ...assignResponse.data,
+            id: activeDriverTripId,
+            trip_id: activeDriverTripId,
+            status: 'assigned'
+        };
 
         if (activeDriverTripId) {
             subscribeTripRealtime(activeDriverTripId);
@@ -8367,7 +8499,7 @@ function isPassengerTripResumable(trip) {
     const tripStatus = String(trip.trip_status || '').toLowerCase();
     if (status === 'cancelled' || status === 'completed') return false;
     if (tripStatus === 'completed' || tripStatus === 'rated') return false;
-    return status === 'pending' || status === 'assigned' || status === 'ongoing';
+    return status === 'pending' || status === 'assigned' || status === 'arrived' || status === 'ongoing';
 }
 
 async function getLatestPassengerActiveTrip() {
@@ -8522,13 +8654,19 @@ async function handlePassengerAssignedTrip(trip) {
         loadTripEtaMeta(activePassengerTripId);
         loadTripPickupSuggestions(activePassengerTripId);
         passengerRealtimeActive = true;
-        passengerLastTripStatus = 'assigned';
+        passengerLastTripStatus = String(trip?.status || 'assigned').toLowerCase();
         passengerTripCenteredOnce = false;
     }
 
     const driverName = trip.driver_name || 'كابتن قريب';
     const driverLabelText = document.getElementById('driver-label-text');
-    if (driverLabelText) driverLabelText.innerText = `${driverName} قادم إليك`;
+    if (driverLabelText) {
+        if (String(trip?.status || '').toLowerCase() === 'arrived') {
+            driverLabelText.innerText = `${driverName} وصل إلى نقطة الالتقاط`;
+        } else {
+            driverLabelText.innerText = `${driverName} قبل الرحلة وهو في الطريق إليك`;
+        }
+    }
 
     const assignedLocation = await loadAssignedDriverLocation(trip.driver_id);
     if (assignedLocation) {
@@ -9266,6 +9404,12 @@ async function triggerDriverRequestPolling() {
             if (activeTrip) {
                 const status = String(activeTrip.status || '').toLowerCase();
                 const tripStatus = String(activeTrip.trip_status || '').toLowerCase();
+                if (status === 'arrived' || tripStatus === 'arrived') {
+                    setDriverStartReady(true);
+                    if (currentIncomingTrip) {
+                        currentIncomingTrip = { ...currentIncomingTrip, ...activeTrip, status: 'arrived' };
+                    }
+                }
                 if (status === 'completed' || tripStatus === 'completed' || tripStatus === 'rated') {
                     handleTripCompletedRealtime({
                         trip_id: String(activeTrip.id || activeDriverTripId),
