@@ -376,6 +376,7 @@ let lastDriverSocketEmitAt = 0;
 
 let passengerRealtimeActive = false;
 let passengerTripCenteredOnce = false;
+let passengerLastDriverLiveUpdateAt = 0;
 let passengerDriverAnimRaf = null;
 let passengerDriverAnimFrom = null;
 let passengerDriverAnimTo = null;
@@ -2276,6 +2277,7 @@ function handleDriverLiveLocationRealtime(tripId, coords) {
     if (!passengerRealtimeActive) return;
     if (!activePassengerTripId || String(activePassengerTripId) !== String(tripId)) return;
 
+    passengerLastDriverLiveUpdateAt = Date.now();
     driverLocation = { ...coords };
 
     // Ensure marker exists, update smoothly
@@ -6053,8 +6055,11 @@ async function refreshPassengerLiveTripTracking() {
             return;
         }
 
-        // Update map marker + route (assigned + ongoing)
-        const newDriverCoords = { lat: driverLat, lng: driverLng };
+        // Prefer very recent websocket coordinates to avoid map jitter from slower polling snapshots.
+        const liveFresh = passengerLastDriverLiveUpdateAt > 0 && (Date.now() - passengerLastDriverLiveUpdateAt) < 2000;
+        const newDriverCoords = (liveFresh && driverLocation && Number.isFinite(Number(driverLocation.lat)) && Number.isFinite(Number(driverLocation.lng)))
+            ? { lat: Number(driverLocation.lat), lng: Number(driverLocation.lng) }
+            : { lat: driverLat, lng: driverLng };
         driverLocation = { ...newDriverCoords };
 
         preparePassengerDriverMapView();
@@ -6117,9 +6122,10 @@ function startPassengerLiveTripTracking(tripId, driverId) {
     passengerLastTripStatus = null;
     passengerArrivalToastShown = false;
     passengerOngoingToastShown = false;
+    passengerLastDriverLiveUpdateAt = 0;
 
     refreshPassengerLiveTripTracking();
-    const intervalMs = realtimeSocket && realtimeConnected ? 9000 : 3000;
+    const intervalMs = realtimeSocket && realtimeConnected ? 4000 : 3000;
     passengerLiveTrackingInterval = setInterval(refreshPassengerLiveTripTracking, intervalMs);
 }
 

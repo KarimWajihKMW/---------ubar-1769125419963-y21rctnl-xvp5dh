@@ -510,6 +510,13 @@ const PICKUP_ARRIVAL_RADIUS_METERS = process.env.PICKUP_ARRIVAL_RADIUS_METERS !=
 const PICKUP_ETA_DEFAULT_SPEED_MPS = process.env.PICKUP_ETA_DEFAULT_SPEED_MPS !== undefined ? Number(process.env.PICKUP_ETA_DEFAULT_SPEED_MPS) : 9;
 const PICKUP_ETA_SMOOTHING_ALPHA = process.env.PICKUP_ETA_SMOOTHING_ALPHA !== undefined ? Number(process.env.PICKUP_ETA_SMOOTHING_ALPHA) : 0.32;
 const PICKUP_ETA_UPWARD_TOLERANCE_SECONDS = process.env.PICKUP_ETA_UPWARD_TOLERANCE_SECONDS !== undefined ? Number(process.env.PICKUP_ETA_UPWARD_TOLERANCE_SECONDS) : 75;
+const PICKUP_SIM_MIN_INTERVAL_MS = process.env.PICKUP_SIM_MIN_INTERVAL_MS !== undefined ? Number(process.env.PICKUP_SIM_MIN_INTERVAL_MS) : 2000;
+const PICKUP_SIM_MAX_INTERVAL_MS = process.env.PICKUP_SIM_MAX_INTERVAL_MS !== undefined ? Number(process.env.PICKUP_SIM_MAX_INTERVAL_MS) : 5000;
+const PICKUP_SIM_STALE_GPS_SECONDS = process.env.PICKUP_SIM_STALE_GPS_SECONDS !== undefined ? Number(process.env.PICKUP_SIM_STALE_GPS_SECONDS) : 8;
+const PICKUP_SIM_STEP_MIN_METERS = process.env.PICKUP_SIM_STEP_MIN_METERS !== undefined ? Number(process.env.PICKUP_SIM_STEP_MIN_METERS) : 55;
+const PICKUP_SIM_STEP_MAX_METERS = process.env.PICKUP_SIM_STEP_MAX_METERS !== undefined ? Number(process.env.PICKUP_SIM_STEP_MAX_METERS) : 140;
+const AUTO_START_TRIP_ON_ARRIVAL = String(process.env.AUTO_START_TRIP_ON_ARRIVAL || 'true').toLowerCase() !== 'false';
+const AUTO_START_TRIP_DELAY_SECONDS = process.env.AUTO_START_TRIP_DELAY_SECONDS !== undefined ? Number(process.env.AUTO_START_TRIP_DELAY_SECONDS) : 4;
 const CAPTAIN_NOT_MOVING_WINDOW_SECONDS = process.env.CAPTAIN_NOT_MOVING_WINDOW_SECONDS !== undefined ? Number(process.env.CAPTAIN_NOT_MOVING_WINDOW_SECONDS) : 45;
 const CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS = process.env.CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS !== undefined ? Number(process.env.CAPTAIN_NOT_MOVING_MIN_DISTANCE_METERS) : 12;
 const CAPTAIN_NOT_MOVING_REEMIT_SECONDS = process.env.CAPTAIN_NOT_MOVING_REEMIT_SECONDS !== undefined ? Number(process.env.CAPTAIN_NOT_MOVING_REEMIT_SECONDS) : 20;
@@ -818,8 +825,101 @@ const lastTripDriverWriteAt = new Map();
 const lastTripSafetyCheckAt = new Map();
 const lastTripDeviationEventAt = new Map();
 const lastTripPickupProgressAt = new Map();
+const lastTripPickupDistanceMeters = new Map();
 const tripPickupMovementState = new Map();
 const tripStopState = new Map();
+const tripPickupSimulationState = new Map();
+const tripAutoStartTimers = new Map();
+
+function randomBetween(min, max) {
+    const a = Number(min);
+    const b = Number(max);
+    const lo = Number.isFinite(a) ? a : 0;
+    const hi = Number.isFinite(b) ? b : lo;
+    if (hi <= lo) return lo;
+    return lo + Math.random() * (hi - lo);
+}
+
+function moveCoordsToward(from, to, stepMeters) {
+    const fromLat = Number(from?.lat);
+    const fromLng = Number(from?.lng);
+    const toLat = Number(to?.lat);
+    const toLng = Number(to?.lng);
+    if (!Number.isFinite(fromLat) || !Number.isFinite(fromLng) || !Number.isFinite(toLat) || !Number.isFinite(toLng)) {
+        return null;
+    }
+
+    const distanceMeters = haversineKm({ lat: fromLat, lng: fromLng }, { lat: toLat, lng: toLng }) * 1000;
+    if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) {
+        return { lat: toLat, lng: toLng, distanceMeters: 0 };
+    }
+
+    const safeStep = Number.isFinite(Number(stepMeters)) ? Math.max(1, Number(stepMeters)) : 25;
+    const ratio = Math.min(1, safeStep / distanceMeters);
+    return {
+        lat: fromLat + (toLat - fromLat) * ratio,
+        lng: fromLng + (toLng - fromLng) * ratio,
+        distanceMeters
+    };
+}
+
+function seedSimulatedDriverCoords(pickupLat, pickupLng, seed) {
+    const baseLat = Number(pickupLat);
+    const baseLng = Number(pickupLng);
+    if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng)) return null;
+
+    const rng = Math.abs(Number(seed) || Date.now()) % 360;
+    const bearing = (rng * Math.PI) / 180;
+    const radiusMeters = 650 + (Math.abs(Number(seed) || 0) % 500); // 650m..1149m
+    const dLat = (radiusMeters / 111320) * Math.cos(bearing);
+    const dLng = (radiusMeters / (111320 * Math.max(0.15, Math.cos(baseLat * Math.PI / 180)))) * Math.sin(bearing);
+    return {
+        lat: baseLat + dLat,
+        lng: baseLng + dLng
+    };
+}
+
+async function tryAutoStartTripOnArrival(tripId) {
+    if (!AUTO_START_TRIP_ON_ARRIVAL) return;
+    const key = String(tripId);
+    if (tripAutoStartTimers.has(key)) return;
+
+    const delayMs = Math.max(1000, (Number.isFinite(AUTO_START_TRIP_DELAY_SECONDS) ? Number(AUTO_START_TRIP_DELAY_SECONDS) : 4) * 1000);
+    const timer = setTimeout(async () => {
+        tripAutoStartTimers.delete(key);
+        try {
+            const started = await pool.query(
+                `UPDATE trips
+                 SET status = 'ongoing',
+                     trip_status = 'started'::trip_status_enum,
+                     started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1
+                   AND status = 'arrived'
+                   AND trip_status = 'arrived'::trip_status_enum
+                 RETURNING id, status, trip_status, started_at`,
+                [key]
+            );
+            const row = started.rows[0] || null;
+            if (!row) return;
+
+            io.to(tripRoom(key)).emit('trip_status_update', {
+                trip_id: String(key),
+                status: row.status,
+                trip_status: row.trip_status
+            });
+            io.to(tripRoom(key)).emit('trip_started', {
+                trip_id: String(key),
+                trip_status: row.trip_status,
+                started_at: row.started_at || null
+            });
+        } catch (err) {
+            console.warn('⚠️ tryAutoStartTripOnArrival failed:', err.message);
+        }
+    }, delayMs);
+
+    tripAutoStartTimers.set(key, timer);
+}
 
 function trackCaptainPickupMovement(tripId, coords, options = {}) {
     const key = String(tripId);
@@ -949,6 +1049,7 @@ async function syncTripPickupProgressFromLocation(tripId, coords, options = {}) 
     if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) return;
 
     const distanceMeters = Math.round(haversineKm({ lat, lng }, { lat: pickupLat, lng: pickupLng }) * 1000);
+    const prevDistanceMeters = lastTripPickupDistanceMeters.has(key) ? Number(lastTripPickupDistanceMeters.get(key)) : null;
     const rawEtaSeconds = estimatePickupEtaSeconds(distanceMeters);
     const arrivalRadius = Number.isFinite(PICKUP_ARRIVAL_RADIUS_METERS)
         ? Math.max(30, Math.min(200, Number(PICKUP_ARRIVAL_RADIUS_METERS)))
@@ -971,17 +1072,38 @@ async function syncTripPickupProgressFromLocation(tripId, coords, options = {}) 
     const nextStatus = reachedPickup ? 'arrived' : 'assigned';
     const nextTripStatus = reachedPickup ? 'arrived' : 'accepted';
     const smoothedEtaSeconds = reachedPickup ? 0 : smoothPickupEtaSeconds(trip.eta_minutes, rawEtaSeconds);
-    const nextEtaMinutes = reachedPickup ? 0 : Math.max(1, Math.round(smoothedEtaSeconds / 60));
+    const computedEtaMinutes = reachedPickup ? 0 : Math.max(1, Math.round(smoothedEtaSeconds / 60));
+    const prevEtaMinutes = trip.eta_minutes !== null && trip.eta_minutes !== undefined ? Number(trip.eta_minutes) : null;
+    let nextEtaMinutes = reachedPickup
+        ? 0
+        : (Number.isFinite(prevEtaMinutes)
+            ? Math.min(Math.max(1, Math.round(prevEtaMinutes)), computedEtaMinutes)
+            : computedEtaMinutes);
+    if (!reachedPickup && Number.isFinite(prevEtaMinutes)) {
+        const prevRounded = Math.max(1, Math.round(prevEtaMinutes));
+        const gotCloser = Number.isFinite(prevDistanceMeters)
+            ? (distanceMeters + 8) < prevDistanceMeters
+            : true;
+        if (gotCloser && nextEtaMinutes >= prevRounded) {
+            nextEtaMinutes = Math.max(1, prevRounded - 1);
+        }
+    }
     const nextEtaReason = reachedPickup ? 'captain_arrived' : 'captain_on_the_way';
 
     const prevTripStatus = String(trip.trip_status || '').toLowerCase();
-    const prevEtaMinutes = trip.eta_minutes !== null && trip.eta_minutes !== undefined ? Number(trip.eta_minutes) : null;
     const prevReason = trip.eta_reason ? String(trip.eta_reason) : null;
 
     const statusChanged = status !== nextStatus || prevTripStatus !== nextTripStatus;
     const etaChanged = !Number.isFinite(prevEtaMinutes)
         || Math.abs(Math.round(prevEtaMinutes) - Math.round(nextEtaMinutes)) >= 1
         || prevReason !== nextEtaReason;
+
+    lastTripPickupDistanceMeters.set(key, reachedPickup ? 0 : distanceMeters);
+
+    if (!reachedPickup && tripAutoStartTimers.has(key)) {
+        clearTimeout(tripAutoStartTimers.get(key));
+        tripAutoStartTimers.delete(key);
+    }
 
     if (!statusChanged && !etaChanged) return;
 
@@ -1020,7 +1142,126 @@ async function syncTripPickupProgressFromLocation(tripId, coords, options = {}) 
             status: 'arrived',
             trip_status: 'arrived'
         });
+        await tryAutoStartTripOnArrival(key);
     }
+
+    if (reachedPickup && status === 'arrived') {
+        await tryAutoStartTripOnArrival(key);
+    }
+}
+
+async function runPickupSimulationTick() {
+    try {
+        const now = Date.now();
+        const staleGpsMs = Math.max(3000, (Number.isFinite(PICKUP_SIM_STALE_GPS_SECONDS) ? Number(PICKUP_SIM_STALE_GPS_SECONDS) : 8) * 1000);
+        const rows = await pool.query(
+            `SELECT t.id, t.status, t.trip_status, t.pickup_lat, t.pickup_lng, t.driver_id,
+                    d.last_lat AS driver_last_lat, d.last_lng AS driver_last_lng, d.last_location_at AS driver_last_location_at
+             FROM trips t
+             JOIN drivers d ON d.id = t.driver_id
+             WHERE t.status IN ('assigned', 'arrived')
+               AND t.driver_id IS NOT NULL
+               AND t.pickup_lat IS NOT NULL
+               AND t.pickup_lng IS NOT NULL
+             ORDER BY t.updated_at DESC
+             LIMIT 250`
+        );
+
+        const activeTripIds = new Set((rows.rows || []).map((r) => String(r.id)));
+        for (const tripId of tripPickupSimulationState.keys()) {
+            if (!activeTripIds.has(tripId)) {
+                tripPickupSimulationState.delete(tripId);
+            }
+        }
+
+        for (const row of rows.rows || []) {
+            const tripId = String(row.id);
+            const state = tripPickupSimulationState.get(tripId) || { nextTickAt: 0, startedAt: now, seed: Number(String(tripId).replace(/\D/g, '')) || now, lastSimulatedAtMs: 0 };
+            if (now < Number(state.nextTickAt || 0)) continue;
+
+            const nextDelay = randomBetween(
+                Math.max(1200, Number.isFinite(PICKUP_SIM_MIN_INTERVAL_MS) ? Number(PICKUP_SIM_MIN_INTERVAL_MS) : 2000),
+                Math.max(1500, Number.isFinite(PICKUP_SIM_MAX_INTERVAL_MS) ? Number(PICKUP_SIM_MAX_INTERVAL_MS) : 5000)
+            );
+            state.nextTickAt = now + Math.round(nextDelay);
+            tripPickupSimulationState.set(tripId, state);
+
+            const pickupLat = Number(row.pickup_lat);
+            const pickupLng = Number(row.pickup_lng);
+            if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) continue;
+
+            const lastAtMs = row.driver_last_location_at ? new Date(row.driver_last_location_at).getTime() : null;
+            const hasRecentGps = Number.isFinite(lastAtMs)
+                && (now - lastAtMs) <= staleGpsMs
+                && (!Number.isFinite(Number(state.lastSimulatedAtMs)) || lastAtMs > (Number(state.lastSimulatedAtMs) + 500));
+            if (hasRecentGps) {
+                if (String(row.status || '').toLowerCase() === 'arrived') {
+                    await tryAutoStartTripOnArrival(tripId);
+                }
+                continue;
+            }
+
+            let currentLat = row.driver_last_lat !== null && row.driver_last_lat !== undefined ? Number(row.driver_last_lat) : null;
+            let currentLng = row.driver_last_lng !== null && row.driver_last_lng !== undefined ? Number(row.driver_last_lng) : null;
+            if (!Number.isFinite(currentLat) || !Number.isFinite(currentLng)) {
+                const seedCoords = seedSimulatedDriverCoords(pickupLat, pickupLng, state.seed);
+                if (!seedCoords) continue;
+                currentLat = Number(seedCoords.lat);
+                currentLng = Number(seedCoords.lng);
+            }
+
+            const stepMeters = randomBetween(
+                Math.max(8, Number.isFinite(PICKUP_SIM_STEP_MIN_METERS) ? Number(PICKUP_SIM_STEP_MIN_METERS) : 30),
+                Math.max(12, Number.isFinite(PICKUP_SIM_STEP_MAX_METERS) ? Number(PICKUP_SIM_STEP_MAX_METERS) : 80)
+            );
+            const moved = moveCoordsToward(
+                { lat: currentLat, lng: currentLng },
+                { lat: pickupLat, lng: pickupLng },
+                stepMeters
+            );
+            if (!moved) continue;
+
+            const nextLat = Number(moved.lat);
+            const nextLng = Number(moved.lng);
+            if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) continue;
+
+            await pool.query(
+                `UPDATE drivers
+                 SET last_lat = $1,
+                     last_lng = $2,
+                     last_location_at = CURRENT_TIMESTAMP,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $3`,
+                [nextLat, nextLng, row.driver_id]
+            );
+
+            state.lastSimulatedAtMs = now;
+            tripPickupSimulationState.set(tripId, state);
+
+            io.to(tripRoom(tripId)).emit('driver_live_location', {
+                trip_id: tripId,
+                driver_lat: nextLat,
+                driver_lng: nextLng,
+                timestamp: now,
+                source: 'simulated'
+            });
+
+            await syncTripPickupProgressFromLocation(tripId, { lat: nextLat, lng: nextLng }, { force: true });
+            if (String(row.status || '').toLowerCase() === 'arrived') {
+                await tryAutoStartTripOnArrival(tripId);
+            }
+        }
+    } catch (err) {
+        console.warn('⚠️ runPickupSimulationTick failed:', err.message);
+    }
+}
+
+function startPickupSimulationLoop() {
+    const baseIntervalMs = Math.max(1000, Math.min(2500, Number.isFinite(PICKUP_SIM_MIN_INTERVAL_MS) ? Number(PICKUP_SIM_MIN_INTERVAL_MS) : 2000));
+    setInterval(() => {
+        runPickupSimulationTick();
+    }, baseIntervalMs);
+    console.log(`⏱️ Pickup simulation loop enabled (~${baseIntervalMs}ms base tick, fallback after stale GPS)`);
 }
 
 async function checkTripSafetyFromDriverLocationUpdate(tripId, coords) {
@@ -20550,6 +20791,7 @@ ensureCoreSchema()
         httpServer.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📍 API available at http://localhost:${PORT}/api`);
+            startPickupSimulationLoop();
             startGuardianCron();
             startExecutiveAutopilotCron();
             startExecutiveImpactCron();
