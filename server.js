@@ -172,98 +172,6 @@ function hasPermission(req, permission) {
     return perms.includes(want);
 }
 
-const ACTIVE_TRIP_LIFECYCLE_STATUSES = Object.freeze(['searching', 'accepted', 'on_the_way', 'started']);
-const LEGACY_ACTIVE_TRIP_LIFECYCLE_STATUSES = Object.freeze(['pending', 'assigned', 'arrived', 'ongoing']);
-const ACTIVE_TRIP_STATUS_ALIASES = Object.freeze({
-    pending: 'searching',
-    assigned: 'accepted',
-    arrived: 'on_the_way',
-    ongoing: 'started'
-});
-
-let cachedUsersActiveTripFlagColumn = undefined;
-
-function normalizeTripLifecycleStatus(rawStatus) {
-    const status = rawStatus !== undefined && rawStatus !== null ? String(rawStatus).trim().toLowerCase() : '';
-    if (!status) return '';
-    if (ACTIVE_TRIP_LIFECYCLE_STATUSES.includes(status)) return status;
-    return ACTIVE_TRIP_STATUS_ALIASES[status] || status;
-}
-
-function isActiveTripLifecycleStatus(rawStatus) {
-    const normalized = normalizeTripLifecycleStatus(rawStatus);
-    return ACTIVE_TRIP_LIFECYCLE_STATUSES.includes(normalized);
-}
-
-async function findUserActiveTripByDbStatus(userId, dbClient = pool) {
-    const normalizedUserId = Number(userId);
-    if (!Number.isFinite(normalizedUserId) || normalizedUserId <= 0) return null;
-
-    const candidateStatuses = Array.from(new Set([
-        ...ACTIVE_TRIP_LIFECYCLE_STATUSES,
-        ...LEGACY_ACTIVE_TRIP_LIFECYCLE_STATUSES
-    ]));
-
-    const result = await dbClient.query(
-        `SELECT id, user_id, status, trip_status, created_at, updated_at
-         FROM trips
-         WHERE user_id = $1
-                     AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'completed')
-           AND (
-                LOWER(COALESCE(status, '')) = ANY($2)
-                OR LOWER(COALESCE(trip_status::text, '')) = ANY($2)
-           )
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [normalizedUserId, candidateStatuses]
-    );
-
-    return result.rows[0] || null;
-}
-
-async function resolveUsersActiveTripFlagColumn(dbClient = pool) {
-    if (cachedUsersActiveTripFlagColumn !== undefined) {
-        return cachedUsersActiveTripFlagColumn;
-    }
-
-    const colsRes = await dbClient.query(
-        `SELECT LOWER(column_name) AS column_name
-         FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name = 'users'
-           AND LOWER(column_name) IN ('has_active_trip', 'hasactivetrip')`
-    );
-
-    const names = (colsRes.rows || []).map((r) => String(r.column_name || ''));
-    if (names.includes('has_active_trip')) {
-        cachedUsersActiveTripFlagColumn = 'has_active_trip';
-    } else if (names.includes('hasactivetrip')) {
-        cachedUsersActiveTripFlagColumn = 'hasactivetrip';
-    } else {
-        cachedUsersActiveTripFlagColumn = null;
-    }
-
-    return cachedUsersActiveTripFlagColumn;
-}
-
-async function setUserActiveTripFlag(userId, hasActiveTrip, dbClient = pool) {
-    const normalizedUserId = Number(userId);
-    if (!Number.isFinite(normalizedUserId) || normalizedUserId <= 0) return false;
-
-    const column = await resolveUsersActiveTripFlagColumn(dbClient);
-    if (!column) return false;
-    if (!['has_active_trip', 'hasactivetrip'].includes(column)) return false;
-
-    await dbClient.query(
-        `UPDATE users
-         SET ${column} = $1,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
-        [!!hasActiveTrip, normalizedUserId]
-    );
-    return true;
-}
-
 function requirePermission(...permissions) {
     const wanted = (permissions || []).flat().map(p => String(p)).filter(Boolean);
     return (req, res, next) => {
@@ -12833,19 +12741,6 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             return res.status(400).json({ success: false, error: 'Invalid pickup_timestamp.' });
         }
 
-        const existingActiveTrip = await findUserActiveTripByDbStatus(effectiveRiderId);
-        if (existingActiveTrip) {
-            return res.status(409).json({
-                success: false,
-                error: 'user_has_active_trip',
-                data: {
-                    trip_id: String(existingActiveTrip.id),
-                    status: existingActiveTrip.status || null,
-                    trip_status: existingActiveTrip.trip_status || null
-                }
-            });
-        }
-
         console.log('📥 Trip create received pickup coords:', {
             trip_id: id || null,
             user_id,
@@ -13081,15 +12976,6 @@ app.post('/api/trips', requireRole('passenger', 'admin'), async (req, res) => {
             } catch (assignErr) {
                 console.error('Error auto-assigning nearest driver:', assignErr);
             }
-        }
-
-        try {
-            const isActive = isActiveTripLifecycleStatus(createdTrip.status) || isActiveTripLifecycleStatus(createdTrip.trip_status);
-            if (isActive) {
-                await setUserActiveTripFlag(createdTrip.user_id, true);
-            }
-        } catch (flagErr) {
-            console.warn('⚠️ Failed to set user active-trip flag after trip creation:', flagErr.message);
         }
 
         res.status(201).json({
@@ -14257,44 +14143,11 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
         } catch (pendingUpdateErr) {
             console.error('⚠️ خطأ في تحديث pending_ride_requests:', pendingUpdateErr.message);
         }
-
-        let activeTripFlagAfterUpdate = null;
-        try {
-            const updatedTrip = result.rows[0] || null;
-            const userIdForFlag = updatedTrip?.user_id ? Number(updatedTrip.user_id) : null;
-            if (Number.isFinite(userIdForFlag) && userIdForFlag > 0) {
-                const shouldRecheck = String(status || '').toLowerCase() === 'cancelled' || String(status || '').toLowerCase() === 'completed';
-                if (shouldRecheck) {
-                    const remainingActiveTrip = await findUserActiveTripByDbStatus(userIdForFlag);
-                    activeTripFlagAfterUpdate = !!remainingActiveTrip;
-                    await setUserActiveTripFlag(userIdForFlag, activeTripFlagAfterUpdate);
-                } else {
-                    const isActiveNow = isActiveTripLifecycleStatus(updatedTrip.status) || isActiveTripLifecycleStatus(updatedTrip.trip_status);
-                    activeTripFlagAfterUpdate = !!isActiveNow;
-                    await setUserActiveTripFlag(userIdForFlag, activeTripFlagAfterUpdate);
-                }
-
-                if (String(status || '').toLowerCase() === 'cancelled') {
-                    console.log('🧪 Cancel debug (backend):', {
-                        trip_id: String(id),
-                        status: updatedTrip.status || null,
-                        trip_status: updatedTrip.trip_status || null,
-                        user_id: userIdForFlag,
-                        has_active_trip: activeTripFlagAfterUpdate
-                    });
-                }
-            }
-        } catch (flagErr) {
-            console.warn('⚠️ Failed to sync user active-trip flag after status update:', flagErr.message);
-        }
         
         res.json({
             success: true,
             data: result.rows[0],
-            meta: {
-                payment: paymentMeta,
-                active_trip_flag: activeTripFlagAfterUpdate
-            }
+            meta: paymentMeta
         });
     } catch (err) {
         console.error('Error updating trip status:', err);

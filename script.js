@@ -7697,57 +7697,22 @@ window.switchSection = function(name) {
     }
 };
 
-window.cancelRide = async function() {
+window.cancelRide = function() {
     if (!confirm('هل أنت متأكد من إلغاء الرحلة؟\nقد يتم فرض رسوم إلغاء.')) return;
 
-    const tripId = activePassengerTripId ? String(activePassengerTripId) : null;
-    if (!tripId) {
-        clearPassengerActiveTripState();
-        resetApp();
-        showToast('⚠️ لا توجد رحلة نشطة');
-        return;
-    }
-
-    try {
-        const cancelResponse = await ApiService.trips.updateStatus(tripId, 'cancelled');
-        console.log('🧪 cancelRide backend response:', {
-            trip_id: tripId,
-            success: !!cancelResponse?.success,
-            status: cancelResponse?.data?.status || null,
-            trip_status: cancelResponse?.data?.trip_status || null,
-            meta: cancelResponse?.meta || null
+    if (activePassengerTripId) {
+        unsubscribeTripRealtime(activePassengerTripId);
+        passengerRealtimeActive = false;
+        ApiService.trips.updateStatus(activePassengerTripId, 'cancelled').catch(err => {
+            console.error('Failed to cancel trip:', err);
         });
-
-        try {
-            const verifyTrip = await ApiService.trips.getById(tripId);
-            console.log('🧪 trip status after cancel refetch:', {
-                trip_id: tripId,
-                status: verifyTrip?.data?.status || null,
-                trip_status: verifyTrip?.data?.trip_status || null
-            });
-        } catch (verifyErr) {
-            console.warn('⚠️ Failed to verify cancelled trip status:', verifyErr?.message || verifyErr);
-        }
-
-        try {
-            const refreshedTrips = await ApiService.trips.getAll({ limit: 25, offset: 0, source: 'passenger_app' });
-            const rows = Array.isArray(refreshedTrips?.data) ? refreshedTrips.data : [];
-            console.log('🧪 trips refetched after cancel:', {
-                count: rows.length,
-                latest_trip_id: rows[0]?.id || null,
-                latest_status: rows[0]?.status || null
-            });
-        } catch (refreshErr) {
-            console.warn('⚠️ Failed to refetch trips after cancel:', refreshErr?.message || refreshErr);
-        }
-    } catch (err) {
-        console.error('Failed to cancel trip:', err);
-        showToast('❌ تعذر إلغاء الرحلة الآن');
-        return;
+        activePassengerTripId = null;
     }
 
-    clearPassengerActiveTripState({ tripId });
+    stopPassengerPickupLiveUpdates();
 
+    stopPassengerLiveTripTracking();
+    
     // Clear driver marker and route
     if (driverMarkerL) driverMarkerL.remove();
     if (routePolyline) routePolyline.remove();
@@ -7756,7 +7721,7 @@ window.cancelRide = async function() {
     showToast('⚠️ تم إلغاء الرحلة');
     
     setTimeout(() => {
-        resetApp();
+        switchSection('destination');
     }, 1000);
 };
 
@@ -8607,62 +8572,13 @@ function startPassengerMatchPolling(tripId) {
     passengerMatchInterval = setInterval(() => checkPassengerMatch(tripId), 4000);
 }
 
-const ACTIVE_TRIP_LIFECYCLE_STATUSES = new Set(['searching', 'accepted', 'on_the_way', 'started']);
-const ACTIVE_TRIP_STATUS_ALIASES = Object.freeze({
-    pending: 'searching',
-    assigned: 'accepted',
-    arrived: 'on_the_way',
-    ongoing: 'started'
-});
-
-function normalizeTripLifecycleStatusClient(rawStatus) {
-    const status = rawStatus !== undefined && rawStatus !== null ? String(rawStatus).trim().toLowerCase() : '';
-    if (!status) return '';
-    if (ACTIVE_TRIP_LIFECYCLE_STATUSES.has(status)) return status;
-    return ACTIVE_TRIP_STATUS_ALIASES[status] || status;
-}
-
-function getTripLifecycleStatusClient(trip) {
-    if (!trip) return '';
-    const byTripStatus = normalizeTripLifecycleStatusClient(trip.trip_status);
-    if (ACTIVE_TRIP_LIFECYCLE_STATUSES.has(byTripStatus)) return byTripStatus;
-    return normalizeTripLifecycleStatusClient(trip.status);
-}
-
-function clearPassengerActiveTripState(options = {}) {
-    const explicitTripId = options && options.tripId ? String(options.tripId) : null;
-    const currentTripId = activePassengerTripId ? String(activePassengerTripId) : null;
-    const tripId = explicitTripId || currentTripId;
-
-    stopPassengerMatchPolling();
-    stopPassengerPickupLiveUpdates();
-    stopPassengerLiveTripTracking();
-
-    if (tripId) {
-        unsubscribeTripRealtime(tripId);
-        tripEtaCache.delete(String(tripId));
-        tripPickupSuggestionCache.delete(String(tripId));
-    }
-
-    passengerRealtimeActive = false;
-    passengerTripCenteredOnce = false;
-    passengerLastTripStatus = null;
-    passengerTripStartedAt = null;
-    passengerArrivalToastShown = false;
-    passengerOngoingToastShown = false;
-
-    activePassengerTripId = null;
-    activeTripAccessibilitySnapshot = null;
-    accessibilityFeedbackRespected = null;
-}
-
 function isPassengerTripResumable(trip) {
     if (!trip) return false;
     const status = String(trip.status || '').toLowerCase();
     const tripStatus = String(trip.trip_status || '').toLowerCase();
     if (status === 'cancelled' || status === 'completed') return false;
     if (tripStatus === 'completed' || tripStatus === 'rated') return false;
-    return ACTIVE_TRIP_LIFECYCLE_STATUSES.has(getTripLifecycleStatusClient(trip));
+    return status === 'pending' || status === 'assigned' || status === 'arrived' || status === 'ongoing';
 }
 
 async function getLatestPassengerActiveTrip() {
@@ -8946,14 +8862,6 @@ window.requestRide = async function() {
     
     try {
         const user = DB.getUser();
-
-        const activeTripFromBackend = await getLatestPassengerActiveTrip();
-        if (activeTripFromBackend && isPassengerTripResumable(activeTripFromBackend)) {
-            hydratePassengerTripLocalState(activeTripFromBackend);
-            showToast('⚠️ لديك رحلة نشطة بالفعل');
-            await restorePassengerActiveTrip();
-            return;
-        }
 
         // Collect extra options from UI (before we create trip)
         const familySelect = document.getElementById('ride-family-member');
