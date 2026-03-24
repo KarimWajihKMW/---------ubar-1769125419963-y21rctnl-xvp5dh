@@ -12140,6 +12140,112 @@ function finalizePassengerPostTripFlow() {
     clearPassengerRatingInputs();
 }
 
+function forceRestoreHomeMapAfterTripCompletion() {
+    try {
+        moveLeafletMapToContainer('map-container');
+    } catch (e) {
+        // ignore
+    }
+
+    const mapEl = document.getElementById('leaflet-map');
+    const mapContainer = document.getElementById('map-container');
+    if (mapEl && mapContainer && mapEl.parentElement !== mapContainer) {
+        mapContainer.appendChild(mapEl);
+    }
+    if (mapEl) {
+        mapEl.style.display = 'block';
+        mapEl.style.position = 'absolute';
+        mapEl.style.inset = '0';
+        mapEl.style.zIndex = '1';
+        mapEl.style.width = '100%';
+        mapEl.style.height = '100%';
+    }
+
+    const shouldHardRemount = !leafletMap || !mapEl || !mapContainer || mapEl.parentElement !== mapContainer;
+    if (shouldHardRemount && mapContainer) {
+        if (mapEl) {
+            mapEl.remove();
+        }
+        const freshMap = document.createElement('div');
+        freshMap.id = 'leaflet-map';
+        freshMap.className = 'absolute inset-0';
+        mapContainer.appendChild(freshMap);
+
+        // Force a full map re-initialization on a fresh DOM node.
+        leafletMap = null;
+        pickupMarkerL = null;
+        destMarkerL = null;
+        driverMarkerL = null;
+        passengerMarkerL = null;
+        routePolyline = null;
+        initLeafletMap();
+    }
+
+    if (!leafletMap) {
+        initLeafletMap();
+    }
+
+    scheduleLeafletResize([0, 120, 360, 720]);
+}
+
+function resetPassengerTripStateAfterCompletion(completedTripId = null) {
+    const normalizedCompletedTripId = completedTripId ? String(completedTripId) : null;
+
+    if (activePassengerTripId) {
+        unsubscribeTripRealtime(activePassengerTripId);
+    }
+    if (normalizedCompletedTripId) {
+        unsubscribeTripRealtime(normalizedCompletedTripId);
+        tripEtaCache.delete(normalizedCompletedTripId);
+        tripPickupSuggestionCache.delete(normalizedCompletedTripId);
+        removePassengerQueuedRating(normalizedCompletedTripId);
+    }
+
+    stopPassengerMatchPolling();
+    stopPassengerPickupLiveUpdates();
+    stopPassengerLiveTripTracking();
+    stopDriverTracking();
+    stopDriverTrackingLive();
+    clearDriverPassengerRoute();
+
+    passengerRealtimeActive = false;
+    passengerTripCenteredOnce = false;
+    passengerLastTripStatus = null;
+    passengerTripStartedAt = null;
+    activePassengerTripId = null;
+    activeDriverTripId = null;
+    currentIncomingTrip = null;
+    driverLocation = null;
+    nearestDriverPreview = null;
+    tripDetails = {};
+    selectedPaymentMethod = null;
+    appliedPromo = null;
+    promoDiscount = 0;
+
+    try {
+        SafeStorage.removeItem('akwadra_active_offer');
+    } catch (e) {
+        // ignore
+    }
+
+    if (typeof window.resetSplitFareRows === 'function') {
+        window.resetSplitFareRows();
+    }
+
+    if (typeof window.switchSection === 'function') {
+        window.switchSection('destination');
+    }
+    if (typeof setPassengerPanelHidden === 'function') {
+        setPassengerPanelHidden(false);
+    }
+
+    forceRestoreHomeMapAfterTripCompletion();
+
+    // Keep location services alive for immediate next-trip readiness.
+    startLocationTracking();
+    requestSingleLocationFix();
+}
+
 function buildPassengerRatingPayloadFromUI() {
     const tripId = lastCompletedTrip?.id || activePassengerTripId;
     if (!tripId) return null;
@@ -12179,6 +12285,7 @@ window.submitTripCompletionDone = async function() {
     if (!tripId) {
         showToast('تعذر تحديد الرحلة');
         finalizePassengerPostTripFlow();
+        resetPassengerTripStateAfterCompletion(null);
         return;
     }
 
@@ -12206,12 +12313,19 @@ window.submitTripCompletionDone = async function() {
     } finally {
         if (btn) btn.disabled = false;
         finalizePassengerPostTripFlow();
+        resetPassengerTripStateAfterCompletion(tripId);
     }
 };
 
 window.skipTripCompletionRating = function() {
+    const tripId = String(lastCompletedTrip?.id || activePassengerTripId || '');
+    if (tripId) {
+        removePassengerQueuedRating(tripId);
+        removePassengerRateLaterTrip(tripId);
+    }
     showToast('تم تخطي التقييم');
     finalizePassengerPostTripFlow();
+    resetPassengerTripStateAfterCompletion(tripId || null);
 };
 
 window.rateTripLater = function() {
@@ -12222,10 +12336,11 @@ window.rateTripLater = function() {
     }
     showToast('سوف نذكرك بتقييم الرحلة لاحقًا');
     finalizePassengerPostTripFlow();
+    resetPassengerTripStateAfterCompletion(tripId ? String(tripId) : null);
 };
 
 window.dismissTripCompletionSheet = function() {
-    closeTripCompletionRatingModal();
+    window.skipTripCompletionRating();
 };
 
 window.submitDriverPassengerRating = async function() {
