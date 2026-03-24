@@ -14455,7 +14455,7 @@ async function rateDriverHandler(req, res) {
         }
 
         const before = await pool.query(
-            'SELECT trip_status, user_id, driver_id, passenger_rating FROM trips WHERE id = $1 LIMIT 1',
+            'SELECT trip_status, status, user_id, driver_id, passenger_rating FROM trips WHERE id = $1 LIMIT 1',
             [tripId]
         );
         const beforeTripStatus = before.rows.length ? (before.rows[0].trip_status || null) : null;
@@ -14469,6 +14469,15 @@ async function rateDriverHandler(req, res) {
         }
 
         const tripRow = before.rows[0];
+        const normalizedTripStatus = String(tripRow.trip_status || '').toLowerCase();
+        const normalizedStatus = String(tripRow.status || '').toLowerCase();
+        const canRateNow = normalizedTripStatus === 'completed' || normalizedTripStatus === 'rated' || normalizedStatus === 'completed';
+        if (!canRateNow) {
+            return res.status(409).json({
+                success: false,
+                error: 'Trip must be completed before rating'
+            });
+        }
         const submittedAt = (() => {
             const raw = timestamp ? new Date(timestamp) : new Date();
             return Number.isNaN(raw.getTime()) ? new Date() : raw;
@@ -14603,6 +14612,19 @@ async function rateDriverHandler(req, res) {
             await refreshCaptainRatingStats(result.rows[0].driver_id);
         }
 
+        let captainUserId = null;
+        try {
+            if (result.rows[0]?.driver_id) {
+                const captainUserRes = await pool.query(
+                    'SELECT user_id FROM drivers WHERE id = $1 LIMIT 1',
+                    [result.rows[0].driver_id]
+                );
+                captainUserId = captainUserRes.rows?.[0]?.user_id || null;
+            }
+        } catch (e) {
+            captainUserId = null;
+        }
+
         try {
             if (beforeTripStatus !== 'rated') {
                 io.to(tripRoom(tripId)).emit('trip_rated', {
@@ -14610,6 +14632,16 @@ async function rateDriverHandler(req, res) {
                     trip_status: 'rated',
                     captain_id: result.rows[0]?.driver_id || resolvedCaptainId || null,
                     rating: Math.trunc(normalizedRating)
+                });
+            }
+
+            if (captainUserId) {
+                io.to(userRoom(captainUserId)).emit('captain_rating_submitted', {
+                    trip_id: String(tripId),
+                    captain_id: result.rows[0]?.driver_id || resolvedCaptainId || null,
+                    rating: Math.trunc(normalizedRating),
+                    comment: normalizedComment || null,
+                    submitted_at: submittedAt.toISOString()
                 });
             }
         } catch (err) {

@@ -336,6 +336,7 @@ let passengerExtraOptionsCollapsed = false;
 const PASSENGER_RATING_QUEUE_KEY = 'akwadra_passenger_rating_queue_v1';
 const PASSENGER_RATE_LATER_KEY = 'akwadra_passenger_rate_later_v1';
 const PASSENGER_RATING_RETRY_INTERVAL_MS = 2 * 60 * 1000;
+const TRIP_COMPLETION_MODAL_ID = 'trip-completion-rating-modal';
 let passengerRatingRetryTimer = null;
 let passengerRatingRetryInFlight = false;
 
@@ -541,6 +542,100 @@ function initPassengerRatingRetrySystem() {
 
     refreshRateLaterReminderBanner();
     void flushPassengerRatingQueue('startup');
+}
+
+function bindPassengerStarsInScope(scopeEl) {
+    if (!scopeEl) return;
+    const stars = scopeEl.querySelectorAll('.star-btn');
+    stars.forEach((btn) => {
+        if (btn.dataset.boundPassengerStar === '1') return;
+        btn.dataset.boundPassengerStar = '1';
+        btn.addEventListener('click', () => {
+            const rating = parseInt(btn.dataset.rating);
+            passengerRatingValue = rating;
+            const scope = btn.closest('[data-rating-scope]') || scopeEl;
+            scope.querySelectorAll('.star-btn').forEach((b) => {
+                if (parseInt(b.dataset.rating) <= rating) {
+                    b.classList.add('text-yellow-400');
+                    b.classList.remove('text-gray-300');
+                } else {
+                    b.classList.remove('text-yellow-400');
+                    b.classList.add('text-gray-300');
+                }
+            });
+        });
+    });
+}
+
+function ensureTripCompletionRatingModal() {
+    let modal = document.getElementById(TRIP_COMPLETION_MODAL_ID);
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = TRIP_COMPLETION_MODAL_ID;
+    modal.className = 'hidden fixed inset-x-0 bottom-0 z-[140] px-3 pb-3 pointer-events-none';
+    modal.innerHTML = `
+        <div class="max-w-md mx-auto bg-white border border-gray-200 rounded-3xl shadow-2xl overflow-hidden pointer-events-auto">
+            <div class="px-5 pt-3 pb-2">
+                <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-2"></div>
+                <div class="flex items-center justify-between">
+                    <h3 class="text-base font-extrabold text-gray-800">تقييم الرحلة (اختياري)</h3>
+                    <button type="button" onclick="dismissTripCompletionSheet()" class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200" aria-label="إغلاق">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">يمكنك بدء رحلة جديدة الآن دون انتظار إرسال التقييم</p>
+            </div>
+
+            <div class="px-5 pb-3" data-rating-scope="passenger">
+                <div class="flex justify-center gap-2 mb-3 dir-ltr">
+                    <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 transition-all text-3xl" data-rating="1" aria-label="1"><i class="fas fa-star"></i></button>
+                    <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 transition-all text-3xl" data-rating="2" aria-label="2"><i class="fas fa-star"></i></button>
+                    <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 transition-all text-3xl" data-rating="3" aria-label="3"><i class="fas fa-star"></i></button>
+                    <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 transition-all text-3xl" data-rating="4" aria-label="4"><i class="fas fa-star"></i></button>
+                    <button type="button" class="star-btn text-gray-300 hover:text-yellow-400 transition-all text-3xl" data-rating="5" aria-label="5"><i class="fas fa-star"></i></button>
+                </div>
+                <textarea id="trip-completion-rating-comment" rows="2" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300" placeholder="اكتب تعليقك (اختياري)"></textarea>
+                <div class="mt-2">
+                    <select id="trip-completion-rating-cause" class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-800 outline-none">
+                        <option value="">بدون</option>
+                        <option value="meetpoint">نقطة التقاء غير مناسبة</option>
+                        <option value="route_change">تغيير مسار بدون توضيح</option>
+                        <option value="stop">توقفات بدون توضيح</option>
+                        <option value="payment">مشكلة دفع/كاش</option>
+                        <option value="behavior">سلوك غير لائق</option>
+                        <option value="other">أخرى</option>
+                    </select>
+                    <textarea id="trip-completion-rating-cause-note" rows="2" class="mt-2 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300" placeholder="تفاصيل مختصرة (اختياري)"></textarea>
+                    <p id="trip-completion-rating-cause-hint" class="text-[11px] text-gray-500 mt-1"></p>
+                </div>
+            </div>
+
+            <div class="px-5 pb-5 grid grid-cols-1 gap-2">
+                <button type="button" onclick="submitTripCompletionDone()" class="w-full bg-emerald-600 text-white py-2.5 rounded-xl font-bold hover:bg-emerald-700 transition-colors">Submit Rating</button>
+                <div class="grid grid-cols-2 gap-2">
+                    <button type="button" onclick="skipTripCompletionRating()" class="w-full bg-gray-100 text-gray-800 py-2.5 rounded-xl font-bold hover:bg-gray-200 transition-colors">Skip</button>
+                    <button type="button" onclick="rateTripLater()" class="w-full bg-indigo-100 text-indigo-700 py-2.5 rounded-xl font-bold hover:bg-indigo-200 transition-colors">Rate Later</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    bindPassengerStarsInScope(modal);
+    return modal;
+}
+
+function openTripCompletionRatingModal() {
+    const modal = ensureTripCompletionRatingModal();
+    if (!modal) return;
+    modal.classList.remove('hidden');
+}
+
+function closeTripCompletionRatingModal() {
+    const modal = document.getElementById(TRIP_COMPLETION_MODAL_ID);
+    if (!modal) return;
+    modal.classList.add('hidden');
 }
 
 // Driving Coach (Driver, privacy-first)
@@ -2460,6 +2555,9 @@ function showPassengerTripSummaryAndRating(tripId, details = {}) {
 
     // Stop receiving live location updates for this trip
     unsubscribeTripRealtime(tripId);
+    if (activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
+        activePassengerTripId = null;
+    }
 
     const distance = details?.distance !== undefined && details?.distance !== null ? Number(details.distance) : (tripDetails?.distance || 0);
     const duration = details?.duration !== undefined && details?.duration !== null ? Number(details.duration) : (tripDetails?.duration || 0);
@@ -2496,9 +2594,13 @@ function showPassengerTripSummaryAndRating(tripId, details = {}) {
     if (distanceEl) distanceEl.innerText = `${Number.isFinite(distance) ? distance : 0} كم`;
     if (durationEl) durationEl.innerText = `${Number.isFinite(duration) ? duration : 0} دقيقة`;
 
-    if (typeof window.switchSection === 'function') {
-        window.switchSection('payment-success');
+    if (typeof window.resetApp === 'function') {
+        window.resetApp();
+    } else if (typeof window.switchSection === 'function') {
+        window.switchSection('destination');
     }
+    clearPassengerRatingInputs();
+    openTripCompletionRatingModal();
 
     // Refresh trip history cache so My Trips updates instantly
     try {
@@ -11988,13 +12090,21 @@ function clearPassengerRatingInputs() {
     const causeNoteEl = document.getElementById('payment-success-rating-cause-note');
     const causeHintEl = document.getElementById('payment-success-rating-cause-hint');
     const legacyCommentInput = document.getElementById('passenger-rating-comment');
+    const modalCommentInput = document.getElementById('trip-completion-rating-comment');
+    const modalCauseEl = document.getElementById('trip-completion-rating-cause');
+    const modalCauseNoteEl = document.getElementById('trip-completion-rating-cause-note');
+    const modalCauseHintEl = document.getElementById('trip-completion-rating-cause-hint');
 
     passengerRatingValue = 0;
     if (commentInput) commentInput.value = '';
     if (legacyCommentInput) legacyCommentInput.value = '';
+    if (modalCommentInput) modalCommentInput.value = '';
     if (causeEl) causeEl.value = '';
     if (causeNoteEl) causeNoteEl.value = '';
     if (causeHintEl) causeHintEl.textContent = '';
+    if (modalCauseEl) modalCauseEl.value = '';
+    if (modalCauseNoteEl) modalCauseNoteEl.value = '';
+    if (modalCauseHintEl) modalCauseHintEl.textContent = '';
 
     try {
         document.querySelectorAll('[data-rating-scope="passenger"] .star-btn').forEach((b) => {
@@ -12025,25 +12135,20 @@ async function submitAccessibilityFeedbackIfAny(tripId) {
 }
 
 function finalizePassengerPostTripFlow() {
-    if (activePassengerTripId) {
-        unsubscribeTripRealtime(activePassengerTripId);
-    }
-    activePassengerTripId = null;
-    passengerRealtimeActive = false;
+    closeTripCompletionRatingModal();
     lastCompletedTrip = null;
     clearPassengerRatingInputs();
-    resetApp();
 }
 
 function buildPassengerRatingPayloadFromUI() {
     const tripId = lastCompletedTrip?.id || activePassengerTripId;
     if (!tripId) return null;
 
-    const commentInput = document.getElementById('payment-success-rating-comment');
+    const commentInput = document.getElementById('trip-completion-rating-comment') || document.getElementById('payment-success-rating-comment');
     const comment = commentInput ? String(commentInput.value || '').trim() : '';
 
-    const causeEl = document.getElementById('payment-success-rating-cause');
-    const causeNoteEl = document.getElementById('payment-success-rating-cause-note');
+    const causeEl = document.getElementById('trip-completion-rating-cause') || document.getElementById('payment-success-rating-cause');
+    const causeNoteEl = document.getElementById('trip-completion-rating-cause-note') || document.getElementById('payment-success-rating-cause-note');
     const causeKey = causeEl ? String(causeEl.value || '').trim() : '';
     const causeNote = causeNoteEl ? String(causeNoteEl.value || '').trim() : '';
 
@@ -12078,7 +12183,8 @@ window.submitTripCompletionDone = async function() {
     }
 
     const hasRating = Number.isFinite(Number(payload.rating));
-    const btn = document.querySelector('#state-payment-success button[onclick="submitTripCompletionDone()"]');
+    const btn = document.querySelector(`#${TRIP_COMPLETION_MODAL_ID} button[onclick="submitTripCompletionDone()"]`) ||
+        document.querySelector('#state-payment-success button[onclick="submitTripCompletionDone()"]');
     if (btn) btn.disabled = true;
 
     try {
@@ -12119,7 +12225,7 @@ window.rateTripLater = function() {
 };
 
 window.dismissTripCompletionSheet = function() {
-    window.skipTripCompletionRating();
+    closeTripCompletionRatingModal();
 };
 
 window.submitDriverPassengerRating = async function() {
@@ -12556,8 +12662,11 @@ window.proceedToPayment = function() {
         if (methodEl) methodEl.innerText = paymentLabels[paymentMethod] || 'دفع كاش';
         if (timeEl) timeEl.innerText = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
         updatePaymentSuccessTripSummary(lastCompletedTrip);
-
-        window.switchSection('payment-success');
+        if (typeof window.resetApp === 'function') {
+            window.resetApp();
+        }
+        clearPassengerRatingInputs();
+        openTripCompletionRatingModal();
 
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check-circle ml-2"></i> تم - تأكيد الدفع';
@@ -13087,7 +13196,7 @@ window.rateTripFromDetails = function() {
 
         updatePaymentSuccessTripSummary(lastCompletedTrip);
         clearPassengerRatingInputs();
-        window.switchSection('payment-success');
+        openTripCompletionRatingModal();
     } catch (e) {
         showToast('تعذر فتح شاشة التقييم');
     }
