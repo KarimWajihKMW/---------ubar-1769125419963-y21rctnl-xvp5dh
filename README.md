@@ -357,8 +357,11 @@ Admin SaaS control endpoints:
 - `POST /api/admin/saas/plans`
 - `POST /api/admin/saas/tenants/:id/subscription`
 - `GET /api/admin/saas/tenants/:id/usage`
+- `POST /api/admin/saas/tenants/:id/invoices/generate`
+- `GET /api/admin/saas/tenants/:id/invoices`
+- `PATCH /api/admin/saas/invoices/:id/status`
 
-This supports isolated tenant config, white-label branding JSON, plan management, subscription state, and usage tracking.
+This supports isolated tenant config, white-label branding JSON, plan management, subscription state, usage tracking, and invoice lifecycle management.
 
 ## AI layer (new)
 

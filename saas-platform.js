@@ -86,10 +86,34 @@ async function ensureSaasTables(pool) {
         );
     `);
 
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS saas_invoices (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id BIGINT NOT NULL REFERENCES saas_tenants(id) ON DELETE CASCADE,
+            subscription_id BIGINT REFERENCES saas_tenant_subscriptions(id),
+            period_start TIMESTAMP NOT NULL,
+            period_end TIMESTAMP NOT NULL,
+            currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+            plan_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+            usage_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+            total_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'draft',
+            breakdown_json JSONB,
+            generated_by_user_id BIGINT,
+            generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            paid_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT saas_invoice_period_check CHECK (period_end > period_start)
+        );
+    `);
+
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_tenants_key ON saas_tenants(tenant_key);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_domains_domain ON saas_tenant_domains(domain);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_subs_tenant ON saas_tenant_subscriptions(tenant_id, created_at DESC);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_usage_tenant_metric ON saas_usage_events(tenant_id, metric_key, created_at DESC);');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_invoices_tenant ON saas_invoices(tenant_id, created_at DESC);');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_invoices_status ON saas_invoices(status, created_at DESC);');
 
     const defaultPlans = [
         {
@@ -197,6 +221,59 @@ async function writeAuditSafe(writeAdminAudit, req, payload) {
     } catch (_e) {
         // non-blocking
     }
+}
+
+function invoiceStatusFromInput(v) {
+    const s = normKey(v, 20);
+    if (['draft', 'issued', 'paid', 'void'].includes(s)) return s;
+    return null;
+}
+
+async function resolveLatestSubscription(pool, tenantId) {
+    const sub = await pool.query(
+        `SELECT s.id, s.tenant_id, s.plan_id, s.status, s.cycle, s.starts_at, p.plan_key, p.monthly_price, p.yearly_price
+         FROM saas_tenant_subscriptions s
+         INNER JOIN saas_subscription_plans p ON p.id = s.plan_id
+         WHERE s.tenant_id = $1
+         ORDER BY s.created_at DESC
+         LIMIT 1`,
+        [tenantId]
+    );
+    return sub.rows[0] || null;
+}
+
+async function computeUsageCharges(pool, tenantId, { periodStart, periodEnd }) {
+    const rows = await pool.query(
+        `SELECT metric_key, SUM(value)::numeric(14,2) AS units
+         FROM saas_usage_events
+         WHERE tenant_id = $1
+           AND created_at >= $2
+           AND created_at < $3
+         GROUP BY metric_key
+         ORDER BY metric_key ASC`,
+        [tenantId, periodStart, periodEnd]
+    );
+
+    // Default simple catalog; can be made tenant-specific later.
+    const unitPrice = {
+        trip_created: 0.02,
+        api_call: 0.001,
+        ai_query: 0.03
+    };
+
+    const items = [];
+    let usageAmount = 0;
+
+    for (const r of rows.rows || []) {
+        const key = String(r.metric_key || 'unknown');
+        const units = Number(r.units || 0);
+        const price = Number.isFinite(unitPrice[key]) ? unitPrice[key] : 0.005;
+        const amount = Number((units * price).toFixed(2));
+        usageAmount += amount;
+        items.push({ metric_key: key, units, unit_price: price, amount });
+    }
+
+    return { usageAmount: Number(usageAmount.toFixed(2)), usageItems: items };
 }
 
 function registerSaasRoutes(app, { pool, requirePermission, requireRole, writeAdminAudit }) {
@@ -523,6 +600,145 @@ function registerSaasRoutes(app, { pool, requirePermission, requireRole, writeAd
             });
         } catch (e) {
             return res.status(500).json({ success: false, error: e.message || 'tenant_usage_failed' });
+        }
+    });
+
+    app.post('/api/admin/saas/tenants/:id/invoices/generate', requirePermission('admin.executive.write', 'admin.ops.write'), async (req, res) => {
+        try {
+            const tenantId = Number(req.params.id);
+            if (!Number.isFinite(tenantId) || tenantId <= 0) {
+                return res.status(400).json({ success: false, error: 'invalid_tenant_id' });
+            }
+
+            const lookbackDaysRaw = Number(req.body?.lookback_days);
+            const lookbackDays = Number.isFinite(lookbackDaysRaw) ? Math.max(1, Math.min(lookbackDaysRaw, 366)) : 30;
+            const currency = normText(req.body?.currency || 'USD', 10).toUpperCase();
+
+            const periodEnd = new Date();
+            const periodStart = new Date(periodEnd.getTime() - (lookbackDays * 24 * 60 * 60 * 1000));
+
+            const sub = await resolveLatestSubscription(pool, tenantId);
+            if (!sub) {
+                return res.status(404).json({ success: false, error: 'subscription_not_found' });
+            }
+
+            const cycle = String(sub.cycle || 'monthly').toLowerCase();
+            const planAmount = cycle === 'yearly'
+                ? Number(sub.yearly_price || 0)
+                : Number(sub.monthly_price || 0);
+
+            const usage = await computeUsageCharges(pool, tenantId, {
+                periodStart: periodStart.toISOString(),
+                periodEnd: periodEnd.toISOString()
+            });
+
+            const totalAmount = Number((planAmount + usage.usageAmount).toFixed(2));
+            const breakdown = {
+                plan: {
+                    plan_key: sub.plan_key,
+                    cycle,
+                    amount: planAmount
+                },
+                usage: usage.usageItems,
+                lookback_days: lookbackDays
+            };
+
+            const ins = await pool.query(
+                `INSERT INTO saas_invoices (
+                    tenant_id, subscription_id, period_start, period_end, currency,
+                    plan_amount, usage_amount, total_amount, status, breakdown_json, generated_by_user_id
+                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'issued',$9,$10)
+                 RETURNING *`,
+                [
+                    tenantId,
+                    sub.id,
+                    periodStart.toISOString(),
+                    periodEnd.toISOString(),
+                    currency,
+                    planAmount,
+                    usage.usageAmount,
+                    totalAmount,
+                    JSON.stringify(breakdown),
+                    req.auth?.uid || null
+                ]
+            );
+
+            await writeAuditSafe(writeAdminAudit, req, {
+                action: 'saas.invoice.generate',
+                entity_type: 'saas_invoice',
+                entity_id: String(ins.rows[0].id),
+                meta: { tenant_id: tenantId, total_amount: totalAmount, currency }
+            });
+
+            return res.status(201).json({ success: true, data: ins.rows[0] });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: e.message || 'generate_invoice_failed' });
+        }
+    });
+
+    app.get('/api/admin/saas/tenants/:id/invoices', requirePermission('admin.executive.read', 'admin.ops.read'), async (req, res) => {
+        try {
+            const tenantId = Number(req.params.id);
+            const limitRaw = Number(req.query?.limit);
+            const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 200)) : 50;
+
+            if (!Number.isFinite(tenantId) || tenantId <= 0) {
+                return res.status(400).json({ success: false, error: 'invalid_tenant_id' });
+            }
+
+            const rows = await pool.query(
+                `SELECT id, tenant_id, subscription_id, period_start, period_end, currency,
+                        plan_amount, usage_amount, total_amount, status, breakdown_json,
+                        generated_by_user_id, generated_at, paid_at, created_at, updated_at
+                 FROM saas_invoices
+                 WHERE tenant_id = $1
+                 ORDER BY created_at DESC
+                 LIMIT $2`,
+                [tenantId, limit]
+            );
+
+            return res.json({ success: true, count: rows.rows.length, data: rows.rows });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: e.message || 'list_invoices_failed' });
+        }
+    });
+
+    app.patch('/api/admin/saas/invoices/:id/status', requirePermission('admin.executive.write', 'admin.ops.write'), async (req, res) => {
+        try {
+            const invoiceId = Number(req.params.id);
+            const status = invoiceStatusFromInput(req.body?.status);
+
+            if (!Number.isFinite(invoiceId) || invoiceId <= 0) {
+                return res.status(400).json({ success: false, error: 'invalid_invoice_id' });
+            }
+            if (!status) {
+                return res.status(400).json({ success: false, error: 'invalid_invoice_status' });
+            }
+
+            const upd = await pool.query(
+                `UPDATE saas_invoices
+                 SET status = $2::text,
+                     paid_at = CASE WHEN $2::text = 'paid' THEN CURRENT_TIMESTAMP ELSE paid_at END,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1
+                 RETURNING *`,
+                [invoiceId, status]
+            );
+
+            if (!upd.rows[0]) {
+                return res.status(404).json({ success: false, error: 'invoice_not_found' });
+            }
+
+            await writeAuditSafe(writeAdminAudit, req, {
+                action: 'saas.invoice.status.update',
+                entity_type: 'saas_invoice',
+                entity_id: String(invoiceId),
+                meta: { status }
+            });
+
+            return res.json({ success: true, data: upd.rows[0] });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: e.message || 'update_invoice_status_failed' });
         }
     });
 }
