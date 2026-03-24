@@ -137,6 +137,51 @@ Or directly:
 bash scripts/k8s-deploy.sh
 ```
 
+## Backup and disaster recovery
+
+Database backup/restore scripts are available:
+
+- `npm run backup:db`
+- `npm run restore:db -- ./backups/<file>.dump`
+
+Requirements:
+
+- `DATABASE_URL` must be set.
+- PostgreSQL client tools (`pg_dump`, `pg_restore`) must be available.
+
+Scripts:
+
+- `scripts/backup-postgres.sh`
+- `scripts/restore-postgres.sh`
+
+## Alerting rules
+
+Prometheus alert rules baseline is included:
+
+- `infra/k8s/prometheus-rules.yaml`
+
+It includes high-level alerts for:
+
+- gateway error rate
+- monolith P95 latency
+- trips service down
+- payments service down
+
+## Terraform cloud baseline
+
+AWS Terraform baseline is included under:
+
+- `infra/terraform/`
+
+Use:
+
+```bash
+cd infra/terraform
+terraform init
+terraform plan -var-file=terraform.tfvars
+terraform apply -var-file=terraform.tfvars
+```
+
 ## Native mobile scaffolds (new)
 
 Expo-based mobile app starters were added:

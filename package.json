@@ -12,6 +12,8 @@
     "start:micro": "docker compose -f docker-compose.microservices.yml up --build",
     "micro:down": "docker compose -f docker-compose.microservices.yml down",
     "deploy:k8s": "bash scripts/k8s-deploy.sh",
+    "backup:db": "bash scripts/backup-postgres.sh",
+    "restore:db": "bash scripts/restore-postgres.sh",
     "test": "node test-runner.js",
     "test:admin-excellence": "node test-admin-excellence.js",
     "test:admin-innovations": "node test-admin-innovations.js",
