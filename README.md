@@ -80,6 +80,40 @@ Pipeline steps:
 - run build check (`npm run build`)
 - run API tests (`npm test`) against a CI PostgreSQL service
 
+## Microservices + API Gateway (new)
+
+The repository now includes a modular microservices-ready architecture:
+
+- `gateway/server.js` (API gateway + proxy routing)
+- `services/trips-service/server.js`
+- `services/payments-service/server.js`
+- `docker-compose.microservices.yml`
+
+Gateway routes:
+
+- `GET /health`
+- `GET|POST /api/ms/trips/*` -> Trips service
+- `GET|POST /api/ms/payments/*` -> Payments service
+- `* /api/*` -> fallback to monolith backend
+
+Useful scripts:
+
+- `npm run start:gateway`
+- `npm run start:trips-service`
+- `npm run start:payments-service`
+- `npm run start:micro`
+- `npm run micro:down`
+- `npm run test:gateway`
+
+## Native mobile scaffolds (new)
+
+Expo-based mobile app starters were added:
+
+- `mobile/rider-app`
+- `mobile/driver-app`
+
+See `mobile/README.md` for quick start and expansion notes.
+
 ## How it works (high level)
 
 ### Static web app

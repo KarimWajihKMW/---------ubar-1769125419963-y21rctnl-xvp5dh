@@ -1,0 +1,74 @@
+version: '3.9'
+services:
+  gateway:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && node gateway/server.js"
+    volumes:
+      - ./:/app
+    environment:
+      GATEWAY_PORT: 8080
+      TRIPS_SERVICE_URL: http://trips-service:4101
+      PAYMENTS_SERVICE_URL: http://payments-service:4102
+      MONOLITH_URL: http://monolith:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      trips-service:
+        condition: service_started
+      payments-service:
+        condition: service_started
+      monolith:
+        condition: service_started
+
+  trips-service:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && node services/trips-service/server.js"
+    volumes:
+      - ./:/app
+    environment:
+      TRIPS_SERVICE_PORT: 4101
+    ports:
+      - "4101:4101"
+
+  payments-service:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && node services/payments-service/server.js"
+    volumes:
+      - ./:/app
+    environment:
+      PAYMENTS_SERVICE_PORT: 4102
+    ports:
+      - "4102:4102"
+
+  monolith:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ubar
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ubar
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ubar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
