@@ -68,6 +68,15 @@ const {
     ensureDefaultAdminInnovationFeatures,
     registerAdminInnovationRoutes
 } = require('./admin-innovations');
+const {
+    ensureSaasTables,
+    makeTenantMiddleware,
+    registerSaasRoutes
+} = require('./saas-platform');
+const {
+    ensureAiTables,
+    registerAiRoutes
+} = require('./ai-layer');
 
 // ------------------------------
 // Admin RBAC (roles + permissions)
@@ -1191,8 +1200,11 @@ app.use((req, res, next) => {
 
 // Attach decoded JWT (if present) to req.auth for all routes (including static file guards)
 app.use(authMiddleware);
+app.use(makeTenantMiddleware(pool));
 
 registerAdminInnovationRoutes(app, { pool, requirePermission, writeAdminAudit });
+registerSaasRoutes(app, { pool, requirePermission, requireRole, writeAdminAudit });
+registerAiRoutes(app, { pool, requirePermission, requireRole });
 
 app.use(express.static('.'));
 
@@ -20437,6 +20449,8 @@ ensureCoreSchema()
     .then(() => ensureAdminExcellenceTables())
     .then(() => ensureAdminRiskTables())
     .then(() => ensureAdminInnovationTables(pool))
+    .then(() => ensureSaasTables(pool))
+    .then(() => ensureAiTables(pool))
     .then(() => ensureExecutiveTables())
     .then(() => ensureDefaultAdminPlaybooks())
     .then(() => ensureDefaultAdminRiskFeatures())

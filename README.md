@@ -181,6 +181,44 @@ There is also a live snapshot endpoint:
 
 - `GET /api/trips/:id/live` (trip + latest driver location)
 
+## SaaS + multi-tenant layer (new)
+
+The platform now includes a tenant-aware SaaS control layer with domain/header-based tenant resolution.
+
+- Tenant context resolution:
+  - Header: `x-tenant-key` (or `x-tenant-id`)
+  - Domain mapping via `saas_tenant_domains`
+- Tenant context endpoint:
+  - `GET /api/saas/tenant/context`
+- Usage metering endpoint:
+  - `POST /api/saas/usage/events`
+
+Admin SaaS control endpoints:
+
+- `GET /api/admin/saas/tenants`
+- `POST /api/admin/saas/tenants`
+- `PATCH /api/admin/saas/tenants/:id`
+- `PATCH /api/admin/saas/tenants/:id/branding`
+- `GET /api/admin/saas/plans`
+- `POST /api/admin/saas/plans`
+- `POST /api/admin/saas/tenants/:id/subscription`
+- `GET /api/admin/saas/tenants/:id/usage`
+
+This supports isolated tenant config, white-label branding JSON, plan management, subscription state, and usage tracking.
+
+## AI layer (new)
+
+A production-safe AI layer (heuristic decision engine + auditable logs) is now available via:
+
+- `POST /api/admin/ai/fraud-score`
+- `POST /api/admin/ai/demand-forecast`
+- `POST /api/admin/ai/pricing-recommendation`
+- `POST /api/admin/ai/ticket-summarize`
+- `GET /api/admin/ai/insights/overview`
+- `POST /api/ai/assistant/query`
+
+All AI outputs are logged in `ai_decision_logs` for governance and compliance review.
+
 ## Safety, sharing, and support (implemented endpoints)
 
 The API includes additional modules that the UI can call:
