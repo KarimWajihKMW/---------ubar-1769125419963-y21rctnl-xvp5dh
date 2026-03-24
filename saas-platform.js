@@ -108,12 +108,46 @@ async function ensureSaasTables(pool) {
         );
     `);
 
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS saas_invoice_payments (
+            id BIGSERIAL PRIMARY KEY,
+            invoice_id BIGINT NOT NULL REFERENCES saas_invoices(id) ON DELETE CASCADE,
+            tenant_id BIGINT NOT NULL REFERENCES saas_tenants(id) ON DELETE CASCADE,
+            provider VARCHAR(40) NOT NULL DEFAULT 'manual',
+            provider_event_id VARCHAR(140),
+            status VARCHAR(20) NOT NULL DEFAULT 'succeeded',
+            amount NUMERIC(14,2) NOT NULL,
+            currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+            paid_at TIMESTAMP,
+            meta_json JSONB,
+            created_by_user_id BIGINT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS saas_billing_webhook_events (
+            id BIGSERIAL PRIMARY KEY,
+            provider VARCHAR(40) NOT NULL,
+            event_id VARCHAR(140) NOT NULL,
+            invoice_id BIGINT,
+            payload_json JSONB,
+            signature_valid BOOLEAN DEFAULT false,
+            processed BOOLEAN DEFAULT false,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (provider, event_id)
+        );
+    `);
+
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_tenants_key ON saas_tenants(tenant_key);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_domains_domain ON saas_tenant_domains(domain);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_subs_tenant ON saas_tenant_subscriptions(tenant_id, created_at DESC);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_usage_tenant_metric ON saas_usage_events(tenant_id, metric_key, created_at DESC);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_invoices_tenant ON saas_invoices(tenant_id, created_at DESC);');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_invoices_status ON saas_invoices(status, created_at DESC);');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_invoice_payments_invoice ON saas_invoice_payments(invoice_id, created_at DESC);');
+    await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_saas_invoice_payments_provider_event ON saas_invoice_payments(provider, provider_event_id) WHERE provider_event_id IS NOT NULL;');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_saas_webhooks_provider_event ON saas_billing_webhook_events(provider, event_id);');
 
     const defaultPlans = [
         {
@@ -274,6 +308,67 @@ async function computeUsageCharges(pool, tenantId, { periodStart, periodEnd }) {
     }
 
     return { usageAmount: Number(usageAmount.toFixed(2)), usageItems: items };
+}
+
+function billingWebhookSecret() {
+    return String(process.env.BILLING_WEBHOOK_SECRET || process.env.JWT_SECRET || 'billing-webhook-dev-secret');
+}
+
+function signWebhookBody(payload) {
+    const body = typeof payload === 'string' ? payload : JSON.stringify(payload || {});
+    return crypto.createHmac('sha256', billingWebhookSecret()).update(body).digest('hex');
+}
+
+function isWebhookSignatureValid(rawBody, signature) {
+    const provided = String(signature || '').trim().toLowerCase();
+    if (!provided) return false;
+    const expected = signWebhookBody(rawBody);
+    const a = Buffer.from(provided, 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+}
+
+async function applyInvoicePaidStatus(pool, invoiceId) {
+    const invRes = await pool.query(
+        `SELECT id, total_amount, status
+         FROM saas_invoices
+         WHERE id = $1
+         LIMIT 1`,
+        [invoiceId]
+    );
+    const inv = invRes.rows[0] || null;
+    if (!inv) return null;
+
+    const paidRes = await pool.query(
+        `SELECT COALESCE(SUM(amount),0)::numeric(14,2) AS paid_total
+         FROM saas_invoice_payments
+         WHERE invoice_id = $1
+           AND status IN ('succeeded','paid')`,
+        [invoiceId]
+    );
+    const paidTotal = Number(paidRes.rows?.[0]?.paid_total || 0);
+    const targetTotal = Number(inv.total_amount || 0);
+
+    let status = 'issued';
+    if (paidTotal >= targetTotal && targetTotal > 0) status = 'paid';
+    if (String(inv.status || '').toLowerCase() === 'void') status = 'void';
+
+    const upd = await pool.query(
+        `UPDATE saas_invoices
+         SET status = $2::text,
+             paid_at = CASE WHEN $2::text = 'paid' THEN COALESCE(paid_at, CURRENT_TIMESTAMP) ELSE paid_at END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING *`,
+        [invoiceId, status]
+    );
+
+    return {
+        invoice: upd.rows[0] || inv,
+        paid_total: Number(paidTotal.toFixed(2)),
+        due_total: Number(targetTotal.toFixed(2))
+    };
 }
 
 function registerSaasRoutes(app, { pool, requirePermission, requireRole, writeAdminAudit }) {
@@ -739,6 +834,175 @@ function registerSaasRoutes(app, { pool, requirePermission, requireRole, writeAd
             return res.json({ success: true, data: upd.rows[0] });
         } catch (e) {
             return res.status(500).json({ success: false, error: e.message || 'update_invoice_status_failed' });
+        }
+    });
+
+    app.get('/api/admin/saas/invoices/:id/payments', requirePermission('admin.executive.read', 'admin.ops.read'), async (req, res) => {
+        try {
+            const invoiceId = Number(req.params.id);
+            if (!Number.isFinite(invoiceId) || invoiceId <= 0) {
+                return res.status(400).json({ success: false, error: 'invalid_invoice_id' });
+            }
+
+            const rows = await pool.query(
+                `SELECT id, invoice_id, tenant_id, provider, provider_event_id, status, amount, currency,
+                        paid_at, meta_json, created_by_user_id, created_at
+                 FROM saas_invoice_payments
+                 WHERE invoice_id = $1
+                 ORDER BY created_at DESC`,
+                [invoiceId]
+            );
+
+            return res.json({ success: true, count: rows.rows.length, data: rows.rows });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: e.message || 'list_invoice_payments_failed' });
+        }
+    });
+
+    app.post('/api/admin/saas/invoices/:id/payments', requirePermission('admin.executive.write', 'admin.ops.write'), async (req, res) => {
+        try {
+            const invoiceId = Number(req.params.id);
+            if (!Number.isFinite(invoiceId) || invoiceId <= 0) {
+                return res.status(400).json({ success: false, error: 'invalid_invoice_id' });
+            }
+
+            const amount = Number(req.body?.amount);
+            const currency = normText(req.body?.currency || 'USD', 10).toUpperCase();
+            const status = ['pending', 'succeeded', 'failed', 'paid'].includes(normKey(req.body?.status, 20))
+                ? normKey(req.body?.status, 20)
+                : 'succeeded';
+            const provider = normKey(req.body?.provider || 'manual', 40) || 'manual';
+            const providerEventId = normText(req.body?.provider_event_id, 140) || null;
+            const paidAt = req.body?.paid_at ? new Date(req.body.paid_at) : new Date();
+            const meta = normJson(req.body?.meta_json) || {};
+
+            if (!Number.isFinite(amount) || amount <= 0) {
+                return res.status(400).json({ success: false, error: 'invalid_payment_amount' });
+            }
+
+            const inv = await pool.query('SELECT id, tenant_id FROM saas_invoices WHERE id = $1 LIMIT 1', [invoiceId]);
+            if (!inv.rows[0]) {
+                return res.status(404).json({ success: false, error: 'invoice_not_found' });
+            }
+
+            const inserted = await pool.query(
+                `INSERT INTO saas_invoice_payments (
+                    invoice_id, tenant_id, provider, provider_event_id, status,
+                    amount, currency, paid_at, meta_json, created_by_user_id
+                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                 ON CONFLICT (provider, provider_event_id)
+                 WHERE provider_event_id IS NOT NULL
+                 DO UPDATE SET
+                    status = EXCLUDED.status,
+                    amount = EXCLUDED.amount,
+                    currency = EXCLUDED.currency,
+                    paid_at = EXCLUDED.paid_at,
+                    meta_json = EXCLUDED.meta_json
+                 RETURNING *`,
+                [
+                    invoiceId,
+                    inv.rows[0].tenant_id,
+                    provider,
+                    providerEventId,
+                    status,
+                    amount,
+                    currency,
+                    Number.isFinite(paidAt.getTime()) ? paidAt.toISOString() : new Date().toISOString(),
+                    JSON.stringify(meta),
+                    req.auth?.uid || null
+                ]
+            );
+
+            const invoiceState = await applyInvoicePaidStatus(pool, invoiceId);
+
+            await writeAuditSafe(writeAdminAudit, req, {
+                action: 'saas.invoice.payment.record',
+                entity_type: 'saas_invoice_payment',
+                entity_id: String(inserted.rows[0].id),
+                meta: { invoice_id: invoiceId, amount, currency, provider, status }
+            });
+
+            return res.status(201).json({
+                success: true,
+                data: inserted.rows[0],
+                invoice_state: invoiceState
+            });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: e.message || 'record_invoice_payment_failed' });
+        }
+    });
+
+    app.post('/api/saas/billing/webhooks/generic', async (req, res) => {
+        try {
+            const signature = String(req.headers['x-billing-signature'] || '').trim();
+            const rawBody = JSON.stringify(req.body || {});
+            const signatureValid = isWebhookSignatureValid(rawBody, signature);
+            if (!signatureValid) {
+                return res.status(401).json({ success: false, error: 'invalid_webhook_signature' });
+            }
+
+            const provider = normKey(req.body?.provider || 'generic', 40) || 'generic';
+            const eventId = normText(req.body?.event_id, 140);
+            const invoiceId = Number(req.body?.invoice_id);
+            const amount = Number(req.body?.amount);
+            const currency = normText(req.body?.currency || 'USD', 10).toUpperCase();
+            const status = ['pending', 'succeeded', 'failed', 'paid'].includes(normKey(req.body?.status, 20))
+                ? normKey(req.body?.status, 20)
+                : 'succeeded';
+
+            if (!eventId) return res.status(400).json({ success: false, error: 'event_id_required' });
+            if (!Number.isFinite(invoiceId) || invoiceId <= 0) return res.status(400).json({ success: false, error: 'invoice_id_required' });
+            if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ success: false, error: 'amount_required' });
+
+            const webhook = await pool.query(
+                `INSERT INTO saas_billing_webhook_events (provider, event_id, invoice_id, payload_json, signature_valid, processed)
+                 VALUES ($1,$2,$3,$4,$5,false)
+                 ON CONFLICT (provider, event_id)
+                 DO UPDATE SET payload_json = EXCLUDED.payload_json
+                 RETURNING *`,
+                [provider, eventId, invoiceId, rawBody, true]
+            );
+
+            const inv = await pool.query('SELECT id, tenant_id FROM saas_invoices WHERE id = $1 LIMIT 1', [invoiceId]);
+            if (!inv.rows[0]) {
+                return res.status(404).json({ success: false, error: 'invoice_not_found' });
+            }
+
+            await pool.query(
+                `INSERT INTO saas_invoice_payments (
+                    invoice_id, tenant_id, provider, provider_event_id, status,
+                    amount, currency, paid_at, meta_json, created_by_user_id
+                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP,$8,NULL)
+                 ON CONFLICT (provider, provider_event_id)
+                 WHERE provider_event_id IS NOT NULL
+                 DO UPDATE SET
+                    status = EXCLUDED.status,
+                    amount = EXCLUDED.amount,
+                    currency = EXCLUDED.currency,
+                    paid_at = EXCLUDED.paid_at,
+                    meta_json = EXCLUDED.meta_json`,
+                [
+                    invoiceId,
+                    inv.rows[0].tenant_id,
+                    provider,
+                    eventId,
+                    status,
+                    amount,
+                    currency,
+                    JSON.stringify({ source: 'webhook', webhook_id: webhook.rows?.[0]?.id || null })
+                ]
+            );
+
+            const invoiceState = await applyInvoicePaidStatus(pool, invoiceId);
+
+            await pool.query(
+                'UPDATE saas_billing_webhook_events SET processed = true WHERE id = $1',
+                [webhook.rows[0].id]
+            );
+
+            return res.json({ success: true, invoice_state: invoiceState });
+        } catch (e) {
+            return res.status(500).json({ success: false, error: e.message || 'billing_webhook_failed' });
         }
     });
 }

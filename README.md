@@ -360,6 +360,9 @@ Admin SaaS control endpoints:
 - `POST /api/admin/saas/tenants/:id/invoices/generate`
 - `GET /api/admin/saas/tenants/:id/invoices`
 - `PATCH /api/admin/saas/invoices/:id/status`
+- `GET /api/admin/saas/invoices/:id/payments`
+- `POST /api/admin/saas/invoices/:id/payments`
+- `POST /api/saas/billing/webhooks/generic` (HMAC via `x-billing-signature`)
 
 This supports isolated tenant config, white-label branding JSON, plan management, subscription state, usage tracking, and invoice lifecycle management.
 
