@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ubar-config
+  namespace: ubar
+data:
+  NODE_ENV: production
+  PORT: "3000"
+  GATEWAY_PORT: "8080"
+  TRIPS_SERVICE_PORT: "4101"
+  PAYMENTS_SERVICE_PORT: "4102"

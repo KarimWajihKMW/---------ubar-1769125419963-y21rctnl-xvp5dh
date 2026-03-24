@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trips-service
+  namespace: ubar
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: trips-service
+  template:
+    metadata:
+      labels:
+        app: trips-service
+    spec:
+      containers:
+        - name: trips-service
+          image: ghcr.io/karimwajihkmw/ubar-monolith:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "services/trips-service/server.js"]
+          envFrom:
+            - configMapRef:
+                name: ubar-config
+          ports:
+            - containerPort: 4101
+          readinessProbe:
+            httpGet:
+              path: /api/trips-service/health
+              port: 4101
+            initialDelaySeconds: 8
+            periodSeconds: 8
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trips-service
+  namespace: ubar
+  labels:
+    app: trips-service
+spec:
+  selector:
+    app: trips-service
+  ports:
+    - name: http
+      port: 4101
+      targetPort: 4101

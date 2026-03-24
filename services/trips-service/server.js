@@ -1,12 +1,35 @@
 const express = require('express');
+const promClient = require('prom-client');
 
 const app = express();
 const PORT = Number(process.env.TRIPS_SERVICE_PORT || 4101);
 
+const metricsRegistry = new promClient.Registry();
+promClient.collectDefaultMetrics({ register: metricsRegistry, prefix: 'ubar_trips_service_' });
+const requestCounter = new promClient.Counter({
+    name: 'ubar_trips_service_http_requests_total',
+    help: 'Total HTTP requests handled by trips service',
+    labelNames: ['method', 'route', 'status_code'],
+    registers: [metricsRegistry]
+});
+
 app.use(express.json());
+
+app.use((req, res, next) => {
+    res.on('finish', () => {
+        const route = req.route && req.route.path ? String(req.route.path) : String(req.path || req.url || 'unknown');
+        requestCounter.inc({ method: req.method, route, status_code: String(res.statusCode || 0) });
+    });
+    next();
+});
 
 app.get('/api/trips-service/health', (_req, res) => {
     return res.json({ success: true, service: 'trips-service', status: 'ok' });
+});
+
+app.get('/metrics', async (_req, res) => {
+    res.set('Content-Type', metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
 });
 
 app.get('/api/trips-service/match/recommendation', (req, res) => {

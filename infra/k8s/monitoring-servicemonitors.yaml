@@ -1,0 +1,63 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monolith-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: monolith
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gateway-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: trips-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: trips-service
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: payments-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: payments-service
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

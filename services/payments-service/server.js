@@ -1,12 +1,35 @@
 const express = require('express');
+const promClient = require('prom-client');
 
 const app = express();
 const PORT = Number(process.env.PAYMENTS_SERVICE_PORT || 4102);
 
+const metricsRegistry = new promClient.Registry();
+promClient.collectDefaultMetrics({ register: metricsRegistry, prefix: 'ubar_payments_service_' });
+const requestCounter = new promClient.Counter({
+    name: 'ubar_payments_service_http_requests_total',
+    help: 'Total HTTP requests handled by payments service',
+    labelNames: ['method', 'route', 'status_code'],
+    registers: [metricsRegistry]
+});
+
 app.use(express.json());
+
+app.use((req, res, next) => {
+    res.on('finish', () => {
+        const route = req.route && req.route.path ? String(req.route.path) : String(req.path || req.url || 'unknown');
+        requestCounter.inc({ method: req.method, route, status_code: String(res.statusCode || 0) });
+    });
+    next();
+});
 
 app.get('/api/payments-service/health', (_req, res) => {
     return res.json({ success: true, service: 'payments-service', status: 'ok' });
+});
+
+app.get('/metrics', async (_req, res) => {
+    res.set('Content-Type', metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
 });
 
 app.post('/api/payments-service/fare/calculate', (req, res) => {

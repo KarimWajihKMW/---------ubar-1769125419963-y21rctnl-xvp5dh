@@ -11,6 +11,7 @@
     "start:payments-service": "node services/payments-service/server.js",
     "start:micro": "docker compose -f docker-compose.microservices.yml up --build",
     "micro:down": "docker compose -f docker-compose.microservices.yml down",
+    "deploy:k8s": "bash scripts/k8s-deploy.sh",
     "test": "node test-runner.js",
     "test:admin-excellence": "node test-admin-excellence.js",
     "test:admin-innovations": "node test-admin-innovations.js",
@@ -42,6 +43,7 @@
     "nodemailer": "^6.10.1",
     "openid-client": "^6.7.1",
     "pg": "^8.11.3",
+    "prom-client": "^15.1.3",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1",
     "twilio": "^5.9.0"

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const promClient = require('prom-client');
 const pool = require('./db');
 const multer = require('multer');
 const path = require('path');
@@ -517,6 +518,37 @@ const MAX_ASSIGN_DISTANCE_KM = 30;
 const PENDING_TRIP_TTL_MINUTES = 20;
 const ASSIGNED_TRIP_TTL_MINUTES = 120;
 const AUTO_ASSIGN_TRIPS = false;
+
+const metricsRegistry = new promClient.Registry();
+promClient.collectDefaultMetrics({ register: metricsRegistry, prefix: 'ubar_monolith_' });
+const httpRequestCounter = new promClient.Counter({
+    name: 'ubar_monolith_http_requests_total',
+    help: 'Total HTTP requests handled by monolith',
+    labelNames: ['method', 'route', 'status_code'],
+    registers: [metricsRegistry]
+});
+const httpRequestDurationMs = new promClient.Histogram({
+    name: 'ubar_monolith_http_request_duration_ms',
+    help: 'Monolith HTTP request duration in milliseconds',
+    labelNames: ['method', 'route', 'status_code'],
+    buckets: [25, 50, 100, 200, 350, 500, 1000, 2000, 5000],
+    registers: [metricsRegistry]
+});
+
+function normalizeMetricsRoute(req) {
+    if (req.route && req.route.path) {
+        return String(req.baseUrl || '') + String(req.route.path);
+    }
+    return String(req.path || req.url || 'unknown');
+}
+
+function metricsAuthGuard(req, res, next) {
+    const token = String(process.env.METRICS_TOKEN || '').trim();
+    if (!token) return next();
+    const auth = String(req.headers.authorization || '');
+    if (auth === `Bearer ${token}`) return next();
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+}
 
 // Night Safety Policy (defaults)
 const NIGHT_POLICY_START_HOUR = process.env.NIGHT_POLICY_START_HOUR !== undefined ? Number(process.env.NIGHT_POLICY_START_HOUR) : 22;
@@ -1197,6 +1229,18 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
+app.use((req, res, next) => {
+    const started = process.hrtime.bigint();
+    res.on('finish', () => {
+        const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
+        const route = normalizeMetricsRoute(req);
+        const statusCode = String(res.statusCode || 0);
+        httpRequestCounter.inc({ method: req.method, route, status_code: statusCode });
+        httpRequestDurationMs.observe({ method: req.method, route, status_code: statusCode }, durationMs);
+    });
+    next();
+});
+
 app.use(express.json());
 // Needed for Apple OAuth when using response_mode=form_post
 app.use(express.urlencoded({ extended: true }));
@@ -1254,6 +1298,15 @@ app.use('/uploads', (req, res, next) => {
         return res.status(500).json({ success: false, error: 'upload_guard_failed' });
     }
 }, express.static(uploadsDir));
+
+app.get('/metrics', metricsAuthGuard, async (_req, res) => {
+    try {
+        res.set('Content-Type', metricsRegistry.contentType);
+        res.end(await metricsRegistry.metrics());
+    } catch (e) {
+        res.status(500).end(e.message || 'metrics_error');
+    }
+});
 
 const DEFAULT_ADMIN_USERS = [
     {

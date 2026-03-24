@@ -48,6 +48,7 @@ Related env vars:
 
 - `API_RATE_LIMIT_MAX` (default: `500` requests/window)
 - `API_RATE_LIMIT_WINDOW_MS` (default: `900000` = 15 minutes)
+- `METRICS_TOKEN` (optional, protects `/metrics` on monolith)
 
 ## Docker deployment
 
@@ -104,6 +105,37 @@ Useful scripts:
 - `npm run start:micro`
 - `npm run micro:down`
 - `npm run test:gateway`
+
+## Monitoring and metrics
+
+Prometheus-compatible metrics endpoints are available on:
+
+- Monolith: `GET /metrics`
+- API gateway: `GET /metrics`
+- Trips service: `GET /metrics`
+- Payments service: `GET /metrics`
+
+Core metrics include request totals, latency histograms (monolith), and default Node.js process/runtime metrics.
+
+## Kubernetes baseline
+
+Production-oriented Kubernetes manifests are available under:
+
+- `infra/k8s/`
+
+Main resources include namespace, config, secrets template, deployments, services, ingress, and optional ServiceMonitor objects.
+
+Deploy command:
+
+```bash
+npm run deploy:k8s
+```
+
+Or directly:
+
+```bash
+bash scripts/k8s-deploy.sh
+```
 
 ## Native mobile scaffolds (new)
 
