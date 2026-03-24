@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const pool = require('./db');
 const multer = require('multer');
 const path = require('path');
@@ -1172,6 +1174,29 @@ app.use(cors({
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+app.use(helmet({
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: false
+}));
+
+const apiLimiter = rateLimit({
+    windowMs: Number(process.env.API_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+    max: Number(process.env.API_RATE_LIMIT_MAX || 500),
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => {
+        const p = String(req.path || '');
+        return p === '/api/health' || p === '/api/db/health';
+    },
+    message: {
+        success: false,
+        error: 'rate_limit_exceeded',
+        retry: 'Please retry shortly.'
+    }
+});
+app.use('/api', apiLimiter);
+
 app.use(express.json());
 // Needed for Apple OAuth when using response_mode=form_post
 app.use(express.urlencoded({ extended: true }));

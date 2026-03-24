@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.vscode
+.env
+server.log
+uploads
+test-uploads
+secure_uploads
+secure-audio

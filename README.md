@@ -37,6 +37,49 @@ Open:
 - `http://localhost:3000/start.html`
 - or directly `http://localhost:3000/index.html`
 
+## Production hardening
+
+The server now includes:
+
+- `helmet` security headers middleware
+- API rate limiting on `/api/*` (configurable via env)
+
+Related env vars:
+
+- `API_RATE_LIMIT_MAX` (default: `500` requests/window)
+- `API_RATE_LIMIT_WINDOW_MS` (default: `900000` = 15 minutes)
+
+## Docker deployment
+
+Run with Docker Compose:
+
+```bash
+docker compose up --build -d
+```
+
+This starts:
+
+- `app` on `:3000`
+- `postgres` on `:5432`
+
+Main files:
+
+- `Dockerfile`
+- `docker-compose.yml`
+- `.dockerignore`
+
+## CI/CD
+
+GitHub Actions workflow is included at:
+
+- `.github/workflows/ci.yml`
+
+Pipeline steps:
+
+- install dependencies (`npm ci`)
+- run build check (`npm run build`)
+- run API tests (`npm test`) against a CI PostgreSQL service
+
 ## How it works (high level)
 
 ### Static web app
