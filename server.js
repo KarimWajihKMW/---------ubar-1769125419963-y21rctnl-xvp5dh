@@ -5858,6 +5858,68 @@ async function ensureTripTimeColumns() {
     }
 }
 
+async function ensureTripRatingSubmissionsTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS trip_rating_submissions (
+                id BIGSERIAL PRIMARY KEY,
+                trip_id VARCHAR(50) NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+                captain_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                rating INTEGER,
+                comment TEXT,
+                submitted_at TIMESTAMP,
+                last_error TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                payload_json JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(trip_id)
+            );
+        `);
+
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_trip_rating_submissions_status ON trip_rating_submissions(status, updated_at DESC);`);
+
+        console.log('✅ Trip rating submissions table ensured');
+    } catch (err) {
+        console.error('❌ Failed to ensure trip rating submissions table:', err.message);
+    }
+}
+
+async function refreshCaptainRatingStats(driverId) {
+    try {
+        const id = Number(driverId);
+        if (!Number.isFinite(id) || id <= 0) return;
+
+        const stats = await pool.query(
+            `SELECT
+                COALESCE(AVG(passenger_rating), 0) AS avg_rating,
+                COUNT(*)::int AS total_rated
+             FROM trips
+             WHERE driver_id = $1
+               AND passenger_rating IS NOT NULL`,
+            [id]
+        );
+
+        const avgRating = Number(stats.rows?.[0]?.avg_rating || 0);
+        const totalRated = Number(stats.rows?.[0]?.total_rated || 0);
+
+        await pool.query(
+            `UPDATE drivers
+             SET rating = CASE
+                    WHEN $2 > 0 THEN ROUND($1::numeric, 2)
+                    ELSE rating
+                 END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $3`,
+            [avgRating, totalRated, id]
+        );
+    } catch (err) {
+        console.warn('⚠️ Failed to refresh captain rating stats:', err.message);
+    }
+}
+
 async function ensureTripStatusColumn() {
     try {
         // Create enum type once (Postgres has no CREATE TYPE IF NOT EXISTS for all versions)
@@ -13672,6 +13734,7 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
                 io.to(tripRoom(id)).emit('trip_completed', {
                     trip_id: String(id),
                     trip_status: 'completed',
+                    driver_id: updatedTrip.driver_id || null,
                     duration: updatedTrip.duration !== undefined && updatedTrip.duration !== null ? Number(updatedTrip.duration) : null,
                     distance: updatedTrip.distance !== undefined && updatedTrip.distance !== null ? Number(updatedTrip.distance) : null,
                     price: updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null,
@@ -14322,6 +14385,7 @@ async function endTripHandler(req, res) {
                 io.to(tripRoom(updatedTrip.id)).emit('trip_completed', {
                     trip_id: String(updatedTrip.id),
                     trip_status: 'completed',
+                    driver_id: updatedTrip.driver_id || null,
                     duration: updatedTrip.duration_minutes !== undefined && updatedTrip.duration_minutes !== null ? Number(updatedTrip.duration_minutes) : (updatedTrip.duration !== undefined && updatedTrip.duration !== null ? Number(updatedTrip.duration) : null),
                     distance: updatedTrip.distance_km !== undefined && updatedTrip.distance_km !== null ? Number(updatedTrip.distance_km) : (updatedTrip.distance !== undefined && updatedTrip.distance !== null ? Number(updatedTrip.distance) : null),
                     price: updatedTrip.price !== undefined && updatedTrip.price !== null ? Number(updatedTrip.price) : (updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null),
@@ -14364,7 +14428,16 @@ app.post('/api/trips/end', requireRole('driver', 'admin'), endTripHandler);
 // Required by rider completion flow: POST /rate-driver { trip_id, rating, comment }
 async function rateDriverHandler(req, res) {
     try {
-        const { trip_id, rating, comment, cause_key, cause_note } = req.body || {};
+        const {
+            trip_id,
+            rating,
+            comment,
+            cause_key,
+            cause_note,
+            captain_id,
+            timestamp,
+            update_existing
+        } = req.body || {};
 
         const authRole = String(req.auth?.role || '').toLowerCase();
         const authUserId = req.auth?.uid;
@@ -14372,6 +14445,7 @@ async function rateDriverHandler(req, res) {
         const tripId = trip_id ? String(trip_id) : '';
         const normalizedRating = Number(rating);
         const normalizedComment = comment !== undefined && comment !== null ? String(comment) : '';
+        const allowUpdate = update_existing === true;
 
         if (!tripId) {
             return res.status(400).json({ success: false, error: 'trip_id is required' });
@@ -14380,7 +14454,10 @@ async function rateDriverHandler(req, res) {
             return res.status(400).json({ success: false, error: 'rating must be between 1 and 5' });
         }
 
-        const before = await pool.query('SELECT trip_status, user_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const before = await pool.query(
+            'SELECT trip_status, user_id, driver_id, passenger_rating FROM trips WHERE id = $1 LIMIT 1',
+            [tripId]
+        );
         const beforeTripStatus = before.rows.length ? (before.rows[0].trip_status || null) : null;
 
         if (before.rows.length === 0) {
@@ -14390,6 +14467,109 @@ async function rateDriverHandler(req, res) {
         if (authRole === 'passenger' && String(before.rows[0].user_id) !== String(authUserId)) {
             return res.status(403).json({ success: false, error: 'Forbidden' });
         }
+
+        const tripRow = before.rows[0];
+        const submittedAt = (() => {
+            const raw = timestamp ? new Date(timestamp) : new Date();
+            return Number.isNaN(raw.getTime()) ? new Date() : raw;
+        })();
+        const resolvedCaptainId = Number.isFinite(Number(captain_id))
+            ? Number(captain_id)
+            : (Number.isFinite(Number(tripRow.driver_id)) ? Number(tripRow.driver_id) : null);
+
+        const existingSubmission = await pool.query(
+            `SELECT status
+             FROM trip_rating_submissions
+             WHERE trip_id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+
+        if (!allowUpdate && existingSubmission.rows.length && String(existingSubmission.rows[0].status || '').toLowerCase() === 'submitted') {
+            const currentTrip = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+            return res.json({
+                success: true,
+                duplicate: true,
+                message: 'Trip already rated',
+                data: currentTrip.rows[0] || null
+            });
+        }
+
+        if (!allowUpdate && tripRow.passenger_rating !== null && tripRow.passenger_rating !== undefined) {
+            const currentTrip = await pool.query('SELECT * FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+            await pool.query(
+                `INSERT INTO trip_rating_submissions (
+                    trip_id,
+                    captain_id,
+                    user_id,
+                    rating,
+                    comment,
+                    submitted_at,
+                    status,
+                    payload_json,
+                    updated_at
+                ) VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,'submitted',$7::jsonb,CURRENT_TIMESTAMP)
+                ON CONFLICT (trip_id) DO UPDATE
+                SET status = 'submitted',
+                    captain_id = COALESCE(EXCLUDED.captain_id, trip_rating_submissions.captain_id),
+                    user_id = COALESCE(EXCLUDED.user_id, trip_rating_submissions.user_id),
+                    rating = COALESCE(EXCLUDED.rating, trip_rating_submissions.rating),
+                    comment = COALESCE(EXCLUDED.comment, trip_rating_submissions.comment),
+                    submitted_at = COALESCE(trip_rating_submissions.submitted_at, EXCLUDED.submitted_at),
+                    payload_json = EXCLUDED.payload_json,
+                    last_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP`,
+                [
+                    tripId,
+                    resolvedCaptainId,
+                    authUserId || null,
+                    Math.trunc(normalizedRating),
+                    normalizedComment,
+                    submittedAt,
+                    JSON.stringify(req.body || {})
+                ]
+            );
+            return res.json({
+                success: true,
+                duplicate: true,
+                message: 'Trip already rated',
+                data: currentTrip.rows[0] || null
+            });
+        }
+
+        await pool.query(
+            `INSERT INTO trip_rating_submissions (
+                trip_id,
+                captain_id,
+                user_id,
+                rating,
+                comment,
+                status,
+                submitted_at,
+                payload_json,
+                updated_at,
+                last_error
+            ) VALUES ($1,$2,$3,$4,NULLIF($5,''),'pending',$6,$7::jsonb,CURRENT_TIMESTAMP,NULL)
+            ON CONFLICT (trip_id) DO UPDATE
+            SET captain_id = COALESCE(EXCLUDED.captain_id, trip_rating_submissions.captain_id),
+                user_id = COALESCE(EXCLUDED.user_id, trip_rating_submissions.user_id),
+                rating = EXCLUDED.rating,
+                comment = EXCLUDED.comment,
+                status = 'pending',
+                payload_json = EXCLUDED.payload_json,
+                submitted_at = EXCLUDED.submitted_at,
+                updated_at = CURRENT_TIMESTAMP,
+                last_error = NULL`,
+            [
+                tripId,
+                resolvedCaptainId,
+                authUserId || null,
+                Math.trunc(normalizedRating),
+                normalizedComment,
+                submittedAt,
+                JSON.stringify(req.body || {})
+            ]
+        );
 
         const result = await pool.query(
             `UPDATE trips
@@ -14408,11 +14588,28 @@ async function rateDriverHandler(req, res) {
             return res.status(404).json({ success: false, error: 'Trip not found' });
         }
 
+        await pool.query(
+            `UPDATE trip_rating_submissions
+             SET status = 'submitted',
+                 retry_count = 0,
+                 last_error = NULL,
+                 updated_at = CURRENT_TIMESTAMP,
+                 submitted_at = COALESCE(submitted_at, $2)
+             WHERE trip_id = $1`,
+            [tripId, submittedAt]
+        );
+
+        if (result.rows[0]?.driver_id) {
+            await refreshCaptainRatingStats(result.rows[0].driver_id);
+        }
+
         try {
             if (beforeTripStatus !== 'rated') {
                 io.to(tripRoom(tripId)).emit('trip_rated', {
                     trip_id: String(tripId),
-                    trip_status: 'rated'
+                    trip_status: 'rated',
+                    captain_id: result.rows[0]?.driver_id || resolvedCaptainId || null,
+                    rating: Math.trunc(normalizedRating)
                 });
             }
         } catch (err) {
@@ -14450,6 +14647,22 @@ async function rateDriverHandler(req, res) {
 
         res.json({ success: true, data: result.rows[0] });
     } catch (err) {
+        try {
+            const tripId = req.body?.trip_id ? String(req.body.trip_id) : '';
+            if (tripId) {
+                await pool.query(
+                    `UPDATE trip_rating_submissions
+                     SET status = 'failed',
+                         retry_count = COALESCE(retry_count, 0) + 1,
+                         last_error = LEFT($2, 500),
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE trip_id = $1`,
+                    [tripId, String(err?.message || 'rating_submission_failed')]
+                );
+            }
+        } catch (updateErr) {
+            console.warn('⚠️ Failed to mark rating submission as failed:', updateErr.message);
+        }
         console.error('Error rating driver:', err);
         res.status(500).json({ success: false, error: err.message });
     }
@@ -20198,6 +20411,7 @@ ensureCoreSchema()
     .then(() => ensureDefaultAdminInnovationFeatures(pool))
     .then(() => ensureUserProfileColumns())
     .then(() => ensureTripRatingColumns())
+    .then(() => ensureTripRatingSubmissionsTable())
     .then(() => ensureTripTimeColumns())
     .then(() => ensureTripStatusColumn())
     .then(() => ensureTripsRequiredColumns())

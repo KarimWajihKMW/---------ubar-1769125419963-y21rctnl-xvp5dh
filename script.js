@@ -286,6 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updatePassengerDriverDetailsCollapseUI();
     updateDriverTripDetailsCollapseUI();
     updateRideExtraOptionsCollapseUI();
+    initPassengerRatingRetrySystem();
 });
 
 // --- Global State ---
@@ -331,6 +332,216 @@ let pickupHubSuggestionsCollapsed = false;
 let passengerDriverDetailsCollapsed = false;
 let driverTripDetailsCollapsed = false;
 let passengerExtraOptionsCollapsed = false;
+
+const PASSENGER_RATING_QUEUE_KEY = 'akwadra_passenger_rating_queue_v1';
+const PASSENGER_RATE_LATER_KEY = 'akwadra_passenger_rate_later_v1';
+const PASSENGER_RATING_RETRY_INTERVAL_MS = 2 * 60 * 1000;
+let passengerRatingRetryTimer = null;
+let passengerRatingRetryInFlight = false;
+
+function loadPassengerRatingQueue() {
+    try {
+        const raw = SafeStorage.getItem(PASSENGER_RATING_QUEUE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function savePassengerRatingQueue(queue) {
+    try {
+        const safeQueue = Array.isArray(queue) ? queue : [];
+        SafeStorage.setItem(PASSENGER_RATING_QUEUE_KEY, JSON.stringify(safeQueue));
+    } catch (e) {
+        // ignore
+    }
+}
+
+function upsertPassengerQueuedRating(entry) {
+    const next = entry && typeof entry === 'object' ? entry : null;
+    if (!next?.trip_id) return;
+    const tripId = String(next.trip_id);
+    const queue = loadPassengerRatingQueue().filter((x) => String(x?.trip_id || '') !== tripId);
+    queue.push({
+        ...next,
+        trip_id: tripId,
+        local_status: next.local_status || 'pending',
+        queued_at: next.queued_at || new Date().toISOString(),
+        retries: Number(next.retries || 0)
+    });
+    savePassengerRatingQueue(queue);
+}
+
+function removePassengerQueuedRating(tripId) {
+    if (!tripId) return;
+    const normalized = String(tripId);
+    const queue = loadPassengerRatingQueue().filter((x) => String(x?.trip_id || '') !== normalized);
+    savePassengerRatingQueue(queue);
+}
+
+function loadPassengerRateLaterTrips() {
+    try {
+        const raw = SafeStorage.getItem(PASSENGER_RATE_LATER_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function savePassengerRateLaterTrips(rows) {
+    try {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        SafeStorage.setItem(PASSENGER_RATE_LATER_KEY, JSON.stringify(safeRows));
+    } catch (e) {
+        // ignore
+    }
+}
+
+function addPassengerRateLaterTrip(tripId) {
+    if (!tripId) return;
+    const normalized = String(tripId);
+    const rows = loadPassengerRateLaterTrips().filter((x) => String(x?.trip_id || '') !== normalized);
+    rows.push({ trip_id: normalized, created_at: new Date().toISOString() });
+    savePassengerRateLaterTrips(rows);
+}
+
+function removePassengerRateLaterTrip(tripId) {
+    if (!tripId) return;
+    const normalized = String(tripId);
+    const rows = loadPassengerRateLaterTrips().filter((x) => String(x?.trip_id || '') !== normalized);
+    savePassengerRateLaterTrips(rows);
+}
+
+function ensureRateLaterReminderBanner() {
+    let banner = document.getElementById('pending-rating-reminder');
+    if (banner) return banner;
+
+    banner = document.createElement('div');
+    banner.id = 'pending-rating-reminder';
+    banner.className = 'hidden fixed bottom-20 left-4 right-4 z-[120] bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 shadow-lg';
+    banner.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+            <p class="text-amber-800 font-bold text-sm">Don't forget to rate your last trip</p>
+            <div class="flex items-center gap-2">
+                <button type="button" id="pending-rating-reminder-action" class="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-extrabold hover:bg-amber-700">Rate now</button>
+                <button type="button" id="pending-rating-reminder-close" class="w-8 h-8 rounded-full bg-white text-amber-700 border border-amber-200">×</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(banner);
+
+    const closeBtn = document.getElementById('pending-rating-reminder-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            banner.classList.add('hidden');
+        });
+    }
+
+    const actionBtn = document.getElementById('pending-rating-reminder-action');
+    if (actionBtn) {
+        actionBtn.addEventListener('click', () => {
+            const rows = loadPassengerRateLaterTrips();
+            if (!rows.length) {
+                banner.classList.add('hidden');
+                return;
+            }
+            const latest = rows[rows.length - 1];
+            if (latest?.trip_id) {
+                window.showTripDetails && window.showTripDetails(String(latest.trip_id));
+            }
+        });
+    }
+
+    return banner;
+}
+
+function refreshRateLaterReminderBanner() {
+    const rows = loadPassengerRateLaterTrips();
+    const banner = ensureRateLaterReminderBanner();
+    if (!banner) return;
+    if (rows.length > 0) {
+        banner.classList.remove('hidden');
+    } else {
+        banner.classList.add('hidden');
+    }
+}
+
+async function submitPassengerRatingPayload(payload) {
+    return ApiService.request('/rate-driver', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
+}
+
+async function flushPassengerRatingQueue(reason = 'background') {
+    if (passengerRatingRetryInFlight) return;
+    passengerRatingRetryInFlight = true;
+    try {
+        const queue = loadPassengerRatingQueue();
+        if (!queue.length) return;
+
+        for (const item of queue) {
+            if (!item?.trip_id) continue;
+            try {
+                const payload = {
+                    ...item,
+                    update_existing: true
+                };
+                delete payload.local_status;
+                delete payload.last_error;
+                delete payload.retries;
+                delete payload.queued_at;
+
+                await submitPassengerRatingPayload(payload);
+                removePassengerQueuedRating(item.trip_id);
+                removePassengerRateLaterTrip(item.trip_id);
+            } catch (error) {
+                upsertPassengerQueuedRating({
+                    ...item,
+                    local_status: 'failed',
+                    last_error: String(error?.message || 'submit_failed'),
+                    retries: Number(item?.retries || 0) + 1
+                });
+            }
+        }
+    } finally {
+        passengerRatingRetryInFlight = false;
+        refreshRateLaterReminderBanner();
+    }
+}
+
+function queuePassengerRatingForRetry(payload, errorMessage) {
+    upsertPassengerQueuedRating({
+        ...payload,
+        local_status: 'failed',
+        last_error: String(errorMessage || 'submit_failed'),
+        retries: 0
+    });
+}
+
+function initPassengerRatingRetrySystem() {
+    if (passengerRatingRetryTimer) return;
+    passengerRatingRetryTimer = setInterval(() => {
+        void flushPassengerRatingQueue('timer');
+    }, PASSENGER_RATING_RETRY_INTERVAL_MS);
+
+    window.addEventListener('online', () => {
+        void flushPassengerRatingQueue('online');
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            refreshRateLaterReminderBanner();
+            void flushPassengerRatingQueue('visible');
+        }
+    });
+
+    refreshRateLaterReminderBanner();
+    void flushPassengerRatingQueue('startup');
+}
 
 // Driving Coach (Driver, privacy-first)
 let drivingCoachRunning = false;
@@ -2257,11 +2468,13 @@ function showPassengerTripSummaryAndRating(tripId, details = {}) {
     // Save lastCompletedTrip for rating flow
     lastCompletedTrip = {
         id: tripId,
+        driver_id: details?.driver_id !== undefined && details?.driver_id !== null ? Number(details.driver_id) : null,
         distance: Number.isFinite(distance) ? distance : 0,
         duration: Number.isFinite(duration) ? duration : 0,
         cost: Number.isFinite(price) ? price : 0,
         pickup: currentPickup?.label || 'موقعك الحالي',
-        dropoff: currentDestination?.label || 'الوجهة'
+        dropoff: currentDestination?.label || 'الوجهة',
+        completed_at: new Date().toISOString()
     };
 
     // Populate existing summary UI (payment-success)
@@ -2318,6 +2531,7 @@ function handleTripCompletedRealtime(payload) {
     if (currentUserRole === 'passenger' && activePassengerTripId && String(activePassengerTripId) === String(tripId)) {
         showToast('✅ تم إنهاء الرحلة');
         showPassengerTripSummaryAndRating(String(tripId), {
+            driver_id: payload?.driver_id,
             distance: payload?.distance,
             duration: payload?.duration,
             price: payload?.price
@@ -11768,155 +11982,144 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-window.submitPassengerRating = async function() {
-    if (!passengerRatingValue) {
-        showToast('يرجى اختيار تقييم أولاً');
-        return;
-    }
-
-    const tripId = lastCompletedTrip?.id || activePassengerTripId;
-    if (!tripId) {
-        showToast('تعذر تحديد الرحلة للتقييم');
-        resetApp();
-        return;
-    }
-
-    const commentInput = document.getElementById('passenger-rating-comment');
-    const comment = commentInput ? commentInput.value.trim() : '';
-
-    try {
-        await ApiService.trips.updateStatus(tripId, 'completed', {
-            passenger_rating: passengerRatingValue,
-            passenger_review: comment || undefined,
-            trip_status: 'rated'
-        });
-        if (lastCompletedTrip) {
-            lastCompletedTrip.rating = passengerRatingValue;
-            lastCompletedTrip.passengerRating = passengerRatingValue;
-            if (comment) {
-                lastCompletedTrip.passengerReview = comment;
-            }
-        }
-        showToast('شكراً لتقييمك!');
-    } catch (error) {
-        console.error('Failed to submit passenger rating:', error);
-        showToast('تعذر إرسال التقييم حالياً');
-    } finally {
-        passengerRatingValue = 0;
-        if (commentInput) commentInput.value = '';
-
-        if (activePassengerTripId) {
-            unsubscribeTripRealtime(activePassengerTripId);
-        }
-        activePassengerTripId = null;
-        passengerRealtimeActive = false;
-
-        resetApp();
-    }
-};
-
-window.submitTripCompletionDone = async function() {
-    if (!passengerRatingValue) {
-        showToast('يرجى اختيار تقييم أولاً');
-        return;
-    }
-
-    const tripId = lastCompletedTrip?.id || activePassengerTripId;
-    if (!tripId) {
-        showToast('تعذر تحديد الرحلة للتقييم');
-        resetApp();
-        return;
-    }
-
+function clearPassengerRatingInputs() {
     const commentInput = document.getElementById('payment-success-rating-comment');
-    const comment = commentInput ? commentInput.value.trim() : '';
-
     const causeEl = document.getElementById('payment-success-rating-cause');
     const causeNoteEl = document.getElementById('payment-success-rating-cause-note');
     const causeHintEl = document.getElementById('payment-success-rating-cause-hint');
-    const causeKeyRaw = causeEl ? String(causeEl.value || '').trim() : '';
-    const causeKey = causeKeyRaw ? causeKeyRaw : '';
-    const causeNote = causeNoteEl ? String(causeNoteEl.value || '').trim() : '';
-    try {
-        if (causeHintEl) {
-            causeHintEl.textContent = passengerRatingValue <= 3 && (causeKey || causeNote)
-                ? 'سيتم تسجيل سبب المشكلة للمراجعة.'
-                : '';
-        }
-    } catch (e) {}
+    const legacyCommentInput = document.getElementById('passenger-rating-comment');
 
-    const btn = document.querySelector('#state-payment-success button[onclick="submitTripCompletionDone()"]');
-    if (btn) btn.disabled = true;
+    passengerRatingValue = 0;
+    if (commentInput) commentInput.value = '';
+    if (legacyCommentInput) legacyCommentInput.value = '';
+    if (causeEl) causeEl.value = '';
+    if (causeNoteEl) causeNoteEl.value = '';
+    if (causeHintEl) causeHintEl.textContent = '';
 
     try {
-        const resp = await fetch('/rate-driver', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                trip_id: String(tripId),
-                rating: Number(passengerRatingValue),
-                comment: comment || '',
-                cause_key: passengerRatingValue <= 3 ? (causeKey || '') : (causeKey || ''),
-                cause_note: passengerRatingValue <= 3 ? (causeNote || '') : (causeNote || '')
-            })
+        document.querySelectorAll('[data-rating-scope="passenger"] .star-btn').forEach((b) => {
+            b.classList.remove('text-yellow-400');
+            b.classList.add('text-gray-300');
         });
-
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || !data?.success) {
-            throw new Error(data?.error || 'Request failed');
-        }
-
-        showToast('شكراً لتقييمك!');
-
-        // v2: Accessibility feedback (non-blocking)
-        try {
-            const reasonEl = document.getElementById('acc-feedback-reason');
-            const reason = reasonEl ? String(reasonEl.value || '').trim() : '';
-            if (typeof accessibilityFeedbackRespected === 'boolean') {
-                const statusEl = document.getElementById('acc-feedback-status');
-                if (statusEl) statusEl.textContent = 'جاري إرسال تغذية راجعة...';
-                await ApiService.trips.submitAccessibilityFeedback(tripId, {
-                    respected: accessibilityFeedbackRespected,
-                    reason: reason || undefined
-                });
-                if (statusEl) statusEl.textContent = '✅ تم إرسال تغذية راجعة للإتاحة.';
-            }
-        } catch (e) {
-            // ignore
-        }
-    } catch (error) {
-        console.error('Failed to rate driver:', error);
-        showToast('تعذر إرسال التقييم حالياً');
-        if (btn) btn.disabled = false;
-        return;
-    } finally {
-        passengerRatingValue = 0;
-        if (commentInput) commentInput.value = '';
-        try {
-            if (causeEl) causeEl.value = '';
-            if (causeNoteEl) causeNoteEl.value = '';
-            if (causeHintEl) causeHintEl.textContent = '';
-        } catch (e) {}
-
-        try {
-            document.querySelectorAll('[data-rating-scope="passenger"] .star-btn').forEach(b => {
-                b.classList.remove('text-yellow-400');
-                b.classList.add('text-gray-300');
-            });
-        } catch (e) {
-            // ignore
-        }
+    } catch (e) {
+        // ignore
     }
+}
 
+async function submitAccessibilityFeedbackIfAny(tripId) {
+    try {
+        const reasonEl = document.getElementById('acc-feedback-reason');
+        const reason = reasonEl ? String(reasonEl.value || '').trim() : '';
+        if (typeof accessibilityFeedbackRespected === 'boolean') {
+            const statusEl = document.getElementById('acc-feedback-status');
+            if (statusEl) statusEl.textContent = 'جاري إرسال تغذية راجعة...';
+            await ApiService.trips.submitAccessibilityFeedback(tripId, {
+                respected: accessibilityFeedbackRespected,
+                reason: reason || undefined
+            });
+            if (statusEl) statusEl.textContent = '✅ تم إرسال تغذية راجعة للإتاحة.';
+        }
+    } catch (e) {
+        // non-blocking
+    }
+}
+
+function finalizePassengerPostTripFlow() {
     if (activePassengerTripId) {
         unsubscribeTripRealtime(activePassengerTripId);
     }
     activePassengerTripId = null;
     passengerRealtimeActive = false;
     lastCompletedTrip = null;
-
-    if (btn) btn.disabled = false;
+    clearPassengerRatingInputs();
     resetApp();
+}
+
+function buildPassengerRatingPayloadFromUI() {
+    const tripId = lastCompletedTrip?.id || activePassengerTripId;
+    if (!tripId) return null;
+
+    const commentInput = document.getElementById('payment-success-rating-comment');
+    const comment = commentInput ? String(commentInput.value || '').trim() : '';
+
+    const causeEl = document.getElementById('payment-success-rating-cause');
+    const causeNoteEl = document.getElementById('payment-success-rating-cause-note');
+    const causeKey = causeEl ? String(causeEl.value || '').trim() : '';
+    const causeNote = causeNoteEl ? String(causeNoteEl.value || '').trim() : '';
+
+    const payload = {
+        trip_id: String(tripId),
+        captain_id: lastCompletedTrip?.driver_id !== undefined && lastCompletedTrip?.driver_id !== null ? Number(lastCompletedTrip.driver_id) : undefined,
+        timestamp: new Date().toISOString()
+    };
+
+    if (passengerRatingValue >= 1 && passengerRatingValue <= 5) {
+        payload.rating = Number(passengerRatingValue);
+        payload.comment = comment || '';
+        payload.cause_key = causeKey || '';
+        payload.cause_note = causeNote || '';
+    }
+
+    return payload;
+}
+
+window.submitPassengerRating = async function() {
+    // Legacy state-rating screen fallback: submit if selected, otherwise skip.
+    await window.submitTripCompletionDone();
+};
+
+window.submitTripCompletionDone = async function() {
+    const payload = buildPassengerRatingPayloadFromUI();
+    const tripId = payload?.trip_id;
+    if (!tripId) {
+        showToast('تعذر تحديد الرحلة');
+        finalizePassengerPostTripFlow();
+        return;
+    }
+
+    const hasRating = Number.isFinite(Number(payload.rating));
+    const btn = document.querySelector('#state-payment-success button[onclick="submitTripCompletionDone()"]');
+    if (btn) btn.disabled = true;
+
+    try {
+        if (hasRating) {
+            await submitPassengerRatingPayload(payload);
+            removePassengerQueuedRating(tripId);
+            removePassengerRateLaterTrip(tripId);
+            showToast('Rating submitted successfully');
+        } else {
+            showToast('تم إنهاء الرحلة بدون تقييم');
+        }
+
+        await submitAccessibilityFeedbackIfAny(tripId);
+    } catch (error) {
+        if (hasRating) {
+            queuePassengerRatingForRetry(payload, error?.message);
+            showToast('Failed to submit rating, will retry automatically');
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+        finalizePassengerPostTripFlow();
+    }
+};
+
+window.skipTripCompletionRating = function() {
+    showToast('تم تخطي التقييم');
+    finalizePassengerPostTripFlow();
+};
+
+window.rateTripLater = function() {
+    const tripId = lastCompletedTrip?.id || activePassengerTripId;
+    if (tripId) {
+        addPassengerRateLaterTrip(String(tripId));
+        refreshRateLaterReminderBanner();
+    }
+    showToast('سوف نذكرك بتقييم الرحلة لاحقًا');
+    finalizePassengerPostTripFlow();
+};
+
+window.dismissTripCompletionSheet = function() {
+    window.skipTripCompletionRating();
 };
 
 window.submitDriverPassengerRating = async function() {
@@ -12836,11 +13039,57 @@ window.showTripDetails = function(tripId) {
     // v3 actions visibility
     try {
         const rebookBtn = document.getElementById('trip-detail-rebook-btn');
+        const rateBtn = document.getElementById('trip-detail-rate-btn');
         if (rebookBtn) {
             rebookBtn.style.display = trip.status === 'cancelled' ? '' : 'none';
         }
+        if (rateBtn) {
+            const hasRating = Number.isFinite(Number(trip.rating)) && Number(trip.rating) > 0;
+            rateBtn.style.display = trip.status === 'completed' && !hasRating ? '' : 'none';
+        }
     } catch (e) {
         // ignore
+    }
+};
+
+window.rateTripFromDetails = function() {
+    try {
+        const tripId = getTripIdFromTripDetailsUI();
+        if (!tripId) {
+            showToast('تعذر تحديد رقم الرحلة');
+            return;
+        }
+
+        const trips = DB.getTrips();
+        const trip = Array.isArray(trips) ? trips.find((t) => String(t.id) === String(tripId)) : null;
+        if (!trip) {
+            showToast('لا توجد بيانات رحلة كافية للتقييم');
+            return;
+        }
+
+        lastCompletedTrip = {
+            id: String(trip.id),
+            driver_id: trip.driverId || trip.driver_id || null,
+            distance: Number(trip.distance || 0),
+            duration: Number(trip.duration || 0),
+            cost: Number(trip.cost || 0),
+            pickup: trip.pickup || '--',
+            dropoff: trip.dropoff || '--',
+            completed_at: trip.date || new Date().toISOString()
+        };
+
+        const amountEl = document.getElementById('payment-success-amount');
+        const methodEl = document.getElementById('payment-success-method');
+        const timeEl = document.getElementById('payment-success-time');
+        if (amountEl) amountEl.innerText = `${Number(lastCompletedTrip.cost || 0)} ر.س`;
+        if (methodEl) methodEl.innerText = trip.paymentMethod || 'كاش';
+        if (timeEl) timeEl.innerText = new Date(lastCompletedTrip.completed_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+        updatePaymentSuccessTripSummary(lastCompletedTrip);
+        clearPassengerRatingInputs();
+        window.switchSection('payment-success');
+    } catch (e) {
+        showToast('تعذر فتح شاشة التقييم');
     }
 };
 

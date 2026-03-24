@@ -129,6 +129,10 @@
         "/^node test-api-endpoint\\.js$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^cd /workspaces/---------ubar-1769125419963-y21rctnl-xvp5dh && node --check script\\.js && node --check server\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }
