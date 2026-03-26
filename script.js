@@ -291,6 +291,14 @@ document.addEventListener('DOMContentLoaded', () => {
     initPassengerRatingRetrySystem();
 });
 
+window.addEventListener('focus', () => {
+    if (currentUserRole === 'driver') {
+        void ensureMapReadyForCaptainContext('window-focus-driver');
+        startLocationTracking();
+        requestSingleLocationFix();
+    }
+});
+
 // --- Global State ---
 let currentUserRole = null; // 'passenger', 'driver', 'admin'
 const ROLE_PATHS = Object.freeze({
@@ -2771,6 +2779,8 @@ function handleTripCompletedRealtime(payload) {
         if (previousTripId) {
             unsubscribeTripRealtime(previousTripId);
         }
+        void ensureMapReadyForCaptainContext('driver-trip-completed-realtime');
+        requestSingleLocationFix();
         triggerDriverRequestPolling();
 
         ApiService.trips.getById(String(tripId)).then((response) => {
@@ -3074,6 +3084,12 @@ let googleGeocoderService = null;
 let googlePlacesAutocompleteService = null;
 let googleMapsReady = false;
 let leafletLoadPromise = null;
+let mapInitPromise = null;
+let mapAutoRetryTimer = null;
+let mapAutoRetryAttempts = 0;
+let mapSearchInputsBound = false;
+const MAP_AUTO_RETRY_MAX_ATTEMPTS = 3;
+const MAP_AUTO_RETRY_DELAY_MS = 2500;
 const GOOGLE_MAPS_KEY_STORAGE_KEY = 'akwadra_google_maps_key';
 const LEAFLET_CSS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
 const LEAFLET_JS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -3087,7 +3103,7 @@ function setMapFallbackMode(enabled, reasonText = '') {
     if (enabled) {
         // Keep decorative fallback map-world disabled in MVP to avoid map conflicts.
         if (world) world.classList.add('hidden');
-        if (mapEl) mapEl.style.opacity = '0';
+        if (mapEl) mapEl.style.opacity = '1';
         if (fallback) {
             fallback.classList.remove('hidden');
             if (reasonText && fallbackText) fallbackText.textContent = reasonText;
@@ -3098,6 +3114,72 @@ function setMapFallbackMode(enabled, reasonText = '') {
     if (world) world.classList.add('hidden');
     if (mapEl) mapEl.style.opacity = '1';
     if (fallback) fallback.classList.add('hidden');
+}
+
+function clearMapAutoRetry() {
+    if (mapAutoRetryTimer) {
+        clearTimeout(mapAutoRetryTimer);
+        mapAutoRetryTimer = null;
+    }
+}
+
+function scheduleMapAutoRetry(reason = '') {
+    if (mapAutoRetryAttempts >= MAP_AUTO_RETRY_MAX_ATTEMPTS) return;
+    if (mapAutoRetryTimer) return;
+
+    mapAutoRetryTimer = setTimeout(() => {
+        mapAutoRetryTimer = null;
+        mapAutoRetryAttempts += 1;
+        initLeafletMap({
+            forceRecreate: true,
+            trigger: `auto-retry-${mapAutoRetryAttempts}`,
+            reason
+        }).catch(() => {
+            // handled in initLeafletMap
+        });
+    }, MAP_AUTO_RETRY_DELAY_MS);
+}
+
+function destroyLeafletMapInstance() {
+    clearMapAutoRetry();
+
+    if (pickupMarkerL) {
+        try { pickupMarkerL.remove(); } catch (e) {}
+        pickupMarkerL = null;
+    }
+    if (destMarkerL) {
+        try { destMarkerL.remove(); } catch (e) {}
+        destMarkerL = null;
+    }
+    if (driverMarkerL) {
+        try { driverMarkerL.remove(); } catch (e) {}
+        driverMarkerL = null;
+    }
+    if (passengerMarkerL) {
+        try { passengerMarkerL.remove(); } catch (e) {}
+        passengerMarkerL = null;
+    }
+    if (routePolyline) {
+        try { routePolyline.remove(); } catch (e) {}
+        routePolyline = null;
+    }
+
+    if (leafletMap) {
+        try {
+            if (typeof leafletMap.remove === 'function') {
+                leafletMap.remove();
+            } else if (typeof leafletMap.off === 'function') {
+                leafletMap.off();
+            }
+            if (leafletMap._map && window.google?.maps?.event) {
+                window.google.maps.event.clearInstanceListeners(leafletMap._map);
+            }
+        } catch (e) {
+            // ignore cleanup errors
+        }
+    }
+
+    leafletMap = null;
 }
 
 function readGoogleMapsKeyFromBrowser() {
@@ -5055,142 +5137,9 @@ function scheduleLeafletResize(delays = [100, 320, 700]) {
     });
 }
 
-function toggleDriverInfoPanel() {
-    const infoSection = document.getElementById('driver-info-section');
-    const mapSection = document.getElementById('driver-map-section');
-    const toggleBtn = document.getElementById('driver-info-toggle');
-    if (!infoSection || !mapSection || !toggleBtn) return;
-
-    isDriverInfoCollapsed = !isDriverInfoCollapsed;
-    infoSection.classList.toggle('hidden', isDriverInfoCollapsed);
-    mapSection.classList.toggle('driver-map-expanded', isDriverInfoCollapsed);
-    toggleBtn.textContent = isDriverInfoCollapsed ? 'إظهار التفاصيل' : 'إخفاء التفاصيل';
-
-    if (leafletMap) {
-        setTimeout(() => leafletMap.invalidateSize(), 100);
-    }
-}
-
-window.toggleDriverInfoPanel = toggleDriverInfoPanel;
-
-function updateDriverPanelCollapseUI() {
-    const collapseBtn = document.getElementById('driver-panel-collapse');
-    const expandFloatingBtn = document.getElementById('driver-panel-expand-floating');
-    if (collapseBtn) {
-        collapseBtn.disabled = isDriverPanelCollapsed;
-        collapseBtn.classList.toggle('opacity-50', isDriverPanelCollapsed);
-        collapseBtn.classList.toggle('cursor-not-allowed', isDriverPanelCollapsed);
-    }
-    if (expandFloatingBtn) {
-        if (isDriverPanelCollapsed) {
-            expandFloatingBtn.classList.remove('hidden');
-        } else {
-            expandFloatingBtn.classList.add('hidden');
-        }
-    }
-}
-
-function setDriverPanelCollapsed(collapsed) {
-    const panelCard = document.getElementById('driver-panel-card');
-    if (!panelCard) return;
-    isDriverPanelCollapsed = collapsed;
-    panelCard.classList.toggle('driver-panel-collapsed', collapsed);
-    updateDriverPanelCollapseUI();
-    scheduleLeafletResize([140, 360, 720]);
-}
-
-window.collapseDriverPanel = function() {
-    setDriverPanelCollapsed(true);
-};
-
-window.expandDriverPanel = function() {
-    setDriverPanelCollapsed(false);
-};
-
-async function initLeafletMap() {
-    const mapDiv = document.getElementById('leaflet-map');
-    if (!mapDiv) {
-        console.error('Leaflet map div not found!');
-        return;
-    }
-    if (leafletMap) {
-        leafletMap.invalidateSize();
-        console.log('Leaflet map already initialized, resizing...');
-        return;
-    }
-    
-    try {
-        await ensureGoogleMapsLoaded();
-        ensureLeafletCompatibilityLayer();
-        ensureGoogleServices();
-        googleMapsReady = true;
-        setMapFallbackMode(false);
-    } catch (e) {
-        console.error('Failed to initialize Google Maps:', e);
-        googleMapsReady = false;
-        try {
-            await ensureNativeLeafletLoaded();
-            setMapFallbackMode(false);
-            showToast('تم تشغيل الخريطة الاحتياطية (OpenStreetMap)');
-        } catch (leafletError) {
-            console.error('Failed to initialize Leaflet fallback:', leafletError);
-            setMapFallbackMode(true, 'الخريطة غير متاحة الآن: تعذر تحميل Google Maps وOpenStreetMap.');
-            showToast('❌ تعذر تحميل الخريطة');
-            return;
-        }
-    }
-
-    const usingGoogleCompat = !!(window.L && window.L.__akwadraGoogleCompat);
-    console.log(`Initializing map with ${usingGoogleCompat ? 'Google Maps compatibility' : 'Leaflet OpenStreetMap'}...`);
-    
-    const alexandriaCenter = [31.2001, 29.9187];
-    const initialCenter = alexandriaCenter;
-    leafletMap = L.map('leaflet-map', { 
-        zoomControl: false,
-        attributionControl: true
-    }).setView(initialCenter, 12);
-    
-    if (usingGoogleCompat) {
-        L.tileLayer('', {}).addTo(leafletMap);
-        console.log('✅ Google map initialized successfully');
-    } else {
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(leafletMap);
-        console.log('✅ Leaflet OpenStreetMap fallback initialized successfully');
-    }
-
-    // Custom controls hookup
-    const zi = document.getElementById('zoom-in');
-    const zo = document.getElementById('zoom-out');
-    const cm = document.getElementById('center-map');
-    if (zi) zi.onclick = () => leafletMap.zoomIn();
-    if (zo) zo.onclick = () => leafletMap.zoomOut();
-    if (cm) cm.onclick = () => {
-        if (currentPickup) leafletMap.setView([currentPickup.lat, currentPickup.lng], Math.max(leafletMap.getZoom(), 14));
-    };
-
-    // Keep Alexandria as the default location for all roles
-    setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
-    leafletMap.setView(alexandriaCenter, 12);
-
-    // Destination/Pickup select by click
-    leafletMap.on('click', e => {
-        if (!isPassengerMapSelectionEnabled()) return;
-        if (mapSelectionMode === 'pickup') {
-            reverseGeocode(e.latlng.lat, e.latlng.lng, (address) => {
-                setPickup({ lat: e.latlng.lat, lng: e.latlng.lng }, address);
-                leafletMap.setView([e.latlng.lat, e.latlng.lng], Math.max(leafletMap.getZoom(), 14));
-                showToast('تم تحديد موقع الالتقاط');
-            });
-            mapSelectionMode = 'destination';
-            updateMapSelectionButtons();
-            return;
-        }
-
-        setDestination({ lat: e.latlng.lat, lng: e.latlng.lng }, 'وجهة محددة');
-    });
+function bindMapSearchInputsOnce() {
+    if (mapSearchInputsBound) return;
+    mapSearchInputsBound = true;
 
     // Hook destination search input
     const destInput = document.getElementById('dest-input');
@@ -5327,6 +5276,176 @@ async function initLeafletMap() {
     }
 }
 
+function toggleDriverInfoPanel() {
+    const infoSection = document.getElementById('driver-info-section');
+    const mapSection = document.getElementById('driver-map-section');
+    const toggleBtn = document.getElementById('driver-info-toggle');
+    if (!infoSection || !mapSection || !toggleBtn) return;
+
+    isDriverInfoCollapsed = !isDriverInfoCollapsed;
+    infoSection.classList.toggle('hidden', isDriverInfoCollapsed);
+    mapSection.classList.toggle('driver-map-expanded', isDriverInfoCollapsed);
+    toggleBtn.textContent = isDriverInfoCollapsed ? 'إظهار التفاصيل' : 'إخفاء التفاصيل';
+
+    if (leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 100);
+    }
+}
+
+window.toggleDriverInfoPanel = toggleDriverInfoPanel;
+
+function updateDriverPanelCollapseUI() {
+    const collapseBtn = document.getElementById('driver-panel-collapse');
+    const expandFloatingBtn = document.getElementById('driver-panel-expand-floating');
+    if (collapseBtn) {
+        collapseBtn.disabled = isDriverPanelCollapsed;
+        collapseBtn.classList.toggle('opacity-50', isDriverPanelCollapsed);
+        collapseBtn.classList.toggle('cursor-not-allowed', isDriverPanelCollapsed);
+    }
+    if (expandFloatingBtn) {
+        if (isDriverPanelCollapsed) {
+            expandFloatingBtn.classList.remove('hidden');
+        } else {
+            expandFloatingBtn.classList.add('hidden');
+        }
+    }
+}
+
+function setDriverPanelCollapsed(collapsed) {
+    const panelCard = document.getElementById('driver-panel-card');
+    if (!panelCard) return;
+    isDriverPanelCollapsed = collapsed;
+    panelCard.classList.toggle('driver-panel-collapsed', collapsed);
+    updateDriverPanelCollapseUI();
+    scheduleLeafletResize([140, 360, 720]);
+}
+
+window.collapseDriverPanel = function() {
+    setDriverPanelCollapsed(true);
+};
+
+window.expandDriverPanel = function() {
+    setDriverPanelCollapsed(false);
+};
+
+async function initLeafletMap(options = {}) {
+    const opts = {
+        forceRecreate: false,
+        trigger: 'default',
+        reason: '',
+        ...options
+    };
+
+    if (mapInitPromise && !opts.forceRecreate) {
+        return mapInitPromise;
+    }
+
+    const mapDiv = document.getElementById('leaflet-map');
+    if (!mapDiv) {
+        console.error('Leaflet map div not found!');
+        return;
+    }
+    mapInitPromise = (async () => {
+        if (opts.forceRecreate && leafletMap) {
+            destroyLeafletMapInstance();
+        }
+
+        if (leafletMap) {
+            setMapFallbackMode(false);
+            clearMapAutoRetry();
+            mapAutoRetryAttempts = 0;
+            leafletMap.invalidateSize();
+            console.log('Leaflet map already initialized, resizing...');
+            return leafletMap;
+        }
+
+        try {
+            await ensureGoogleMapsLoaded();
+            ensureLeafletCompatibilityLayer();
+            ensureGoogleServices();
+            googleMapsReady = true;
+            setMapFallbackMode(false);
+        } catch (e) {
+            console.error('Failed to initialize Google Maps:', e);
+            googleMapsReady = false;
+            try {
+                await ensureNativeLeafletLoaded();
+                setMapFallbackMode(false);
+                showToast('تم تشغيل الخريطة الاحتياطية (OpenStreetMap)');
+            } catch (leafletError) {
+                console.error('Failed to initialize Leaflet fallback:', leafletError);
+                setMapFallbackMode(true, 'تعذر تحميل الخريطة الآن. سيتم إعادة المحاولة تلقائيًا.');
+                showToast('تعذر تحميل الخريطة الآن، جاري إعادة المحاولة');
+                scheduleMapAutoRetry(opts.reason || opts.trigger || 'init_failed');
+                return null;
+            }
+        }
+
+        const usingGoogleCompat = !!(window.L && window.L.__akwadraGoogleCompat);
+        console.log(`Initializing map with ${usingGoogleCompat ? 'Google Maps compatibility' : 'Leaflet OpenStreetMap'}...`);
+        
+        const alexandriaCenter = [31.2001, 29.9187];
+        const initialCenter = alexandriaCenter;
+        leafletMap = L.map('leaflet-map', { 
+            zoomControl: false,
+            attributionControl: true
+        }).setView(initialCenter, 12);
+        
+        if (usingGoogleCompat) {
+            L.tileLayer('', {}).addTo(leafletMap);
+            console.log('✅ Google map initialized successfully');
+        } else {
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(leafletMap);
+            console.log('✅ Leaflet OpenStreetMap fallback initialized successfully');
+        }
+
+        clearMapAutoRetry();
+        mapAutoRetryAttempts = 0;
+
+        // Custom controls hookup
+        const zi = document.getElementById('zoom-in');
+        const zo = document.getElementById('zoom-out');
+        const cm = document.getElementById('center-map');
+        if (zi) zi.onclick = () => leafletMap.zoomIn();
+        if (zo) zo.onclick = () => leafletMap.zoomOut();
+        if (cm) cm.onclick = () => {
+            if (currentPickup) leafletMap.setView([currentPickup.lat, currentPickup.lng], Math.max(leafletMap.getZoom(), 14));
+        };
+
+        // Keep Alexandria as the default location for all roles
+        setPickup({ lat: alexandriaCenter[0], lng: alexandriaCenter[1] }, 'الإسكندرية، مصر');
+        leafletMap.setView(alexandriaCenter, 12);
+
+        // Destination/Pickup select by click
+        leafletMap.on('click', e => {
+            if (!isPassengerMapSelectionEnabled()) return;
+            if (mapSelectionMode === 'pickup') {
+                reverseGeocode(e.latlng.lat, e.latlng.lng, (address) => {
+                    setPickup({ lat: e.latlng.lat, lng: e.latlng.lng }, address);
+                    leafletMap.setView([e.latlng.lat, e.latlng.lng], Math.max(leafletMap.getZoom(), 14));
+                    showToast('تم تحديد موقع الالتقاط');
+                });
+                mapSelectionMode = 'destination';
+                updateMapSelectionButtons();
+                return;
+            }
+
+            setDestination({ lat: e.latlng.lat, lng: e.latlng.lng }, 'وجهة محددة');
+        });
+
+        bindMapSearchInputsOnce();
+
+        return leafletMap;
+    })().finally(() => {
+        mapInitPromise = null;
+    });
+
+    return mapInitPromise;
+}
+
 function moveLeafletMapToContainer(containerId) {
     const mapEl = document.getElementById('leaflet-map');
     const container = document.getElementById(containerId);
@@ -5346,6 +5465,14 @@ function moveLeafletMapToContainer(containerId) {
     if (leafletMap) {
         setTimeout(() => leafletMap.invalidateSize(), 100);
     }
+}
+
+async function ensureMapReadyForCaptainContext(reason = 'captain-context') {
+    const targetContainerId = 'map-container';
+    moveLeafletMapToContainer(targetContainerId);
+    await initLeafletMap({ trigger: reason });
+    moveLeafletMapToContainer(targetContainerId);
+    scheduleLeafletResize([0, 120, 360, 720]);
 }
 
 function resetPassengerMapVisualState(options = {}) {
@@ -5620,6 +5747,8 @@ function handleGeoSuccess(position) {
     lastGeoAccuracy = Number.isFinite(Number(position?.coords?.accuracy)) ? Number(position.coords.accuracy) : null;
     lastGeoTimestamp = Number.isFinite(Number(position?.timestamp)) ? Number(position.timestamp) : Date.now();
     geoPermissionDenied = false;
+    setMapFallbackMode(false);
+    clearMapAutoRetry();
 
     if (currentUserRole === 'passenger') {
         applyPassengerLocation(coords, !hasCenteredOnGeo);
@@ -5814,9 +5943,15 @@ function updateDriverRealTripProgress(coords) {
 function handleGeoError(error) {
     if (error && error.code === 1) {
         geoPermissionDenied = true;
+        setMapFallbackMode(true, 'تم رفض إذن الموقع. فعّل GPS لعرض موقعك الحالي، وسنستمر بعرض الخريطة.');
+        scheduleMapAutoRetry('geo_permission_denied');
+        showToast('تم رفض إذن الموقع. فعّل الموقع من إعدادات المتصفح.');
+    } else {
+        setMapFallbackMode(true, 'يتعذر تحديد الموقع الآن. سنعيد المحاولة تلقائيًا مع إبقاء الخريطة متاحة.');
+        scheduleMapAutoRetry('geo_temporarily_unavailable');
     }
 
-    if (shouldShowGeoToast()) {
+    if (shouldShowGeoToast() && !(error && error.code === 1)) {
         showToast('⚠️ يرجى تفعيل الموقع لاستخدام الخريطة بدقة');
     }
 
@@ -5832,6 +5967,7 @@ function handleGeoError(error) {
 
 function startLocationTracking() {
     if (!canUseGeolocation()) {
+        setMapFallbackMode(true, 'الموقع غير مدعوم في هذا المتصفح. يمكن متابعة استخدام الخريطة بدون GPS.');
         handleGeoError();
         return;
     }
@@ -5871,6 +6007,7 @@ function requestSingleLocationFix() {
         return;
     }
     if (!canUseGeolocation()) {
+        setMapFallbackMode(true, 'الموقع غير مدعوم في هذا المتصفح. يمكن متابعة استخدام الخريطة بدون GPS.');
         handleGeoError();
         return;
     }
@@ -6483,9 +6620,7 @@ function ensureDriverMarker(location) {
 }
 
 window.focusCaptainOnMap = function() {
-    if (!leafletMap) {
-        initLeafletMap();
-    }
+    void ensureMapReadyForCaptainContext('focus-captain-on-map');
     const trackingView = document.getElementById('driver-map-view');
     const targetContainerId = trackingView ? 'driver-map-view' : 'map-container';
     moveLeafletMapToContainer(targetContainerId);
@@ -8716,6 +8851,10 @@ window.driverEndTrip = async function() {
     if (tripId) {
         unsubscribeTripRealtime(tripId);
     }
+    if (currentUserRole === 'driver') {
+        void ensureMapReadyForCaptainContext('driver-trip-ended');
+        requestSingleLocationFix();
+    }
     triggerDriverRequestPolling();
 };
 
@@ -9405,8 +9544,7 @@ function initDriverMode() {
     if(um) um.classList.remove('hidden');
     const world = document.getElementById('map-world');
     if (world) world.classList.add('hidden');
-    initLeafletMap();
-    moveLeafletMapToContainer('map-container');
+    void ensureMapReadyForCaptainContext('driver-mode-init');
     showDriverWaitingState();
     updateDriverMenuData();
     startLocationTracking();
@@ -12352,10 +12490,7 @@ function forceRestoreHomeMapAfterTripCompletion() {
         mapEl.style.height = '100%';
     }
 
-    if (!leafletMap) {
-        initLeafletMap();
-    }
-
+    void ensureMapReadyForCaptainContext('post-trip-restore');
     scheduleLeafletResize([0, 120, 360, 720]);
 }
 
@@ -12544,6 +12679,9 @@ window.submitDriverPassengerRating = async function() {
         }
         showToast('تم إرسال تقييم الراكب');
         closeDriverTripSummary();
+        if (currentUserRole === 'driver') {
+            void ensureMapReadyForCaptainContext('driver-rating-submitted');
+        }
     } catch (error) {
         console.error('Failed to submit driver rating:', error);
         showToast('تعذر إرسال التقييم حالياً');
@@ -13692,5 +13830,10 @@ window.switchSection = function(section) {
         initPaymentFlow();
     } else if (section === 'payment-invoice') {
         window.applyStoredOfferToPayment();
+    }
+
+    if (currentUserRole === 'driver' && (section === 'destination' || section === 'driver' || section === 'inRide')) {
+        void ensureMapReadyForCaptainContext(`driver-section-${section}`);
+        requestSingleLocationFix();
     }
 };
