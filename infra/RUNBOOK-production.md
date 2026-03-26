@@ -67,6 +67,12 @@ One-command go-live verification:
 GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod
 ```
 
+If the default environment token lacks workflow dispatch scopes, use a PAT override:
+
+```bash
+GH_PAT=<token-with-repo-and-workflow-scopes> GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod
+```
+
 ## 2) Deploy
 
 ```bash

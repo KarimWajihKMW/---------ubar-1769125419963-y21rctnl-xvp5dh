@@ -231,6 +231,7 @@ One-command go-live verification (precheck + trigger + live smoke):
 
 - Script: `scripts/go-live-production.sh`
 - Command: `GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod`
+- Optional auth override: `GH_PAT=<token with repo,workflow scopes>`
 
 Readiness score command (returns 100% only when integration test, build, and GitHub dispatch precheck all pass):
 
