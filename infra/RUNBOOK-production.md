@@ -19,6 +19,12 @@ This runbook covers production operations for gateway + monolith + microservices
 - Confirm secret values are present in cluster (`ubar-secrets`).
 - Confirm `DATABASE_URL`, `JWT_SECRET`, `BILLING_WEBHOOK_SECRET`, and metrics token are valid.
 
+Run preflight locally (or in GitHub Actions manual workflow):
+
+```bash
+npm run preflight:prod
+```
+
 ## 2) Deploy
 
 ```bash

@@ -1,0 +1,39 @@
+name: Production Preflight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: production
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+      BILLING_PROVIDER: ${{ secrets.BILLING_PROVIDER }}
+      PAYMENT_PROVIDER: ${{ secrets.PAYMENT_PROVIDER }}
+      BILLING_WEBHOOK_SECRET: ${{ secrets.BILLING_WEBHOOK_SECRET }}
+      PAYMENT_WEBHOOK_SECRET: ${{ secrets.PAYMENT_WEBHOOK_SECRET }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_SUCCESS_URL: ${{ secrets.STRIPE_SUCCESS_URL }}
+      STRIPE_CANCEL_URL: ${{ secrets.STRIPE_CANCEL_URL }}
+      GATEWAY_BASE_URL: ${{ secrets.GATEWAY_BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run production preflight
+        run: npm run preflight:prod

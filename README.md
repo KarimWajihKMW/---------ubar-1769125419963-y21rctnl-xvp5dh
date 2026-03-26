@@ -177,6 +177,12 @@ Useful scripts:
 - `npm run start:micro`
 - `npm run micro:down`
 - `npm run test:gateway`
+- `npm run preflight:prod`
+
+Production preflight validates required runtime secrets and can optionally verify deployed service health if `GATEWAY_BASE_URL` is set.
+
+- Script: `scripts/preflight-production.js`
+- CI workflow (manual trigger): `.github/workflows/production-preflight.yml`
 
 ## Monitoring and metrics
 
