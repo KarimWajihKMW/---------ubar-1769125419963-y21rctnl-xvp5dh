@@ -119,6 +119,12 @@ New production-focused capabilities added in microservices:
   - `POST /api/ms/payments/wallet/charge`
   - `POST /api/ms/payments/wallet/withdrawals/request`
   - `GET /api/ms/payments/wallet/transactions/:userId`
+  - `GET /api/ms/payments/provider/status`
+  - `POST /api/ms/payments/online/intent`
+  - `POST /api/ms/payments/online/checkout/session`
+  - `POST /api/ms/payments/online/webhooks/provider`
+  - `POST /api/ms/payments/online/reconciliation/run`
+  - `GET /api/ms/payments/online/reconciliation/summary`
 - Dispatcher and support operations endpoints:
   - `GET /api/ms/ops/dispatch/queue`
   - `POST /api/ms/ops/dispatch/manual-assign`
@@ -215,6 +221,12 @@ Provider-related environment variables:
 - `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_SUCCESS_URL`
 - `STRIPE_CANCEL_URL`
+
+Payments online provider environment variables:
+
+- `PAYMENT_PROVIDER`
+- `PAYMENT_WEBHOOK_SECRET`
+- `MOCKPAY_PAYMENT_CHECKOUT_BASE_URL`
 
 ## Kubernetes baseline
 

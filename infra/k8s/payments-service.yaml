@@ -21,6 +21,13 @@ spec:
           envFrom:
             - configMapRef:
                 name: ubar-config
+            - secretRef:
+                name: ubar-secrets
+          env:
+            - name: PAYMENT_PROVIDER
+              value: mockpay
+            - name: MOCKPAY_PAYMENT_CHECKOUT_BASE_URL
+              value: https://mockpay.local
           ports:
             - containerPort: 4102
           readinessProbe:

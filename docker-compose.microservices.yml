@@ -52,6 +52,9 @@ services:
       - ./:/app
     environment:
       PAYMENTS_SERVICE_PORT: 4102
+      PAYMENT_PROVIDER: mockpay
+      PAYMENT_WEBHOOK_SECRET: payment-webhook-dev-secret
+      MOCKPAY_PAYMENT_CHECKOUT_BASE_URL: https://mockpay.local
     ports:
       - "4102:4102"
 

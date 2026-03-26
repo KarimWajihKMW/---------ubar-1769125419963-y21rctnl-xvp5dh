@@ -121,6 +121,71 @@ async function main() {
     const fare = fareResp.data;
     if (!fareResp.res.ok || !fare?.success || !fare?.data?.total) throw new Error('gateway_payments_proxy_failed');
 
+    const providerStatusResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/provider/status');
+    if (!providerStatusResp.res.ok || !providerStatusResp.data?.success || !providerStatusResp.data?.data?.provider) {
+      throw new Error('payments_provider_status_failed');
+    }
+
+    const onlineIntentResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/online/intent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        user_id: 'rider-99',
+        trip_id: 'trip-700',
+        amount: 61.04,
+        currency: 'SAR',
+        source: 'integration_test'
+      })
+    });
+    if (!onlineIntentResp.res.ok || !onlineIntentResp.data?.success || !onlineIntentResp.data?.data?.id) {
+      throw new Error('payments_online_intent_failed');
+    }
+
+    const onlineCheckoutResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/online/checkout/session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        payment_id: String(onlineIntentResp.data.data.id)
+      })
+    });
+    if (!onlineCheckoutResp.res.ok || !onlineCheckoutResp.data?.success || !onlineCheckoutResp.data?.data?.checkout_id) {
+      throw new Error('payments_online_checkout_failed');
+    }
+
+    const paymentWebhookPayload = {
+      provider: 'mockpay',
+      event_type: 'payment.paid',
+      tenant_id: 'demo-tenant',
+      payment_id: String(onlineIntentResp.data.data.id),
+      provider_reference: `pay_ref_${Date.now()}`
+    };
+    const paymentWebhookSignature = createHmac('sha256', 'payment-webhook-dev-secret')
+      .update(JSON.stringify(paymentWebhookPayload))
+      .digest('hex');
+
+    const paymentWebhookResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/online/webhooks/provider', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-payment-signature': paymentWebhookSignature
+      },
+      body: JSON.stringify(paymentWebhookPayload)
+    });
+    if (!paymentWebhookResp.res.ok || !paymentWebhookResp.data?.success || paymentWebhookResp.data?.data?.payment?.status !== 'paid') {
+      throw new Error('payments_online_webhook_failed');
+    }
+
+    const paymentReconciliationSummary = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/online/reconciliation/summary');
+    if (!paymentReconciliationSummary.res.ok || !paymentReconciliationSummary.data?.success || typeof paymentReconciliationSummary.data?.data?.pending_count !== 'number') {
+      throw new Error('payments_online_reconciliation_summary_failed');
+    }
+
     const topupResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/wallet/topup', {
       method: 'POST',
       headers: {
@@ -373,6 +438,8 @@ async function main() {
       match_strategy: rec.data.strategy,
       assigned_driver: assignResp.data.data.selected_driver.driver_id,
       fare_total: fare.data.total,
+      payment_provider: providerStatusResp.data.data.provider,
+      payment_checkout_provider: onlineCheckoutResp.data.data.provider,
       wallet_balance_after_withdrawal: withdrawalResp.data.data.user_id ? 'ok' : 'unknown',
       ops_ticket_id: ticketResp.data.data.id,
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
