@@ -342,6 +342,16 @@ async function main() {
       throw new Error('ops_support_kpis_failed');
     }
 
+    const supportAlertsResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/alerts?max_open_minutes=0&breach_threshold=1&escalation_threshold=1&critical_threshold=1&window_minutes=1440', {
+      headers: {
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      }
+    });
+    if (!supportAlertsResp.res.ok || !supportAlertsResp.data?.success || !Array.isArray(supportAlertsResp.data?.data?.alerts) || !supportAlertsResp.data.data.alerts.length) {
+      throw new Error('ops_support_alerts_failed');
+    }
+
     const fraudScoreResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ai/fraud/score', {
       method: 'POST',
       headers: {
@@ -534,6 +544,7 @@ async function main() {
       ops_escalation_status: escalationResp.data.data.ticket.status,
       ops_sla_breach_count: slaBreachesResp.data.data.breach_count,
       ops_escalated_tickets: supportKpisResp.data.data.escalated_tickets,
+      ops_alerts_count: supportAlertsResp.data.data.alerts.length,
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
       ai_surge: pricingResp.data.data.surge_multiplier,
       saas_plan: subResp.data.data.plan_code,

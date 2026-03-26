@@ -652,6 +652,143 @@ app.get('/api/ops-service/support/kpis', requireRole(['admin', 'support', 'compl
     }
 });
 
+app.get('/api/ops-service/support/alerts', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const maxOpenMinutes = Math.max(0, Number(req.query.max_open_minutes || 30));
+        const breachThreshold = Math.max(1, Number(req.query.breach_threshold || 1));
+        const escalationThreshold = Math.max(1, Number(req.query.escalation_threshold || 1));
+        const criticalThreshold = Math.max(1, Number(req.query.critical_threshold || 1));
+        const windowMinutes = Math.max(1, Math.min(7 * 24 * 60, Number(req.query.window_minutes || 60)));
+
+        let totalTickets = 0;
+        let escalatedTickets = 0;
+        let criticalTickets = 0;
+        let slaBreachCount = 0;
+        let escalationsInWindow = 0;
+
+        if (pool) {
+            const totalsRes = await pool.query(
+                `SELECT
+                    COUNT(*)::int AS total_tickets,
+                    COUNT(*) FILTER (WHERE status = 'escalated')::int AS escalated_tickets,
+                    COUNT(*) FILTER (WHERE priority = 'critical')::int AS critical_tickets
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1`,
+                [tenantId]
+            );
+
+            const breachesRes = await pool.query(
+                `SELECT COUNT(*)::int AS breach_count
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1
+                   AND status IN ('open', 'escalated', 'in_progress')
+                   AND EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0 >= $2`,
+                [tenantId, maxOpenMinutes]
+            );
+
+            const escalationsWindowRes = await pool.query(
+                `SELECT COUNT(*)::int AS escalations_in_window
+                 FROM ms_ticket_escalations
+                 WHERE tenant_id = $1
+                   AND created_at >= NOW() - ($2::text || ' minutes')::interval`,
+                [tenantId, windowMinutes]
+            );
+
+            const t = totalsRes.rows[0] || {};
+            const b = breachesRes.rows[0] || {};
+            const e = escalationsWindowRes.rows[0] || {};
+
+            totalTickets = Number(t.total_tickets || 0);
+            escalatedTickets = Number(t.escalated_tickets || 0);
+            criticalTickets = Number(t.critical_tickets || 0);
+            slaBreachCount = Number(b.breach_count || 0);
+            escalationsInWindow = Number(e.escalations_in_window || 0);
+        } else {
+            const now = Date.now();
+            const windowMs = windowMinutes * 60 * 1000;
+            const openStatuses = new Set(['open', 'escalated', 'in_progress']);
+            const ticketSet = memTickets.filter((x) => x.tenant_id === tenantId);
+
+            totalTickets = ticketSet.length;
+            escalatedTickets = ticketSet.filter((x) => String(x.status || '').toLowerCase() === 'escalated').length;
+            criticalTickets = ticketSet.filter((x) => String(x.priority || '').toLowerCase() === 'critical').length;
+            slaBreachCount = ticketSet
+                .filter((x) => openStatuses.has(String(x.status || '').toLowerCase()))
+                .filter((x) => {
+                    const createdAtMs = Date.parse(x.created_at || new Date().toISOString());
+                    const ageMinutes = Math.max(0, (now - createdAtMs) / (1000 * 60));
+                    return ageMinutes >= maxOpenMinutes;
+                }).length;
+            escalationsInWindow = memEscalations
+                .filter((x) => x.tenant_id === tenantId)
+                .filter((x) => {
+                    const createdAtMs = Date.parse(x.created_at || new Date().toISOString());
+                    return now - createdAtMs <= windowMs;
+                }).length;
+        }
+
+        const alerts = [];
+        if (slaBreachCount >= breachThreshold) {
+            alerts.push({
+                code: 'sla_breach_spike',
+                severity: slaBreachCount >= breachThreshold * 2 ? 'high' : 'medium',
+                message: `Detected ${slaBreachCount} ticket(s) above ${maxOpenMinutes} minutes open time.`,
+                recommended_actions: ['increase_support_capacity', 'prioritize_oldest_tickets']
+            });
+        }
+        if (escalationsInWindow >= escalationThreshold) {
+            alerts.push({
+                code: 'escalation_activity_high',
+                severity: escalationsInWindow >= escalationThreshold * 2 ? 'high' : 'medium',
+                message: `Detected ${escalationsInWindow} escalation(s) in the last ${windowMinutes} minutes.`,
+                recommended_actions: ['assign_senior_reviewers', 'audit_high_risk_cases']
+            });
+        }
+        if (criticalTickets >= criticalThreshold) {
+            alerts.push({
+                code: 'critical_backlog_present',
+                severity: criticalTickets >= criticalThreshold * 2 ? 'high' : 'medium',
+                message: `Detected ${criticalTickets} critical ticket(s) currently active.`,
+                recommended_actions: ['trigger_incident_bridge', 'notify_ops_lead']
+            });
+        }
+
+        if (!alerts.length && totalTickets > 0) {
+            alerts.push({
+                code: 'support_operating_normally',
+                severity: 'info',
+                message: 'No support risk thresholds were exceeded for the configured window.',
+                recommended_actions: ['continue_monitoring']
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                tenant_id: tenantId,
+                config: {
+                    max_open_minutes: maxOpenMinutes,
+                    breach_threshold: breachThreshold,
+                    escalation_threshold: escalationThreshold,
+                    critical_threshold: criticalThreshold,
+                    window_minutes: windowMinutes
+                },
+                metrics: {
+                    total_tickets: totalTickets,
+                    escalated_tickets: escalatedTickets,
+                    critical_tickets: criticalTickets,
+                    sla_breach_count: slaBreachCount,
+                    escalations_in_window: escalationsInWindow
+                },
+                alerts
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'support_alerts_failed', message: error.message });
+    }
+});
+
 app.get('/api/ops-service/audit/logs', requireRole(['admin', 'compliance']), async (req, res) => {
     try {
         const tenantId = getTenantId(req);

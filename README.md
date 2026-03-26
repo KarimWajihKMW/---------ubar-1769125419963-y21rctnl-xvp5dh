@@ -135,6 +135,7 @@ New production-focused capabilities added in microservices:
   - `GET /api/ms/ops/support/escalations`
   - `GET /api/ms/ops/support/sla/breaches`
   - `GET /api/ms/ops/support/kpis`
+  - `GET /api/ms/ops/support/alerts`
   - `GET /api/ms/ops/audit/logs`
 - AI endpoints:
   - `POST /api/ms/ai/fraud/score`
