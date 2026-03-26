@@ -37,6 +37,12 @@ Run full local release gate:
 npm run release:gate
 ```
 
+Run readiness score check (must reach 100% before final go-live signoff):
+
+```bash
+npm run readiness:100
+```
+
 Trigger GitHub production release gate workflow from terminal:
 
 ```bash

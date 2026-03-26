@@ -194,6 +194,7 @@ Useful scripts:
 - `npm run precheck:prod:github`
 - `npm run trigger:prod:gate`
 - `npm run go-live:prod`
+- `npm run readiness:100`
 
 Production preflight validates required runtime secrets and can optionally verify deployed service health if `GATEWAY_BASE_URL` is set.
 
@@ -230,6 +231,11 @@ One-command go-live verification (precheck + trigger + live smoke):
 
 - Script: `scripts/go-live-production.sh`
 - Command: `GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod`
+
+Readiness score command (returns 100% only when integration test, build, and GitHub dispatch precheck all pass):
+
+- Script: `scripts/readiness-100.sh`
+- Command: `npm run readiness:100`
 
 Kubernetes secret sync helper:
 
