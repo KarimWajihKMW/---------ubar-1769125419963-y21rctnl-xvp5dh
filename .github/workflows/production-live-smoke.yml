@@ -1,0 +1,53 @@
+name: Production Live Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      gateway_base_url:
+        description: "Optional override for gateway base URL (e.g. https://api.example.com)"
+        required: false
+        type: string
+      smoke_tenant_id:
+        description: "Optional tenant id for smoke checks"
+        required: false
+        default: "public"
+        type: string
+      smoke_role:
+        description: "Optional role header for ops checks"
+        required: false
+        default: "support"
+        type: string
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: production
+      METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+      GATEWAY_BASE_URL: ${{ inputs.gateway_base_url != '' && inputs.gateway_base_url || secrets.GATEWAY_BASE_URL }}
+      SMOKE_TENANT_ID: ${{ inputs.smoke_tenant_id }}
+      SMOKE_ROLE: ${{ inputs.smoke_role }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Validate smoke gateway input
+        run: |
+          if [[ -z "${GATEWAY_BASE_URL}" ]]; then
+            echo "GATEWAY_BASE_URL is required (set secret or workflow input)." >&2
+            exit 1
+          fi
+
+      - name: Run production smoke checks
+        run: npm run smoke:prod
