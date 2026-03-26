@@ -304,12 +304,14 @@ window.addEventListener('focus', () => {
 // --- Global State ---
 let currentUserRole = null; // 'passenger', 'driver', 'admin'
 const ROLE_PATHS = Object.freeze({
-    passenger: '/home',
-    // Kept per requested naming examples in task statement.
-    driver: '/tenants',
+    passenger: '/passenger',
+    // Primary role URLs; legacy paths are preserved in ROLE_PATH_ALIASES.
+    driver: '/driver',
     admin: '/admin'
 });
 const ROLE_PATH_ALIASES = Object.freeze({
+    '/home': 'passenger',
+    '/tenants': 'driver',
     '/mra': 'driver'
 });
 const PASSENGER_SECTION_PATHS = Object.freeze({

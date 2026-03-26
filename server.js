@@ -1313,6 +1313,10 @@ app.use(express.static('.'));
 
 const spaIndexFile = path.join(__dirname, 'index.html');
 app.get([
+    '/passenger',
+    '/passenger/*',
+    '/driver',
+    '/driver/*',
     '/home',
     '/home/*',
     '/tenants',
