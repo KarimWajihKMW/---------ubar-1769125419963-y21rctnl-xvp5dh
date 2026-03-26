@@ -323,6 +323,20 @@ async function main() {
       throw new Error('saas_invoice_issue_failed');
     }
 
+    const checkoutResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/billing/checkout/session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-role': 'admin'
+      },
+      body: JSON.stringify({
+        invoice_id: String(issueInvoiceResp.data.data.id)
+      })
+    });
+    if (!checkoutResp.res.ok || !checkoutResp.data?.success || !checkoutResp.data?.data?.checkout_id) {
+      throw new Error('saas_checkout_session_failed');
+    }
+
     const webhookPayload = {
       provider: 'mockpay',
       event_type: 'invoice.paid',
@@ -346,6 +360,15 @@ async function main() {
       throw new Error('saas_webhook_payment_failed');
     }
 
+    const reconciliationResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/billing/reconciliation/summary', {
+      headers: {
+        'x-role': 'admin'
+      }
+    });
+    if (!reconciliationResp.res.ok || !reconciliationResp.data?.success || typeof reconciliationResp.data?.data?.pending_count !== 'number') {
+      throw new Error('saas_reconciliation_summary_failed');
+    }
+
     console.log('✅ Gateway test passed', {
       match_strategy: rec.data.strategy,
       assigned_driver: assignResp.data.data.selected_driver.driver_id,
@@ -357,7 +380,9 @@ async function main() {
       saas_plan: subResp.data.data.plan_code,
       saas_billing_total: billingResp.data.data.charges.total,
       events_count: listEventsResp.data.data.length,
-      invoice_status_after_webhook: webhookResp.data.data.invoice.status
+      invoice_status_after_webhook: webhookResp.data.data.invoice.status,
+      checkout_provider: checkoutResp.data.data.provider,
+      pending_reconciliation: reconciliationResp.data.data.pending_count
     });
   } finally {
     for (const p of [gateway, trips, payments, ops, ai, saas, events]) {

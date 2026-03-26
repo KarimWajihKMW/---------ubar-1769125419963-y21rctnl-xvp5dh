@@ -12,6 +12,16 @@ cd mobile/rider-app && npm install && npm start
 cd mobile/driver-app && npm install && npm start
 ```
 
+Optional environment variable for both apps:
+
+- `EXPO_PUBLIC_API_BASE_URL` (default: `http://localhost:8080`)
+
+Example:
+
+```bash
+export EXPO_PUBLIC_API_BASE_URL=http://localhost:8080
+```
+
 Both apps are Expo-based scaffolds and should be expanded with:
 
 - Authentication + secure token storage

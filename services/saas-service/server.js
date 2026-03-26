@@ -3,14 +3,25 @@ const promClient = require('prom-client');
 const { Pool } = require('pg');
 const { createHmac, timingSafeEqual } = require('crypto');
 const cron = require('node-cron');
+const { createBillingProvider } = require('./provider-adapter');
 
 const app = express();
 const PORT = Number(process.env.SAAS_SERVICE_PORT || 4105);
 const useDatabase = Boolean(process.env.DATABASE_URL);
 const pool = useDatabase ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
 const billingWebhookSecret = process.env.BILLING_WEBHOOK_SECRET || 'billing-webhook-dev-secret';
+const billingProviderName = process.env.BILLING_PROVIDER || 'mockpay';
+const mockCheckoutBaseUrl = process.env.MOCKPAY_CHECKOUT_BASE_URL || 'https://mockpay.local';
 const autoCycleEnabled = String(process.env.SAAS_BILLING_AUTOCYCLE_ENABLED || 'false').toLowerCase() === 'true';
 const autoCycleSchedule = process.env.SAAS_BILLING_AUTOCYCLE_CRON || '0 1 * * *';
+const reconciliationEnabled = String(process.env.SAAS_RECONCILIATION_ENABLED || 'false').toLowerCase() === 'true';
+const reconciliationSchedule = process.env.SAAS_RECONCILIATION_CRON || '*/30 * * * *';
+
+const billingProvider = createBillingProvider({
+    provider: billingProviderName,
+    webhookSecret: billingWebhookSecret,
+    mockCheckoutBaseUrl
+});
 
 const metricsRegistry = new promClient.Registry();
 promClient.collectDefaultMetrics({ register: metricsRegistry, prefix: 'ubar_saas_service_' });
@@ -128,8 +139,7 @@ async function ensureSchema() {
 }
 
 function signWebhookPayload(payload) {
-    const body = JSON.stringify(payload);
-    return createHmac('sha256', billingWebhookSecret).update(body).digest('hex');
+    return billingProvider.signWebhookPayload(payload);
 }
 
 function verifyWebhookSignature(payload, signature) {
@@ -497,6 +507,73 @@ async function markInvoiceStatus(invoiceId, status, paidAt, providerReference) {
     return memInvoices[idx];
 }
 
+async function findInvoice(invoiceId) {
+    if (pool) {
+        const result = await pool.query(
+            `SELECT id, tenant_id, plan_code, billing_period, status, currency,
+                base_amount::float8 AS base_amount,
+                overage_amount::float8 AS overage_amount,
+                total_amount::float8 AS total_amount,
+                provider_reference, details, issued_at, paid_at
+             FROM ms_saas_invoices
+             WHERE id::text = $1`,
+            [String(invoiceId)]
+        );
+        return result.rows[0] || null;
+    }
+
+    const found = memInvoices.find((x) => String(x.id) === String(invoiceId));
+    return found || null;
+}
+
+async function upsertInvoiceDetails(invoiceId, extraDetails) {
+    if (pool) {
+        const result = await pool.query(
+            `UPDATE ms_saas_invoices
+             SET details = COALESCE(details, '{}'::jsonb) || $2::jsonb
+             WHERE id::text = $1
+             RETURNING id, tenant_id, plan_code, billing_period, status, currency,
+                base_amount::float8 AS base_amount,
+                overage_amount::float8 AS overage_amount,
+                total_amount::float8 AS total_amount,
+                provider_reference, details, issued_at, paid_at`,
+            [String(invoiceId), extraDetails]
+        );
+        return result.rows[0] || null;
+    }
+
+    const idx = memInvoices.findIndex((x) => String(x.id) === String(invoiceId));
+    if (idx < 0) return null;
+    memInvoices[idx].details = { ...(memInvoices[idx].details || {}), ...extraDetails };
+    return memInvoices[idx];
+}
+
+async function listPendingInvoices(tenantId) {
+    if (pool) {
+        const values = [];
+        let where = `WHERE status = 'pending'`;
+        if (tenantId) {
+            values.push(tenantId);
+            where += ' AND tenant_id = $1';
+        }
+        const result = await pool.query(
+            `SELECT id, tenant_id, plan_code, billing_period, status, currency,
+                base_amount::float8 AS base_amount,
+                overage_amount::float8 AS overage_amount,
+                total_amount::float8 AS total_amount,
+                provider_reference, details, issued_at, paid_at
+             FROM ms_saas_invoices
+             ${where}
+             ORDER BY id ASC
+             LIMIT 200`,
+            values
+        );
+        return result.rows;
+    }
+
+    return memInvoices.filter((x) => x.status === 'pending' && (!tenantId || x.tenant_id === tenantId));
+}
+
 app.get('/api/saas-service/usage/summary/:tenantId', requireRole(['super-admin', 'admin', 'tenant-admin']), async (req, res) => {
     try {
         const tenantId = String(req.params.tenantId || '').trim().toLowerCase();
@@ -560,6 +637,37 @@ app.post('/api/saas-service/billing/invoices/issue', requireRole(['super-admin',
             return res.status(422).json({ success: false, error: 'plan_not_found' });
         }
         return res.status(500).json({ success: false, error: 'invoice_issue_failed', message: error.message });
+    }
+});
+
+app.post('/api/saas-service/billing/checkout/session', requireRole(['super-admin', 'admin', 'tenant-admin']), async (req, res) => {
+    try {
+        const invoiceId = String(req.body.invoice_id || '').trim();
+        if (!invoiceId) {
+            return res.status(400).json({ success: false, error: 'invoice_id_required' });
+        }
+
+        const invoice = await findInvoice(invoiceId);
+        if (!invoice) {
+            return res.status(404).json({ success: false, error: 'invoice_not_found' });
+        }
+
+        const checkout = await billingProvider.createCheckoutSession({
+            tenantId: invoice.tenant_id,
+            invoiceId: String(invoice.id),
+            amount: invoice.total_amount,
+            currency: invoice.currency
+        });
+
+        await upsertInvoiceDetails(String(invoice.id), {
+            payment_checkout: checkout,
+            payment_provider: billingProvider.name,
+            payment_checkout_created_at: new Date().toISOString()
+        });
+
+        return res.json({ success: true, data: checkout });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'checkout_session_failed', message: error.message });
     }
 });
 
@@ -675,6 +783,54 @@ app.post('/api/saas-service/billing/cycle/run', requireRole(['super-admin']), as
     }
 });
 
+app.post('/api/saas-service/billing/reconciliation/run', requireRole(['super-admin', 'admin']), async (req, res) => {
+    try {
+        const tenantId = req.body.tenant_id ? String(req.body.tenant_id).trim().toLowerCase() : null;
+        const pending = await listPendingInvoices(tenantId);
+        const updated = [];
+
+        for (const invoice of pending) {
+            const statusResult = await billingProvider.getPaymentStatus({
+                tenantId: invoice.tenant_id,
+                invoiceId: String(invoice.id),
+                providerReference: invoice.provider_reference
+            });
+
+            if (statusResult.status === 'paid') {
+                const next = await markInvoiceStatus(String(invoice.id), 'paid', null, invoice.provider_reference);
+                if (next) updated.push({ invoice_id: next.id, status: next.status, tenant_id: next.tenant_id });
+                continue;
+            }
+
+            if (statusResult.status === 'failed') {
+                const next = await markInvoiceStatus(String(invoice.id), 'failed', null, invoice.provider_reference);
+                if (next) updated.push({ invoice_id: next.id, status: next.status, tenant_id: next.tenant_id });
+            }
+        }
+
+        return res.json({ success: true, data: { checked: pending.length, updated } });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'reconciliation_failed', message: error.message });
+    }
+});
+
+app.get('/api/saas-service/billing/reconciliation/summary', requireRole(['super-admin', 'admin']), async (req, res) => {
+    try {
+        const tenantId = req.query.tenant_id ? String(req.query.tenant_id).trim().toLowerCase() : null;
+        const pending = await listPendingInvoices(tenantId);
+        return res.json({
+            success: true,
+            data: {
+                provider: billingProvider.name,
+                pending_count: pending.length,
+                sample_invoice_ids: pending.slice(0, 10).map((x) => x.id)
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'reconciliation_summary_failed', message: error.message });
+    }
+});
+
 if (autoCycleEnabled) {
     cron.schedule(autoCycleSchedule, async () => {
         try {
@@ -696,6 +852,29 @@ if (autoCycleEnabled) {
             }
         } catch (error) {
             console.error('⚠️ Auto billing cycle failed:', error.message);
+        }
+    });
+}
+
+if (reconciliationEnabled) {
+    cron.schedule(reconciliationSchedule, async () => {
+        try {
+            const pending = await listPendingInvoices(null);
+            for (const invoice of pending) {
+                const statusResult = await billingProvider.getPaymentStatus({
+                    tenantId: invoice.tenant_id,
+                    invoiceId: String(invoice.id),
+                    providerReference: invoice.provider_reference
+                });
+
+                if (statusResult.status === 'paid') {
+                    await markInvoiceStatus(String(invoice.id), 'paid', null, invoice.provider_reference);
+                } else if (statusResult.status === 'failed') {
+                    await markInvoiceStatus(String(invoice.id), 'failed', null, invoice.provider_reference);
+                }
+            }
+        } catch (error) {
+            console.error('⚠️ Billing reconciliation failed:', error.message);
         }
     });
 }

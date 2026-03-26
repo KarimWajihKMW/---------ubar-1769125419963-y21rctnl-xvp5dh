@@ -88,7 +88,10 @@ services:
       SAAS_SERVICE_PORT: 4105
       DATABASE_URL: postgresql://postgres:postgres@db:5432/ubar
       BILLING_WEBHOOK_SECRET: billing-webhook-dev-secret
+      BILLING_PROVIDER: mockpay
+      MOCKPAY_CHECKOUT_BASE_URL: https://mockpay.local
       SAAS_BILLING_AUTOCYCLE_ENABLED: "false"
+      SAAS_RECONCILIATION_ENABLED: "false"
     ports:
       - "4105:4105"
 

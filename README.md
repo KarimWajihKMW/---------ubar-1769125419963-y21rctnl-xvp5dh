@@ -142,9 +142,12 @@ New production-focused capabilities added in microservices:
   - `GET /api/ms/saas/usage/summary/:tenantId`
   - `GET /api/ms/saas/billing/preview/:tenantId`
   - `POST /api/ms/saas/billing/invoices/issue`
+  - `POST /api/ms/saas/billing/checkout/session`
   - `GET /api/ms/saas/billing/invoices/:tenantId`
   - `POST /api/ms/saas/billing/webhooks/provider`
   - `POST /api/ms/saas/billing/cycle/run`
+  - `POST /api/ms/saas/billing/reconciliation/run`
+  - `GET /api/ms/saas/billing/reconciliation/summary`
 - Event bus endpoints:
   - `POST /api/ms/events/publish`
   - `GET /api/ms/events/events`
@@ -182,6 +185,19 @@ Prometheus-compatible metrics endpoints are available on:
 - Events service: `GET /metrics`
 
 Core metrics include request totals, latency histograms (monolith), and default Node.js process/runtime metrics.
+
+## Mobile gateway wiring
+
+Both Expo apps in `mobile/` now call gateway APIs directly for runtime health and feature previews.
+
+- Rider app calls:
+  - `GET /health`
+  - `POST /api/ms/payments/fare/calculate`
+- Driver app calls:
+  - `GET /health`
+  - `GET /api/ms/trips/match/recommendation`
+
+Set `EXPO_PUBLIC_API_BASE_URL` before running mobile apps if gateway is not on localhost.
 
 ## Kubernetes baseline
 
