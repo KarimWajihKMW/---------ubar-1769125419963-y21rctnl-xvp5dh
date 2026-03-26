@@ -1,0 +1,69 @@
+name: Production Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_live_smoke:
+        description: "Run live production smoke checks after local gate"
+        required: false
+        default: false
+        type: boolean
+      gateway_base_url:
+        description: "Optional gateway URL override for live smoke"
+        required: false
+        type: string
+      smoke_tenant_id:
+        description: "Optional tenant id for smoke checks"
+        required: false
+        default: "public"
+        type: string
+      smoke_role:
+        description: "Optional role for ops smoke checks"
+        required: false
+        default: "support"
+        type: string
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_ENV: production
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://x:x@localhost:5432/x' }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET || 'dummy-jwt-secret' }}
+      METRICS_TOKEN: ${{ secrets.METRICS_TOKEN || 'dummy-metrics-token' }}
+      BILLING_PROVIDER: ${{ secrets.BILLING_PROVIDER || 'mockpay' }}
+      PAYMENT_PROVIDER: ${{ secrets.PAYMENT_PROVIDER || 'mockpay' }}
+      BILLING_WEBHOOK_SECRET: ${{ secrets.BILLING_WEBHOOK_SECRET || 'dummy-billing-secret' }}
+      PAYMENT_WEBHOOK_SECRET: ${{ secrets.PAYMENT_WEBHOOK_SECRET || 'dummy-payment-secret' }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_SUCCESS_URL: ${{ secrets.STRIPE_SUCCESS_URL }}
+      STRIPE_CANCEL_URL: ${{ secrets.STRIPE_CANCEL_URL }}
+      RUN_PROD_SMOKE: ${{ inputs.run_live_smoke && '1' || '0' }}
+      GATEWAY_BASE_URL: ${{ inputs.gateway_base_url != '' && inputs.gateway_base_url || secrets.GATEWAY_BASE_URL }}
+      SMOKE_TENANT_ID: ${{ inputs.smoke_tenant_id }}
+      SMOKE_ROLE: ${{ inputs.smoke_role }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Validate smoke input when enabled
+        run: |
+          if [[ "${RUN_PROD_SMOKE}" == "1" && -z "${GATEWAY_BASE_URL}" ]]; then
+            echo "GATEWAY_BASE_URL is required when run_live_smoke=true" >&2
+            exit 1
+          fi
+
+      - name: Run release gate
+        run: npm run release:gate
