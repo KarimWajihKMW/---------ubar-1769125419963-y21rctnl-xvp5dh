@@ -322,6 +322,16 @@ async function main() {
       throw new Error('ops_escalation_list_failed');
     }
 
+    const slaBreachesResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/sla/breaches?limit=5&max_open_minutes=0', {
+      headers: {
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      }
+    });
+    if (!slaBreachesResp.res.ok || !slaBreachesResp.data?.success || !Array.isArray(slaBreachesResp.data?.data?.tickets) || !slaBreachesResp.data.data.tickets.length) {
+      throw new Error('ops_sla_breaches_failed');
+    }
+
     const fraudScoreResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ai/fraud/score', {
       method: 'POST',
       headers: {
@@ -512,6 +522,7 @@ async function main() {
       wallet_balance_after_withdrawal: withdrawalResp.data.data.user_id ? 'ok' : 'unknown',
       ops_ticket_id: ticketResp.data.data.id,
       ops_escalation_status: escalationResp.data.data.ticket.status,
+      ops_sla_breach_count: slaBreachesResp.data.data.breach_count,
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
       ai_surge: pricingResp.data.data.surge_multiplier,
       saas_plan: subResp.data.data.plan_code,

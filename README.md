@@ -133,6 +133,7 @@ New production-focused capabilities added in microservices:
   - `PATCH /api/ms/ops/support/tickets/:id`
   - `POST /api/ms/ops/support/tickets/:id/escalate`
   - `GET /api/ms/ops/support/escalations`
+  - `GET /api/ms/ops/support/sla/breaches`
   - `GET /api/ms/ops/audit/logs`
 - AI endpoints:
   - `POST /api/ms/ai/fraud/score`

@@ -479,6 +479,66 @@ app.get('/api/ops-service/support/escalations', requireRole(['admin', 'support',
     }
 });
 
+app.get('/api/ops-service/support/sla/breaches', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+        const maxOpenMinutes = Math.max(0, Number(req.query.max_open_minutes || 30));
+
+        if (pool) {
+            const result = await pool.query(
+                `SELECT id, tenant_id, rider_id, driver_id, category, priority, status, summary, details, created_by_role, assignee, created_at, updated_at,
+                        ROUND(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0, 2) AS age_minutes
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1
+                   AND status IN ('open', 'escalated', 'in_progress')
+                   AND EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0 >= $2
+                 ORDER BY created_at ASC
+                 LIMIT $3`,
+                [tenantId, maxOpenMinutes, limit]
+            );
+
+            return res.json({
+                success: true,
+                data: {
+                    tenant_id: tenantId,
+                    max_open_minutes: maxOpenMinutes,
+                    breach_count: result.rows.length,
+                    tickets: result.rows
+                }
+            });
+        }
+
+        const now = Date.now();
+        const tickets = memTickets
+            .filter((x) => x.tenant_id === tenantId)
+            .filter((x) => ['open', 'escalated', 'in_progress'].includes(String(x.status || '').toLowerCase()))
+            .map((x) => {
+                const createdAtMs = Date.parse(x.created_at || new Date().toISOString());
+                const ageMinutes = Math.max(0, (now - createdAtMs) / (1000 * 60));
+                return {
+                    ...x,
+                    age_minutes: Number(ageMinutes.toFixed(2))
+                };
+            })
+            .filter((x) => x.age_minutes >= maxOpenMinutes)
+            .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+            .slice(0, limit);
+
+        return res.json({
+            success: true,
+            data: {
+                tenant_id: tenantId,
+                max_open_minutes: maxOpenMinutes,
+                breach_count: tickets.length,
+                tickets
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'sla_breach_list_failed', message: error.message });
+    }
+});
+
 app.get('/api/ops-service/audit/logs', requireRole(['admin', 'compliance']), async (req, res) => {
     try {
         const tenantId = getTenantId(req);
