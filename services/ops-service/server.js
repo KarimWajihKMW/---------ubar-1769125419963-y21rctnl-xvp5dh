@@ -20,6 +20,7 @@ const memTickets = [];
 const memAudit = [];
 const memAssignments = [];
 const memEscalations = [];
+const memAlertAcks = [];
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -97,6 +98,17 @@ async function ensureSchema() {
             escalated_by_role TEXT NOT NULL,
             level TEXT NOT NULL DEFAULT 'high',
             reason TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS ms_support_alert_acknowledgements (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            alert_code TEXT NOT NULL,
+            acknowledged_by_role TEXT NOT NULL,
+            note TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     `);
@@ -786,6 +798,77 @@ app.get('/api/ops-service/support/alerts', requireRole(['admin', 'support', 'com
         });
     } catch (error) {
         return res.status(500).json({ success: false, error: 'support_alerts_failed', message: error.message });
+    }
+});
+
+app.post('/api/ops-service/support/alerts/ack', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const actorRole = getRole(req);
+        const alertCode = String(req.body.alert_code || '').trim().toLowerCase();
+        const note = String(req.body.note || '').trim();
+
+        if (!alertCode) {
+            return res.status(400).json({ success: false, error: 'alert_code_required' });
+        }
+
+        let ack;
+        if (pool) {
+            const result = await pool.query(
+                `INSERT INTO ms_support_alert_acknowledgements (tenant_id, alert_code, acknowledged_by_role, note)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING id, tenant_id, alert_code, acknowledged_by_role, note, created_at`,
+                [tenantId, alertCode, actorRole, note || null]
+            );
+            ack = result.rows[0];
+        } else {
+            ack = {
+                id: `ack-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                tenant_id: tenantId,
+                alert_code: alertCode,
+                acknowledged_by_role: actorRole,
+                note: note || null,
+                created_at: new Date().toISOString()
+            };
+            memAlertAcks.push(ack);
+        }
+
+        await writeAudit({
+            tenantId,
+            actorRole,
+            action: 'support_alert_acknowledged',
+            targetType: 'alert',
+            targetId: alertCode,
+            metadata: { note: note || null }
+        });
+
+        return res.json({ success: true, data: ack });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'support_alert_ack_failed', message: error.message });
+    }
+});
+
+app.get('/api/ops-service/support/alerts/acks', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+
+        if (pool) {
+            const result = await pool.query(
+                `SELECT id, tenant_id, alert_code, acknowledged_by_role, note, created_at
+                 FROM ms_support_alert_acknowledgements
+                 WHERE tenant_id = $1
+                 ORDER BY id DESC
+                 LIMIT $2`,
+                [tenantId, limit]
+            );
+            return res.json({ success: true, data: result.rows });
+        }
+
+        const items = memAlertAcks.filter((x) => x.tenant_id === tenantId).slice(-limit).reverse();
+        return res.json({ success: true, data: items });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'support_alert_acks_list_failed', message: error.message });
     }
 });
 

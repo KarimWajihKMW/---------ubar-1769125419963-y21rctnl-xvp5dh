@@ -136,6 +136,8 @@ New production-focused capabilities added in microservices:
   - `GET /api/ms/ops/support/sla/breaches`
   - `GET /api/ms/ops/support/kpis`
   - `GET /api/ms/ops/support/alerts`
+  - `POST /api/ms/ops/support/alerts/ack`
+  - `GET /api/ms/ops/support/alerts/acks`
   - `POST /api/ms/ops/support/tickets/reprioritize`
   - `POST /api/ms/ops/support/tickets/auto-close`
   - `GET /api/ms/ops/support/handoff/summary`

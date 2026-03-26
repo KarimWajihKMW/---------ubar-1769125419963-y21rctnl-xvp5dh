@@ -352,6 +352,37 @@ async function main() {
       throw new Error('ops_support_alerts_failed');
     }
 
+    const alertCodeToAck = String(supportAlertsResp.data.data.alerts[0].code || '').trim();
+    if (!alertCodeToAck) {
+      throw new Error('ops_support_alert_missing_code');
+    }
+
+    const ackAlertResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/alerts/ack', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      },
+      body: JSON.stringify({
+        alert_code: alertCodeToAck,
+        note: 'ack from integration pipeline'
+      })
+    });
+    if (!ackAlertResp.res.ok || !ackAlertResp.data?.success || !ackAlertResp.data?.data?.alert_code) {
+      throw new Error('ops_support_alert_ack_failed');
+    }
+
+    const alertAcksResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/alerts/acks?limit=5', {
+      headers: {
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      }
+    });
+    if (!alertAcksResp.res.ok || !alertAcksResp.data?.success || !Array.isArray(alertAcksResp.data?.data) || !alertAcksResp.data.data.length) {
+      throw new Error('ops_support_alert_acks_list_failed');
+    }
+
     const reprioritizeResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/tickets/reprioritize', {
       method: 'POST',
       headers: {
@@ -588,6 +619,7 @@ async function main() {
       ops_sla_breach_count: slaBreachesResp.data.data.breach_count,
       ops_escalated_tickets: supportKpisResp.data.data.escalated_tickets,
       ops_alerts_count: supportAlertsResp.data.data.alerts.length,
+      ops_alert_acks_count: alertAcksResp.data.data.length,
       ops_reprioritized_count: reprioritizeResp.data.data.updated_count,
       ops_auto_closed_count: autoCloseResp.data.data.updated_count,
       ops_handoff_escalated_open: handoffSummaryResp.data.data.totals.escalated_open,
