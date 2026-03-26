@@ -1311,6 +1311,20 @@ registerAiRoutes(app, { pool, requirePermission, requireRole });
 
 app.use(express.static('.'));
 
+const spaIndexFile = path.join(__dirname, 'index.html');
+app.get([
+    '/home',
+    '/home/*',
+    '/tenants',
+    '/tenants/*',
+    '/mra',
+    '/mra/*',
+    '/admin',
+    '/admin/*'
+], (req, res) => {
+    res.sendFile(spaIndexFile);
+});
+
 // Protect /uploads from public access to sensitive files
 app.use('/uploads', (req, res, next) => {
     try {

@@ -20,6 +20,7 @@ const selectRoleImpl = function(role) {
     }
 
     if (role === 'passenger') {
+        syncRolePath('passenger');
         console.log('🧑 Passenger selected');
         // Check for existing session (Auto Login)
         if (typeof DB !== 'undefined' && DB.hasSession()) {
@@ -47,6 +48,7 @@ const selectRoleImpl = function(role) {
             }
         }
     } else if (role === 'driver' || role === 'admin') {
+        syncRolePath(role);
         console.log('🚗/📊 Driver or Admin selected:', role);
         if (typeof openRoleLoginModal === 'function') {
             openRoleLoginModal(role);
@@ -291,6 +293,103 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- Global State ---
 let currentUserRole = null; // 'passenger', 'driver', 'admin'
+const ROLE_PATHS = Object.freeze({
+    passenger: '/home',
+    // Kept per requested naming examples in task statement.
+    driver: '/tenants',
+    admin: '/admin'
+});
+const ROLE_PATH_ALIASES = Object.freeze({
+    '/mra': 'driver'
+});
+const PASSENGER_SECTION_PATHS = Object.freeze({
+    destination: '',
+    rideSelect: '/ride-select',
+    loading: '/loading',
+    driver: '/driver',
+    inRide: '/in-ride',
+    'payment-method': '/payment-method',
+    'payment-invoice': '/payment-invoice',
+    'payment-success': '/payment-success',
+    rating: '/rating',
+    profile: '/profile',
+    chat: '/chat',
+    'trip-history': '/trip-history',
+    'trip-details': '/trip-details',
+    offers: '/offers'
+});
+const PASSENGER_PATH_TO_SECTION = Object.freeze({
+    '/': 'destination',
+    '/ride-select': 'rideSelect',
+    '/loading': 'loading',
+    '/driver': 'driver',
+    '/in-ride': 'inRide',
+    '/payment-method': 'payment-method',
+    '/payment-invoice': 'payment-invoice',
+    '/payment-success': 'payment-success',
+    '/rating': 'rating',
+    '/profile': 'profile',
+    '/chat': 'chat',
+    '/trip-history': 'trip-history',
+    '/trip-details': 'trip-details',
+    '/offers': 'offers'
+});
+// Temporarily disables URL write-back while we are applying URL-driven UI state.
+let suppressPathSync = false;
+// Stores initial passenger section parsed from pathname until passenger mode is initialized.
+let pendingPassengerSectionFromPath = null;
+
+function normalizePathname(pathname) {
+    const p = String(pathname || '/').trim();
+    const withLeading = p.startsWith('/') ? p : `/${p}`;
+    const cleaned = withLeading.replace(/\/{2,}/g, '/');
+    return cleaned.length > 1 ? cleaned.replace(/\/$/, '') : cleaned;
+}
+
+function setPathname(pathname, { replace = false } = {}) {
+    const target = normalizePathname(pathname);
+    const current = normalizePathname(window.location.pathname);
+    if (target === current) return;
+    const action = replace ? 'replaceState' : 'pushState';
+    window.history[action]({}, '', target);
+}
+
+function getRoleFromPathname(pathname) {
+    const normalized = normalizePathname(pathname);
+    const aliasRole = ROLE_PATH_ALIASES[normalized];
+    if (aliasRole) return aliasRole;
+    if (normalized === ROLE_PATHS.passenger || normalized.startsWith(`${ROLE_PATHS.passenger}/`)) return 'passenger';
+    if (normalized === ROLE_PATHS.driver || normalized.startsWith(`${ROLE_PATHS.driver}/`)) return 'driver';
+    if (normalized === ROLE_PATHS.admin || normalized.startsWith(`${ROLE_PATHS.admin}/`)) return 'admin';
+    return null;
+}
+
+function resolvePassengerSectionFromPath(pathname) {
+    const normalized = normalizePathname(pathname);
+    if (!normalized.startsWith(ROLE_PATHS.passenger)) return null;
+    const suffixRaw = normalized.slice(ROLE_PATHS.passenger.length);
+    const suffix = suffixRaw === '' ? '/' : suffixRaw;
+    return PASSENGER_PATH_TO_SECTION[suffix] || null;
+}
+
+function syncRolePath(role, { replace = false } = {}) {
+    if (suppressPathSync) return;
+    const next = ROLE_PATHS[role];
+    if (next) setPathname(next, { replace });
+}
+
+function syncPassengerSectionPath(section, { replace = false } = {}) {
+    if (suppressPathSync || currentUserRole !== 'passenger') return;
+    const suffix = PASSENGER_SECTION_PATHS[section];
+    if (suffix === undefined) return;
+    setPathname(`${ROLE_PATHS.passenger}${suffix}`, { replace });
+}
+
+function applyPathRouting() {
+    const role = getRoleFromPathname(window.location.pathname);
+    const passengerSection = resolvePassengerSectionFromPath(window.location.pathname);
+    return { role, passengerSection };
+}
 let currentCarType = null;
 let currentTripPrice = 0;
 let previousState = 'driver';
@@ -9173,6 +9272,7 @@ function loginSuccess() {
 function initPassengerMode() {
     currentUserRole = 'passenger';
     window.currentUserRole = 'passenger';
+    syncRolePath('passenger');
     // JWT is now available -> subscribe for match timeline updates
     subscribeUserRealtime();
     document.body.classList.add('role-passenger');
@@ -9245,6 +9345,19 @@ function initPassengerMode() {
     restorePassengerActiveTrip().catch((error) => {
         console.warn('Failed to restore active passenger trip:', error?.message || error);
     });
+
+    if (pendingPassengerSectionFromPath && pendingPassengerSectionFromPath !== 'destination') {
+        const targetSection = pendingPassengerSectionFromPath;
+        pendingPassengerSectionFromPath = null;
+        suppressPathSync = true;
+        try {
+            window.switchSection(targetSection);
+        } finally {
+            suppressPathSync = false;
+        }
+    } else {
+        pendingPassengerSectionFromPath = null;
+    }
 }
 
 window.switchToPassengerMode = function() {
@@ -9259,6 +9372,7 @@ window.switchToPassengerMode = function() {
 function initDriverMode() {
     currentUserRole = 'driver';
     window.currentUserRole = 'driver';
+    syncRolePath('driver');
     document.body.classList.add('role-driver');
     document.body.classList.remove('role-passenger');
     document.getElementById('driver-ui-container').classList.remove('hidden');
@@ -9304,6 +9418,9 @@ function initDriverMode() {
 }
 
 function initAdminMode() {
+    currentUserRole = 'admin';
+    window.currentUserRole = 'admin';
+    syncRolePath('admin');
     document.getElementById('admin-ui-container').classList.remove('hidden');
     renderAdminTrips();
     loadAdminDashboardStats();
@@ -11829,8 +11946,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const roleModal = document.getElementById('role-selection-modal');
         const params = new URLSearchParams(window.location.search);
         const requestedRole = (params.get('role') || params.get('mode') || '').toLowerCase();
+        const pathRouting = applyPathRouting();
+        if (pathRouting.passengerSection) {
+            pendingPassengerSectionFromPath = pathRouting.passengerSection;
+        }
         const allowedRoles = ['passenger', 'driver', 'admin'];
-        const forcedRole = allowedRoles.includes(requestedRole) ? requestedRole : null;
+        const pathRole = allowedRoles.includes(pathRouting.role) ? pathRouting.role : null;
+        const forcedRole = pathRole || (allowedRoles.includes(requestedRole) ? requestedRole : null);
 
         const hasSession = DB.hasSession();
         const user = hasSession ? DB.getUser() : null;
@@ -11855,6 +11977,29 @@ document.addEventListener('DOMContentLoaded', () => {
             roleModal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
             document.body.classList.remove('role-driver', 'role-passenger');
         }
+
+        window.addEventListener('popstate', () => {
+            const route = applyPathRouting();
+            if (route.role && route.role !== currentUserRole) {
+                if (route.role === 'driver') {
+                    initDriverMode();
+                } else if (route.role === 'admin') {
+                    initAdminMode();
+                } else {
+                    initPassengerMode();
+                }
+                return;
+            }
+
+            if (route.role === 'passenger' && route.passengerSection && typeof window.switchSection === 'function') {
+                suppressPathSync = true;
+                try {
+                    window.switchSection(route.passengerSection);
+                } finally {
+                    suppressPathSync = false;
+                }
+            }
+        });
 
         // Open auth modal directly when URL hash requests it
         const hash = window.location.hash;
@@ -13530,6 +13675,7 @@ window.switchSection = function(section) {
     }
 
     originalSwitchSection(section);
+    syncPassengerSectionPath(section);
 
     if (section === 'driver') {
         resetDriverInfoPanel();
