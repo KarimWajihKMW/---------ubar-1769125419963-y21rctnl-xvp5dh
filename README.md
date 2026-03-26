@@ -188,6 +188,7 @@ Useful scripts:
 - `npm run micro:down`
 - `npm run test:gateway`
 - `npm run preflight:prod`
+- `npm run smoke:prod`
 - `npm run sync:secrets:k8s`
 - `npm run release:gate`
 
@@ -200,6 +201,14 @@ Release gate runs full local launch checks in one command:
 
 - Script: `scripts/release-gate.sh`
 - Command: `npm run release:gate`
+
+Optional live production smoke checks (read-only) can be included in release gate:
+
+- Script: `scripts/smoke-production.js`
+- Command: `npm run smoke:prod`
+- Required env: `GATEWAY_BASE_URL`
+- Optional env: `SMOKE_TENANT_ID`, `SMOKE_ROLE`
+- To run from release gate: set `RUN_PROD_SMOKE=1`
 
 Kubernetes secret sync helper:
 
