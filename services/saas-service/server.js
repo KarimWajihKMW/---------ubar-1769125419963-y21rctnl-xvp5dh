@@ -12,6 +12,10 @@ const pool = useDatabase ? new Pool({ connectionString: process.env.DATABASE_URL
 const billingWebhookSecret = process.env.BILLING_WEBHOOK_SECRET || 'billing-webhook-dev-secret';
 const billingProviderName = process.env.BILLING_PROVIDER || 'mockpay';
 const mockCheckoutBaseUrl = process.env.MOCKPAY_CHECKOUT_BASE_URL || 'https://mockpay.local';
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || '';
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+const stripeSuccessUrl = process.env.STRIPE_SUCCESS_URL || 'https://example.com/billing/success';
+const stripeCancelUrl = process.env.STRIPE_CANCEL_URL || 'https://example.com/billing/cancel';
 const autoCycleEnabled = String(process.env.SAAS_BILLING_AUTOCYCLE_ENABLED || 'false').toLowerCase() === 'true';
 const autoCycleSchedule = process.env.SAAS_BILLING_AUTOCYCLE_CRON || '0 1 * * *';
 const reconciliationEnabled = String(process.env.SAAS_RECONCILIATION_ENABLED || 'false').toLowerCase() === 'true';
@@ -20,7 +24,11 @@ const reconciliationSchedule = process.env.SAAS_RECONCILIATION_CRON || '*/30 * *
 const billingProvider = createBillingProvider({
     provider: billingProviderName,
     webhookSecret: billingWebhookSecret,
-    mockCheckoutBaseUrl
+    mockCheckoutBaseUrl,
+    stripeSecretKey,
+    stripeWebhookSecret,
+    stripeSuccessUrl,
+    stripeCancelUrl
 });
 
 const metricsRegistry = new promClient.Registry();
@@ -170,6 +178,16 @@ app.get('/metrics', async (_req, res) => {
 
 app.get('/api/saas-service/plans', (_req, res) => {
     return res.json({ success: true, data: Object.values(plans) });
+});
+
+app.get('/api/saas-service/billing/provider/status', requireRole(['super-admin', 'admin']), (_req, res) => {
+    return res.json({
+        success: true,
+        data: {
+            provider: billingProvider.name,
+            meta: billingProvider.meta || { configured: true, mode: 'active' }
+        }
+    });
 });
 
 app.post('/api/saas-service/tenants', requireRole(['super-admin', 'admin']), async (req, res) => {

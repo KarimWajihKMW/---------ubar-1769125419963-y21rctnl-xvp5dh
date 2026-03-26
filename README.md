@@ -143,6 +143,7 @@ New production-focused capabilities added in microservices:
   - `GET /api/ms/saas/billing/preview/:tenantId`
   - `POST /api/ms/saas/billing/invoices/issue`
   - `POST /api/ms/saas/billing/checkout/session`
+  - `GET /api/ms/saas/billing/provider/status`
   - `GET /api/ms/saas/billing/invoices/:tenantId`
   - `POST /api/ms/saas/billing/webhooks/provider`
   - `POST /api/ms/saas/billing/cycle/run`
@@ -198,6 +199,22 @@ Both Expo apps in `mobile/` now call gateway APIs directly for runtime health an
   - `GET /api/ms/trips/match/recommendation`
 
 Set `EXPO_PUBLIC_API_BASE_URL` before running mobile apps if gateway is not on localhost.
+
+## Billing providers
+
+SaaS billing supports provider adapters:
+
+- `mockpay` (default, deterministic testing)
+- `stripe` (live-capable if Stripe env keys are provided)
+
+Provider-related environment variables:
+
+- `BILLING_PROVIDER`
+- `BILLING_WEBHOOK_SECRET`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_SUCCESS_URL`
+- `STRIPE_CANCEL_URL`
 
 ## Kubernetes baseline
 

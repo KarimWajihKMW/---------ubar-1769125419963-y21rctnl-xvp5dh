@@ -28,6 +28,10 @@ spec:
               value: mockpay
             - name: MOCKPAY_CHECKOUT_BASE_URL
               value: https://mockpay.local
+            - name: STRIPE_SUCCESS_URL
+              value: https://example.com/billing/success
+            - name: STRIPE_CANCEL_URL
+              value: https://example.com/billing/cancel
             - name: SAAS_BILLING_AUTOCYCLE_ENABLED
               value: "false"
             - name: SAAS_RECONCILIATION_ENABLED
