@@ -539,6 +539,119 @@ app.get('/api/ops-service/support/sla/breaches', requireRole(['admin', 'support'
     }
 });
 
+app.get('/api/ops-service/support/kpis', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const windowMinutes = Math.max(1, Math.min(7 * 24 * 60, Number(req.query.window_minutes || 1440)));
+
+        if (pool) {
+            const totalsRes = await pool.query(
+                `SELECT
+                    COUNT(*)::int AS total_tickets,
+                    COUNT(*) FILTER (WHERE status = 'open')::int AS open_tickets,
+                    COUNT(*) FILTER (WHERE status = 'escalated')::int AS escalated_tickets,
+                    COUNT(*) FILTER (WHERE status = 'closed')::int AS closed_tickets,
+                    COUNT(*) FILTER (WHERE priority = 'critical')::int AS critical_tickets,
+                    ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0) FILTER (WHERE status IN ('open', 'escalated', 'in_progress')), 2) AS avg_open_age_minutes
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1`,
+                [tenantId]
+            );
+
+            const breachesRes = await pool.query(
+                `SELECT COUNT(*)::int AS breach_count
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1
+                   AND status IN ('open', 'escalated', 'in_progress')
+                   AND EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0 >= 30`,
+                [tenantId]
+            );
+
+            const escalationsWindowRes = await pool.query(
+                `SELECT COUNT(*)::int AS escalations_in_window
+                 FROM ms_ticket_escalations
+                 WHERE tenant_id = $1
+                   AND created_at >= NOW() - ($2::text || ' minutes')::interval`,
+                [tenantId, windowMinutes]
+            );
+
+            const t = totalsRes.rows[0] || {};
+            const b = breachesRes.rows[0] || {};
+            const ew = escalationsWindowRes.rows[0] || {};
+
+            return res.json({
+                success: true,
+                data: {
+                    tenant_id: tenantId,
+                    window_minutes: windowMinutes,
+                    total_tickets: Number(t.total_tickets || 0),
+                    open_tickets: Number(t.open_tickets || 0),
+                    escalated_tickets: Number(t.escalated_tickets || 0),
+                    closed_tickets: Number(t.closed_tickets || 0),
+                    critical_tickets: Number(t.critical_tickets || 0),
+                    avg_open_age_minutes: Number(t.avg_open_age_minutes || 0),
+                    sla_breach_count: Number(b.breach_count || 0),
+                    escalations_in_window: Number(ew.escalations_in_window || 0)
+                }
+            });
+        }
+
+        const now = Date.now();
+        const windowMs = windowMinutes * 60 * 1000;
+        const ticketSet = memTickets.filter((x) => x.tenant_id === tenantId);
+        const openStatuses = new Set(['open', 'escalated', 'in_progress']);
+
+        const openTickets = ticketSet.filter((x) => String(x.status || '').toLowerCase() === 'open').length;
+        const escalatedTickets = ticketSet.filter((x) => String(x.status || '').toLowerCase() === 'escalated').length;
+        const closedTickets = ticketSet.filter((x) => String(x.status || '').toLowerCase() === 'closed').length;
+        const criticalTickets = ticketSet.filter((x) => String(x.priority || '').toLowerCase() === 'critical').length;
+
+        const openAges = ticketSet
+            .filter((x) => openStatuses.has(String(x.status || '').toLowerCase()))
+            .map((x) => {
+                const createdAtMs = Date.parse(x.created_at || new Date().toISOString());
+                return Math.max(0, (now - createdAtMs) / (1000 * 60));
+            });
+
+        const avgOpenAgeMinutes = openAges.length
+            ? Number((openAges.reduce((sum, v) => sum + v, 0) / openAges.length).toFixed(2))
+            : 0;
+
+        const slaBreachCount = ticketSet
+            .filter((x) => openStatuses.has(String(x.status || '').toLowerCase()))
+            .filter((x) => {
+                const createdAtMs = Date.parse(x.created_at || new Date().toISOString());
+                const ageMinutes = Math.max(0, (now - createdAtMs) / (1000 * 60));
+                return ageMinutes >= 30;
+            }).length;
+
+        const escalationsInWindow = memEscalations
+            .filter((x) => x.tenant_id === tenantId)
+            .filter((x) => {
+                const createdAtMs = Date.parse(x.created_at || new Date().toISOString());
+                return now - createdAtMs <= windowMs;
+            }).length;
+
+        return res.json({
+            success: true,
+            data: {
+                tenant_id: tenantId,
+                window_minutes: windowMinutes,
+                total_tickets: ticketSet.length,
+                open_tickets: openTickets,
+                escalated_tickets: escalatedTickets,
+                closed_tickets: closedTickets,
+                critical_tickets: criticalTickets,
+                avg_open_age_minutes: avgOpenAgeMinutes,
+                sla_breach_count: slaBreachCount,
+                escalations_in_window: escalationsInWindow
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'support_kpis_failed', message: error.message });
+    }
+});
+
 app.get('/api/ops-service/audit/logs', requireRole(['admin', 'compliance']), async (req, res) => {
     try {
         const tenantId = getTenantId(req);
