@@ -1,11 +1,16 @@
 const express = require('express');
 const promClient = require('prom-client');
 const { Pool } = require('pg');
+const { createHmac, timingSafeEqual } = require('crypto');
+const cron = require('node-cron');
 
 const app = express();
 const PORT = Number(process.env.SAAS_SERVICE_PORT || 4105);
 const useDatabase = Boolean(process.env.DATABASE_URL);
 const pool = useDatabase ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+const billingWebhookSecret = process.env.BILLING_WEBHOOK_SECRET || 'billing-webhook-dev-secret';
+const autoCycleEnabled = String(process.env.SAAS_BILLING_AUTOCYCLE_ENABLED || 'false').toLowerCase() === 'true';
+const autoCycleSchedule = process.env.SAAS_BILLING_AUTOCYCLE_CRON || '0 1 * * *';
 
 const metricsRegistry = new promClient.Registry();
 promClient.collectDefaultMetrics({ register: metricsRegistry, prefix: 'ubar_saas_service_' });
@@ -21,6 +26,8 @@ app.use(express.json({ limit: '1mb' }));
 const memTenants = new Map();
 const memSubscriptions = new Map();
 const memUsageEvents = [];
+const memInvoices = [];
+const memWebhookEvents = [];
 
 const plans = {
     starter: { code: 'starter', monthly_price: 199, included_rides: 5000, overage_per_ride: 0.05 },
@@ -88,6 +95,50 @@ async function ensureSchema() {
             recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS ms_saas_invoices (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            plan_code TEXT NOT NULL,
+            billing_period TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            currency TEXT NOT NULL DEFAULT 'USD',
+            base_amount NUMERIC(14,2) NOT NULL,
+            overage_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+            total_amount NUMERIC(14,2) NOT NULL,
+            provider_reference TEXT,
+            details JSONB NOT NULL DEFAULT '{}'::jsonb,
+            issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            paid_at TIMESTAMPTZ
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS ms_saas_billing_webhook_events (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT,
+            provider TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            signature_valid BOOLEAN NOT NULL,
+            payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+}
+
+function signWebhookPayload(payload) {
+    const body = JSON.stringify(payload);
+    return createHmac('sha256', billingWebhookSecret).update(body).digest('hex');
+}
+
+function verifyWebhookSignature(payload, signature) {
+    if (!signature) return false;
+    const expected = signWebhookPayload(payload);
+    const a = Buffer.from(String(expected));
+    const b = Buffer.from(String(signature));
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
 }
 
 app.use((req, res, next) => {
@@ -336,6 +387,116 @@ async function getUsageSum(tenantId, metric) {
         .reduce((sum, x) => sum + Number(x.quantity || 0), 0);
 }
 
+async function calculateBilling(tenantId) {
+    const subscription = await getSubscription(tenantId);
+    if (!subscription) {
+        throw new Error('subscription_not_found');
+    }
+
+    const plan = plans[subscription.plan_code];
+    if (!plan) {
+        throw new Error('plan_not_found');
+    }
+
+    const rides = await getUsageSum(tenantId, 'rides');
+    const overageRides = Math.max(0, rides - plan.included_rides);
+    const overageCost = Number((overageRides * plan.overage_per_ride).toFixed(2));
+    const total = Number((plan.monthly_price + overageCost).toFixed(2));
+
+    return {
+        subscription,
+        plan,
+        usage: { rides, overage_rides: overageRides },
+        charges: {
+            base_monthly: plan.monthly_price,
+            overage: overageCost,
+            total
+        }
+    };
+}
+
+function getBillingPeriod(date = new Date()) {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+}
+
+async function issueInvoiceForTenant(tenantId, metadata = {}) {
+    const billing = await calculateBilling(tenantId);
+    const billingPeriod = getBillingPeriod();
+    const providerReference = `mockpay_${tenantId}_${Date.now()}`;
+
+    if (pool) {
+        const result = await pool.query(
+            `INSERT INTO ms_saas_invoices
+             (tenant_id, plan_code, billing_period, status, currency, base_amount, overage_amount, total_amount, provider_reference, details)
+             VALUES ($1, $2, $3, 'pending', 'USD', $4, $5, $6, $7, $8)
+             RETURNING id, tenant_id, plan_code, billing_period, status, currency,
+                base_amount::float8 AS base_amount,
+                overage_amount::float8 AS overage_amount,
+                total_amount::float8 AS total_amount,
+                provider_reference, details, issued_at, paid_at`,
+            [
+                tenantId,
+                billing.subscription.plan_code,
+                billingPeriod,
+                billing.charges.base_monthly,
+                billing.charges.overage,
+                billing.charges.total,
+                providerReference,
+                { ...billing, metadata }
+            ]
+        );
+        return result.rows[0];
+    }
+
+    const invoice = {
+        id: `inv-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        tenant_id: tenantId,
+        plan_code: billing.subscription.plan_code,
+        billing_period: billingPeriod,
+        status: 'pending',
+        currency: 'USD',
+        base_amount: billing.charges.base_monthly,
+        overage_amount: billing.charges.overage,
+        total_amount: billing.charges.total,
+        provider_reference: providerReference,
+        details: { ...billing, metadata },
+        issued_at: new Date().toISOString(),
+        paid_at: null
+    };
+    memInvoices.push(invoice);
+    return invoice;
+}
+
+async function markInvoiceStatus(invoiceId, status, paidAt, providerReference) {
+    if (pool) {
+        const result = await pool.query(
+            `UPDATE ms_saas_invoices
+             SET status = $2,
+                 paid_at = CASE WHEN $2 = 'paid' THEN COALESCE($3::timestamptz, NOW()) ELSE paid_at END,
+                 provider_reference = COALESCE($4, provider_reference)
+             WHERE id::text = $1
+             RETURNING id, tenant_id, plan_code, billing_period, status, currency,
+                base_amount::float8 AS base_amount,
+                overage_amount::float8 AS overage_amount,
+                total_amount::float8 AS total_amount,
+                provider_reference, details, issued_at, paid_at`,
+            [invoiceId, status, paidAt || null, providerReference || null]
+        );
+        return result.rows[0] || null;
+    }
+
+    const idx = memInvoices.findIndex((x) => String(x.id) === String(invoiceId));
+    if (idx < 0) return null;
+    memInvoices[idx].status = status;
+    if (status === 'paid') {
+        memInvoices[idx].paid_at = paidAt || new Date().toISOString();
+    }
+    if (providerReference) memInvoices[idx].provider_reference = providerReference;
+    return memInvoices[idx];
+}
+
 app.get('/api/saas-service/usage/summary/:tenantId', requireRole(['super-admin', 'admin', 'tenant-admin']), async (req, res) => {
     try {
         const tenantId = String(req.params.tenantId || '').trim().toLowerCase();
@@ -362,40 +523,182 @@ app.get('/api/saas-service/usage/summary/:tenantId', requireRole(['super-admin',
 app.get('/api/saas-service/billing/preview/:tenantId', requireRole(['super-admin', 'admin', 'tenant-admin']), async (req, res) => {
     try {
         const tenantId = String(req.params.tenantId || '').trim().toLowerCase();
-        const subscription = await getSubscription(tenantId);
-
-        if (!subscription) {
-            return res.status(404).json({ success: false, error: 'subscription_not_found' });
-        }
-
-        const plan = plans[subscription.plan_code];
-        if (!plan) {
-            return res.status(422).json({ success: false, error: 'plan_not_found' });
-        }
-
-        const rides = await getUsageSum(tenantId, 'rides');
-        const overageRides = Math.max(0, rides - plan.included_rides);
-        const overageCost = Number((overageRides * plan.overage_per_ride).toFixed(2));
-        const total = Number((plan.monthly_price + overageCost).toFixed(2));
+        const billing = await calculateBilling(tenantId);
 
         return res.json({
             success: true,
             data: {
                 tenant_id: tenantId,
-                subscription,
-                plan,
-                usage: { rides, overage_rides: overageRides },
-                charges: {
-                    base_monthly: plan.monthly_price,
-                    overage: overageCost,
-                    total
-                }
+                ...billing
             }
         });
     } catch (error) {
+        if (error.message === 'subscription_not_found') {
+            return res.status(404).json({ success: false, error: 'subscription_not_found' });
+        }
+        if (error.message === 'plan_not_found') {
+            return res.status(422).json({ success: false, error: 'plan_not_found' });
+        }
         return res.status(500).json({ success: false, error: 'billing_preview_failed', message: error.message });
     }
 });
+
+app.post('/api/saas-service/billing/invoices/issue', requireRole(['super-admin', 'admin']), async (req, res) => {
+    try {
+        const tenantId = String(req.body.tenant_id || '').trim().toLowerCase();
+        if (!tenantId) {
+            return res.status(400).json({ success: false, error: 'tenant_id_required' });
+        }
+
+        const invoice = await issueInvoiceForTenant(tenantId, { source: req.body.source || 'manual' });
+        return res.json({ success: true, data: invoice });
+    } catch (error) {
+        if (error.message === 'subscription_not_found') {
+            return res.status(404).json({ success: false, error: 'subscription_not_found' });
+        }
+        if (error.message === 'plan_not_found') {
+            return res.status(422).json({ success: false, error: 'plan_not_found' });
+        }
+        return res.status(500).json({ success: false, error: 'invoice_issue_failed', message: error.message });
+    }
+});
+
+app.get('/api/saas-service/billing/invoices/:tenantId', requireRole(['super-admin', 'admin', 'tenant-admin']), async (req, res) => {
+    try {
+        const tenantId = String(req.params.tenantId || '').trim().toLowerCase();
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+
+        if (pool) {
+            const result = await pool.query(
+                `SELECT id, tenant_id, plan_code, billing_period, status, currency,
+                    base_amount::float8 AS base_amount,
+                    overage_amount::float8 AS overage_amount,
+                    total_amount::float8 AS total_amount,
+                    provider_reference, details, issued_at, paid_at
+                 FROM ms_saas_invoices
+                 WHERE tenant_id = $1
+                 ORDER BY id DESC
+                 LIMIT $2`,
+                [tenantId, limit]
+            );
+            return res.json({ success: true, data: result.rows });
+        }
+
+        const data = memInvoices.filter((x) => x.tenant_id === tenantId).slice(-limit).reverse();
+        return res.json({ success: true, data });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'invoice_list_failed', message: error.message });
+    }
+});
+
+app.post('/api/saas-service/billing/webhooks/provider', async (req, res) => {
+    try {
+        const payload = req.body || {};
+        const signature = String(req.headers['x-billing-signature'] || '');
+        const signatureValid = verifyWebhookSignature(payload, signature);
+        const provider = String(payload.provider || 'mockpay').trim();
+        const eventType = String(payload.event_type || '').trim();
+        const tenantId = payload.tenant_id ? String(payload.tenant_id).trim().toLowerCase() : null;
+
+        if (pool) {
+            await pool.query(
+                `INSERT INTO ms_saas_billing_webhook_events (tenant_id, provider, event_type, signature_valid, payload)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [tenantId, provider, eventType || 'unknown', signatureValid, payload]
+            );
+        } else {
+            memWebhookEvents.push({
+                id: `webhook-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                tenant_id: tenantId,
+                provider,
+                event_type: eventType || 'unknown',
+                signature_valid: signatureValid,
+                payload,
+                created_at: new Date().toISOString()
+            });
+        }
+
+        if (!signatureValid) {
+            return res.status(401).json({ success: false, error: 'invalid_signature' });
+        }
+
+        const invoiceId = payload.invoice_id ? String(payload.invoice_id) : '';
+        if (eventType === 'invoice.paid' && invoiceId) {
+            const invoice = await markInvoiceStatus(invoiceId, 'paid', payload.paid_at || null, payload.provider_reference || null);
+            if (!invoice) {
+                return res.status(404).json({ success: false, error: 'invoice_not_found' });
+            }
+            return res.json({ success: true, data: { processed: true, invoice } });
+        }
+
+        if (eventType === 'invoice.failed' && invoiceId) {
+            const invoice = await markInvoiceStatus(invoiceId, 'failed', null, payload.provider_reference || null);
+            if (!invoice) {
+                return res.status(404).json({ success: false, error: 'invoice_not_found' });
+            }
+            return res.json({ success: true, data: { processed: true, invoice } });
+        }
+
+        return res.json({ success: true, data: { processed: false } });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'billing_webhook_failed', message: error.message });
+    }
+});
+
+app.post('/api/saas-service/billing/cycle/run', requireRole(['super-admin']), async (_req, res) => {
+    try {
+        const processed = [];
+
+        if (pool) {
+            const result = await pool.query(
+                `SELECT tenant_id
+                 FROM ms_saas_subscriptions
+                 WHERE status = 'active'`
+            );
+
+            for (const row of result.rows) {
+                const invoice = await issueInvoiceForTenant(String(row.tenant_id), { source: 'cycle_run' });
+                processed.push(invoice.id);
+            }
+        } else {
+            for (const [tenantId, sub] of memSubscriptions.entries()) {
+                if (sub.status === 'active') {
+                    const invoice = await issueInvoiceForTenant(tenantId, { source: 'cycle_run' });
+                    processed.push(invoice.id);
+                }
+            }
+        }
+
+        return res.json({ success: true, data: { processed_count: processed.length, invoice_ids: processed } });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'billing_cycle_failed', message: error.message });
+    }
+});
+
+if (autoCycleEnabled) {
+    cron.schedule(autoCycleSchedule, async () => {
+        try {
+            if (pool) {
+                const result = await pool.query(
+                    `SELECT tenant_id
+                     FROM ms_saas_subscriptions
+                     WHERE status = 'active'`
+                );
+                for (const row of result.rows) {
+                    await issueInvoiceForTenant(String(row.tenant_id), { source: 'auto_cron' });
+                }
+            } else {
+                for (const [tenantId, sub] of memSubscriptions.entries()) {
+                    if (sub.status === 'active') {
+                        await issueInvoiceForTenant(tenantId, { source: 'auto_cron' });
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('⚠️ Auto billing cycle failed:', error.message);
+        }
+    });
+}
 
 ensureSchema()
     .catch((error) => {

@@ -91,6 +91,7 @@ The repository now includes a modular microservices-ready architecture:
 - `services/ops-service/server.js`
 - `services/ai-service/server.js`
 - `services/saas-service/server.js`
+- `services/events-service/server.js`
 - `docker-compose.microservices.yml`
 
 Gateway routes:
@@ -101,6 +102,7 @@ Gateway routes:
 - `GET|POST /api/ms/ops/*` -> Ops service
 - `GET|POST /api/ms/ai/*` -> AI service
 - `GET|POST /api/ms/saas/*` -> SaaS service
+- `GET|POST /api/ms/events/*` -> Events service
 - `* /api/*` -> fallback to monolith backend
 
 New production-focused capabilities added in microservices:
@@ -139,6 +141,14 @@ New production-focused capabilities added in microservices:
   - `POST /api/ms/saas/usage/record`
   - `GET /api/ms/saas/usage/summary/:tenantId`
   - `GET /api/ms/saas/billing/preview/:tenantId`
+  - `POST /api/ms/saas/billing/invoices/issue`
+  - `GET /api/ms/saas/billing/invoices/:tenantId`
+  - `POST /api/ms/saas/billing/webhooks/provider`
+  - `POST /api/ms/saas/billing/cycle/run`
+- Event bus endpoints:
+  - `POST /api/ms/events/publish`
+  - `GET /api/ms/events/events`
+  - `POST /api/ms/events/consume/ack`
 
 Payments service persistence mode:
 
@@ -153,6 +163,7 @@ Useful scripts:
 - `npm run start:ops-service`
 - `npm run start:ai-service`
 - `npm run start:saas-service`
+- `npm run start:events-service`
 - `npm run start:micro`
 - `npm run micro:down`
 - `npm run test:gateway`
@@ -168,6 +179,7 @@ Prometheus-compatible metrics endpoints are available on:
 - Ops service: `GET /metrics`
 - AI service: `GET /metrics`
 - SaaS service: `GET /metrics`
+- Events service: `GET /metrics`
 
 Core metrics include request totals, latency histograms (monolith), and default Node.js process/runtime metrics.
 

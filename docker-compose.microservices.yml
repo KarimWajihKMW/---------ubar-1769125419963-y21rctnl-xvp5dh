@@ -13,6 +13,7 @@ services:
       OPS_SERVICE_URL: http://ops-service:4103
       AI_SERVICE_URL: http://ai-service:4104
       SAAS_SERVICE_URL: http://saas-service:4105
+      EVENTS_SERVICE_URL: http://events-service:4106
       MONOLITH_URL: http://monolith:3000
     ports:
       - "8080:8080"
@@ -26,6 +27,8 @@ services:
       ai-service:
         condition: service_started
       saas-service:
+        condition: service_started
+      events-service:
         condition: service_started
       monolith:
         condition: service_started
@@ -84,8 +87,22 @@ services:
     environment:
       SAAS_SERVICE_PORT: 4105
       DATABASE_URL: postgresql://postgres:postgres@db:5432/ubar
+      BILLING_WEBHOOK_SECRET: billing-webhook-dev-secret
+      SAAS_BILLING_AUTOCYCLE_ENABLED: "false"
     ports:
       - "4105:4105"
+
+  events-service:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && node services/events-service/server.js"
+    volumes:
+      - ./:/app
+    environment:
+      EVENTS_SERVICE_PORT: 4106
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ubar
+    ports:
+      - "4106:4106"
 
   monolith:
     build: .

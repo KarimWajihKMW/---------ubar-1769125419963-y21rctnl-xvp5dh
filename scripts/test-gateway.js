@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { spawn } = require('node:child_process');
+const { createHmac } = require('node:crypto');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,6 +48,7 @@ async function main() {
   const ops = start(process.execPath, ['services/ops-service/server.js']);
   const ai = start(process.execPath, ['services/ai-service/server.js']);
   const saas = start(process.execPath, ['services/saas-service/server.js']);
+  const events = start(process.execPath, ['services/events-service/server.js']);
   const gateway = start(process.execPath, ['gateway/server.js'], {
     GATEWAY_PORT: '8080',
     TRIPS_SERVICE_URL: 'http://localhost:4101',
@@ -54,6 +56,7 @@ async function main() {
     OPS_SERVICE_URL: 'http://localhost:4103',
     AI_SERVICE_URL: 'http://localhost:4104',
     SAAS_SERVICE_URL: 'http://localhost:4105',
+    EVENTS_SERVICE_URL: 'http://localhost:4106',
     MONOLITH_URL: 'http://localhost:3000'
   });
 
@@ -64,8 +67,9 @@ async function main() {
     const okOps = await waitFor('http://localhost:4103/api/ops-service/health');
     const okAi = await waitFor('http://localhost:4104/api/ai-service/health');
     const okSaas = await waitFor('http://localhost:4105/api/saas-service/health');
+    const okEvents = await waitFor('http://localhost:4106/api/events-service/health');
 
-    if (!okTrips || !okPayments || !okGateway || !okOps || !okAi || !okSaas) {
+    if (!okTrips || !okPayments || !okGateway || !okOps || !okAi || !okSaas || !okEvents) {
       throw new Error('services_not_ready');
     }
 
@@ -217,6 +221,34 @@ async function main() {
       throw new Error('ai_pricing_recommendation_failed');
     }
 
+    const publishResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/events/publish', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'service'
+      },
+      body: JSON.stringify({
+        topic: 'trip.lifecycle',
+        event_type: 'trip.completed',
+        producer: 'trips-service',
+        payload: { trip_id: 'trip-700', driver_id: 'driver-9' }
+      })
+    });
+    if (!publishResp.res.ok || !publishResp.data?.success || !publishResp.data?.data?.id) {
+      throw new Error('events_publish_failed');
+    }
+
+    const listEventsResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/events/events?topic=trip.lifecycle&since_id=0&limit=10', {
+      headers: {
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'dispatcher'
+      }
+    });
+    if (!listEventsResp.res.ok || !listEventsResp.data?.success || !Array.isArray(listEventsResp.data?.data) || !listEventsResp.data.data.length) {
+      throw new Error('events_list_failed');
+    }
+
     const tenantResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/tenants', {
       method: 'POST',
       headers: {
@@ -276,6 +308,44 @@ async function main() {
       throw new Error('saas_billing_preview_failed');
     }
 
+    const issueInvoiceResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/billing/invoices/issue', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-role': 'admin'
+      },
+      body: JSON.stringify({
+        tenant_id: 'demo-tenant',
+        source: 'integration_test'
+      })
+    });
+    if (!issueInvoiceResp.res.ok || !issueInvoiceResp.data?.success || !issueInvoiceResp.data?.data?.id) {
+      throw new Error('saas_invoice_issue_failed');
+    }
+
+    const webhookPayload = {
+      provider: 'mockpay',
+      event_type: 'invoice.paid',
+      tenant_id: 'demo-tenant',
+      invoice_id: String(issueInvoiceResp.data.data.id),
+      provider_reference: `paid_ref_${Date.now()}`
+    };
+    const webhookSignature = createHmac('sha256', 'billing-webhook-dev-secret')
+      .update(JSON.stringify(webhookPayload))
+      .digest('hex');
+
+    const webhookResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/billing/webhooks/provider', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-billing-signature': webhookSignature
+      },
+      body: JSON.stringify(webhookPayload)
+    });
+    if (!webhookResp.res.ok || !webhookResp.data?.success || webhookResp.data?.data?.invoice?.status !== 'paid') {
+      throw new Error('saas_webhook_payment_failed');
+    }
+
     console.log('✅ Gateway test passed', {
       match_strategy: rec.data.strategy,
       assigned_driver: assignResp.data.data.selected_driver.driver_id,
@@ -285,10 +355,12 @@ async function main() {
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
       ai_surge: pricingResp.data.data.surge_multiplier,
       saas_plan: subResp.data.data.plan_code,
-      saas_billing_total: billingResp.data.data.charges.total
+      saas_billing_total: billingResp.data.data.charges.total,
+      events_count: listEventsResp.data.data.length,
+      invoice_status_after_webhook: webhookResp.data.data.invoice.status
     });
   } finally {
-    for (const p of [gateway, trips, payments, ops, ai, saas]) {
+    for (const p of [gateway, trips, payments, ops, ai, saas, events]) {
       try { p.kill('SIGTERM'); } catch (_) {}
     }
   }
