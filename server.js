@@ -850,6 +850,40 @@ function userRoom(userId) {
     return `user:${String(userId)}`;
 }
 
+function emitTripNotification({
+    tripId,
+    userId,
+    type,
+    title,
+    message,
+    target_screen,
+    event_name,
+    payload
+}) {
+    try {
+        const tripIdStr = String(tripId || '').trim();
+        if (!tripIdStr) return;
+        const notification = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            type: String(type || 'trip_update'),
+            title: title ? String(title) : null,
+            message: message ? String(message) : null,
+            trip_id: tripIdStr,
+            target_screen: target_screen ? String(target_screen) : 'trip-details',
+            event_name: event_name ? String(event_name) : null,
+            created_at: new Date().toISOString(),
+            payload: payload && typeof payload === 'object' ? payload : {}
+        };
+
+        io.to(tripRoom(tripIdStr)).emit('trip_notification', notification);
+        if (userId !== undefined && userId !== null && String(userId).trim()) {
+            io.to(userRoom(userId)).emit('trip_notification', notification);
+        }
+    } catch (err) {
+        console.warn('⚠️ emitTripNotification failed:', err.message);
+    }
+}
+
 const lastTripDriverWriteAt = new Map();
 const lastTripSafetyCheckAt = new Map();
 const lastTripDeviationEventAt = new Map();
@@ -7463,7 +7497,7 @@ function computeMeetCode({ tripId, windowStartMs, digits = 4 }) {
 app.get('/api/trips/:id/meet-code', requireRole('driver', 'admin'), async (req, res) => {
     try {
         const tripId = String(req.params.id);
-        const tripRes = await pool.query('SELECT id, driver_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
+        const tripRes = await pool.query('SELECT id, driver_id, user_id FROM trips WHERE id = $1 LIMIT 1', [tripId]);
         const tripRow = tripRes.rows[0] || null;
         if (!tripRow) return res.status(404).json({ success: false, error: 'Trip not found' });
 
@@ -13818,6 +13852,16 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
                     trip_id: String(id),
                     trip_status: 'started'
                 });
+
+                emitTripNotification({
+                    tripId: id,
+                    userId: updatedTrip.user_id || null,
+                    type: 'trip_started',
+                    title: 'Trip started',
+                    message: 'Your trip is now in progress.',
+                    target_screen: 'live-trip',
+                    event_name: 'trip_started'
+                });
             }
 
             if (updatedTripStatus === 'completed' && beforeTripStatus !== 'completed') {
@@ -13830,6 +13874,20 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
                     price: updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null,
                     payment_method: updatedTrip.payment_method || null,
                     paid: true
+                });
+
+                emitTripNotification({
+                    tripId: id,
+                    userId: updatedTrip.user_id || null,
+                    type: 'trip_ended',
+                    title: 'Trip ended',
+                    message: 'Trip completed successfully.',
+                    target_screen: 'trip-summary',
+                    event_name: 'trip_completed',
+                    payload: {
+                        price: updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null,
+                        payment_method: updatedTrip.payment_method || null
+                    }
                 });
             }
 
@@ -14482,6 +14540,22 @@ async function endTripHandler(req, res) {
                     payment_method: updatedTrip.payment_method || null,
                     paid: true
                 });
+
+                emitTripNotification({
+                    tripId: updatedTrip.id,
+                    userId: updatedTrip.user_id || null,
+                    type: 'trip_ended',
+                    title: 'Trip ended',
+                    message: 'Trip completed successfully.',
+                    target_screen: 'trip-summary',
+                    event_name: 'trip_completed',
+                    payload: {
+                        price: updatedTrip.price !== undefined && updatedTrip.price !== null
+                            ? Number(updatedTrip.price)
+                            : (updatedTrip.cost !== undefined && updatedTrip.cost !== null ? Number(updatedTrip.cost) : null),
+                        payment_method: updatedTrip.payment_method || null
+                    }
+                });
             }
         } catch (e) {
             // ignore
@@ -14722,6 +14796,20 @@ async function rateDriverHandler(req, res) {
                     trip_status: 'rated',
                     captain_id: result.rows[0]?.driver_id || resolvedCaptainId || null,
                     rating: Math.trunc(normalizedRating)
+                });
+
+                emitTripNotification({
+                    tripId,
+                    userId: result.rows[0]?.user_id || null,
+                    type: 'new_rating_received',
+                    title: 'Rating received',
+                    message: 'Your trip has a new rating.',
+                    target_screen: 'trip-rating',
+                    event_name: 'trip_rated',
+                    payload: {
+                        rating: Math.trunc(normalizedRating),
+                        captain_id: result.rows[0]?.driver_id || resolvedCaptainId || null
+                    }
                 });
             }
 
@@ -15153,6 +15241,20 @@ app.patch('/api/trips/:id/assign', requireRole('driver', 'admin'), async (req, r
                 io.to(userRoom(trip.user_id)).emit('trip_assigned', {
                     trip_id: String(trip.id),
                     trip
+                });
+
+                emitTripNotification({
+                    tripId: trip.id,
+                    userId: trip.user_id,
+                    type: 'driver_accepted_trip',
+                    title: 'Driver accepted your trip',
+                    message: 'Captain accepted your request and is heading to pickup.',
+                    target_screen: 'trip-tracking',
+                    event_name: 'trip_assigned',
+                    payload: {
+                        driver_id: trip.driver_id || null,
+                        driver_name: trip.driver_name || null
+                    }
                 });
             }
         } catch (e) {
@@ -19966,6 +20068,33 @@ app.post('/api/trips/:id/waiting/arrive', requireRole('driver', 'admin'), async 
              RETURNING *`,
             [tripId, trip.driver_id || authDriverId || null, lat, lng]
         );
+
+        try {
+            io.to(tripRoom(tripId)).emit('driver_arrived', {
+                trip_id: tripId,
+                trip_status: 'arrived',
+                lat,
+                lng,
+                arrived_at: upsert.rows[0]?.arrived_at || new Date().toISOString()
+            });
+
+            emitTripNotification({
+                tripId,
+                userId: trip.user_id || null,
+                type: 'driver_arrived',
+                title: 'Driver arrived',
+                message: 'Your captain has arrived at pickup point.',
+                target_screen: 'pickup',
+                event_name: 'driver_arrived',
+                payload: {
+                    lat,
+                    lng
+                }
+            });
+        } catch (e) {
+            // non-blocking
+        }
+
         res.status(201).json({ success: true, data: upsert.rows[0] });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });

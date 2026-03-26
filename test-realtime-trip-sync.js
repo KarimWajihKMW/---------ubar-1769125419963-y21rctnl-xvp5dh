@@ -161,6 +161,13 @@ async function main() {
         5000
     );
 
+    const tripStartedNotificationPromise = waitForEvent(
+        socket,
+        'trip_notification',
+        (p) => String(p?.trip_id) === String(tripId) && String(p?.type || '') === 'trip_started',
+        5000
+    );
+
     await api(`/trips/${encodeURIComponent(tripId)}/status`, {
         method: 'PATCH',
         headers: authHeaders,
@@ -168,7 +175,12 @@ async function main() {
     });
 
     const tripStarted = await tripStartedPromise;
+    const tripStartedNotification = await tripStartedNotificationPromise;
     console.log('✅ trip_started received:', tripStarted);
+    console.log('✅ trip_notification(trip_started) received:', {
+        trip_id: tripStartedNotification.trip_id,
+        type: tripStartedNotification.type
+    });
 
     // Driver location update -> expect driver_live_location
     const locPromise = waitForEvent(
@@ -196,6 +208,13 @@ async function main() {
         5000
     );
 
+    const tripCompletedNotificationPromise = waitForEvent(
+        socket,
+        'trip_notification',
+        (p) => String(p?.trip_id) === String(tripId) && String(p?.type || '') === 'trip_ended',
+        5000
+    );
+
     await api(`/trips/${encodeURIComponent(tripId)}/status`, {
         method: 'PATCH',
         headers: authHeaders,
@@ -203,13 +222,25 @@ async function main() {
     });
 
     const tripCompleted = await tripCompletedPromise;
+    const tripCompletedNotification = await tripCompletedNotificationPromise;
     console.log('✅ trip_completed received:', tripCompleted);
+    console.log('✅ trip_notification(trip_ended) received:', {
+        trip_id: tripCompletedNotification.trip_id,
+        type: tripCompletedNotification.type
+    });
 
     // Rate -> expect trip_rated
     const tripRatedPromise = waitForEvent(
         socket,
         'trip_rated',
         (p) => String(p?.trip_id) === String(tripId) && p?.trip_status === 'rated',
+        5000
+    );
+
+    const tripRatedNotificationPromise = waitForEvent(
+        socket,
+        'trip_notification',
+        (p) => String(p?.trip_id) === String(tripId) && String(p?.type || '') === 'new_rating_received',
         5000
     );
 
@@ -220,7 +251,12 @@ async function main() {
     });
 
     const tripRated = await tripRatedPromise;
+    const tripRatedNotification = await tripRatedNotificationPromise;
     console.log('✅ trip_rated received:', tripRated);
+    console.log('✅ trip_notification(new_rating_received) received:', {
+        trip_id: tripRatedNotification.trip_id,
+        type: tripRatedNotification.type
+    });
 
     socket.disconnect();
 
