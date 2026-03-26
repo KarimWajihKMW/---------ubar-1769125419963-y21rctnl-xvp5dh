@@ -191,6 +191,7 @@ Useful scripts:
 - `npm run smoke:prod`
 - `npm run sync:secrets:k8s`
 - `npm run release:gate`
+- `npm run trigger:prod:gate`
 
 Production preflight validates required runtime secrets and can optionally verify deployed service health if `GATEWAY_BASE_URL` is set.
 
@@ -212,6 +213,12 @@ Optional live production smoke checks (read-only) can be included in release gat
 - Required env: `GATEWAY_BASE_URL`
 - Optional env: `SMOKE_TENANT_ID`, `SMOKE_ROLE`
 - To run from release gate: set `RUN_PROD_SMOKE=1`
+
+Trigger production release gate workflow from terminal (requires GitHub CLI auth):
+
+- Script: `scripts/trigger-production-release-gate.sh`
+- Command: `npm run trigger:prod:gate`
+- Optional envs: `RUN_LIVE_SMOKE=1`, `GATEWAY_BASE_URL`, `SMOKE_TENANT_ID`, `SMOKE_ROLE`, `REF_BRANCH`
 
 Kubernetes secret sync helper:
 

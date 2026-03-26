@@ -37,6 +37,18 @@ Run full local release gate:
 npm run release:gate
 ```
 
+Trigger GitHub production release gate workflow from terminal:
+
+```bash
+npm run trigger:prod:gate
+```
+
+Trigger with live smoke against deployed gateway:
+
+```bash
+RUN_LIVE_SMOKE=1 GATEWAY_BASE_URL=https://<gateway-host> npm run trigger:prod:gate
+```
+
 ## 2) Deploy
 
 ```bash
