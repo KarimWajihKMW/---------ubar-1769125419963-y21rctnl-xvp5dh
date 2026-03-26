@@ -194,6 +194,7 @@ Useful scripts:
 - `npm run precheck:prod:github`
 - `npm run trigger:prod:gate`
 - `npm run go-live:prod`
+- `npm run go-live:assistant`
 - `npm run readiness:100`
 - `npm run readiness:live`
 
@@ -233,6 +234,15 @@ One-command go-live verification (precheck + trigger + live smoke):
 - Script: `scripts/go-live-production.sh`
 - Command: `GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod`
 - Optional auth override: `GH_PAT=<token with repo,workflow scopes>`
+
+Go-live assistant (loads env from file if present, then runs readiness + go-live):
+
+- Script: `scripts/go-live-assistant.sh`
+- Command: `npm run go-live:assistant`
+- Optional env file path: `GO_LIVE_ENV_FILE=.env.go-live`
+- Default env file format:
+  - `GATEWAY_BASE_URL=https://<gateway-host>`
+  - `GH_PAT=<token-with-repo-and-workflow-scopes>`
 
 Readiness score command (returns 100% only when integration test, build, and GitHub dispatch precheck all pass):
 

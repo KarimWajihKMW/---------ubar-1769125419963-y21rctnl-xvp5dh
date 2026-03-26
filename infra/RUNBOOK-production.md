@@ -73,6 +73,12 @@ One-command go-live verification:
 GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod
 ```
 
+Assistant flow (loads `.env.go-live` if present and runs readiness + go-live):
+
+```bash
+npm run go-live:assistant
+```
+
 If the default environment token lacks workflow dispatch scopes, use a PAT override:
 
 ```bash
