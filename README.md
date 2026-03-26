@@ -198,6 +198,7 @@ Production preflight validates required runtime secrets and can optionally verif
 - CI workflow (manual trigger): `.github/workflows/production-preflight.yml`
 - Live smoke workflow (manual trigger): `.github/workflows/production-live-smoke.yml`
 - Release gate workflow (manual trigger): `.github/workflows/production-release-gate.yml`
+- Nightly smoke workflow (scheduled + manual): `.github/workflows/production-nightly-smoke.yml`
 
 Release gate runs full local launch checks in one command:
 

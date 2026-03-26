@@ -1,0 +1,40 @@
+name: Production Nightly Smoke
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  nightly-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: production
+      GATEWAY_BASE_URL: ${{ secrets.GATEWAY_BASE_URL }}
+      METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+      SMOKE_TENANT_ID: ${{ secrets.SMOKE_TENANT_ID || 'public' }}
+      SMOKE_ROLE: ${{ secrets.SMOKE_ROLE || 'support' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Validate gateway configuration
+        run: |
+          if [[ -z "${GATEWAY_BASE_URL}" ]]; then
+            echo "Missing required secret: GATEWAY_BASE_URL" >&2
+            exit 1
+          fi
+
+      - name: Run production smoke checks
+        run: npm run smoke:prod
