@@ -22,6 +22,11 @@ on:
         required: false
         default: "support"
         type: string
+      strict_secrets:
+        description: "Fail if required production secrets are missing or using dummy defaults"
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   release-gate:
@@ -62,6 +67,37 @@ jobs:
         run: |
           if [[ "${RUN_PROD_SMOKE}" == "1" && -z "${GATEWAY_BASE_URL}" ]]; then
             echo "GATEWAY_BASE_URL is required when run_live_smoke=true" >&2
+            exit 1
+          fi
+
+      - name: Validate required production secrets
+        run: |
+          if [[ "${{ inputs.strict_secrets }}" != "true" ]]; then
+            echo "strict_secrets=false: skipping strict secret validation"
+            exit 0
+          fi
+
+          missing=()
+
+          [[ -z "${DATABASE_URL}" || "${DATABASE_URL}" == "postgresql://x:x@localhost:5432/x" ]] && missing+=("DATABASE_URL")
+          [[ -z "${JWT_SECRET}" || "${JWT_SECRET}" == "dummy-jwt-secret" ]] && missing+=("JWT_SECRET")
+          [[ -z "${METRICS_TOKEN}" || "${METRICS_TOKEN}" == "dummy-metrics-token" ]] && missing+=("METRICS_TOKEN")
+          [[ -z "${BILLING_WEBHOOK_SECRET}" || "${BILLING_WEBHOOK_SECRET}" == "dummy-billing-secret" ]] && missing+=("BILLING_WEBHOOK_SECRET")
+          [[ -z "${PAYMENT_WEBHOOK_SECRET}" || "${PAYMENT_WEBHOOK_SECRET}" == "dummy-payment-secret" ]] && missing+=("PAYMENT_WEBHOOK_SECRET")
+
+          if [[ "${BILLING_PROVIDER}" == "stripe" || "${PAYMENT_PROVIDER}" == "stripe" ]]; then
+            [[ -z "${STRIPE_SECRET_KEY}" ]] && missing+=("STRIPE_SECRET_KEY")
+            [[ -z "${STRIPE_WEBHOOK_SECRET}" ]] && missing+=("STRIPE_WEBHOOK_SECRET")
+          fi
+
+          if [[ "${BILLING_PROVIDER}" == "stripe" ]]; then
+            [[ -z "${STRIPE_SUCCESS_URL}" ]] && missing+=("STRIPE_SUCCESS_URL")
+            [[ -z "${STRIPE_CANCEL_URL}" ]] && missing+=("STRIPE_CANCEL_URL")
+          fi
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            echo "Missing required production secrets:" >&2
+            for v in "${missing[@]}"; do echo "- ${v}" >&2; done
             exit 1
           fi
 

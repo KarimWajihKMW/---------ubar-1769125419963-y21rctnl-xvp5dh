@@ -203,6 +203,8 @@ Production preflight validates required runtime secrets and can optionally verif
 - Release gate workflow (manual trigger): `.github/workflows/production-release-gate.yml`
 - Nightly smoke workflow (scheduled + manual): `.github/workflows/production-nightly-smoke.yml`
 
+`production-release-gate.yml` supports `strict_secrets` input (default `true`) to fail early when required production secrets are missing or still using dummy fallback values.
+
 Release gate runs full local launch checks in one command:
 
 - Script: `scripts/release-gate.sh`
