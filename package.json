@@ -11,6 +11,7 @@
     "start:payments-service": "node services/payments-service/server.js",
     "start:ops-service": "node services/ops-service/server.js",
     "start:ai-service": "node services/ai-service/server.js",
+    "start:saas-service": "node services/saas-service/server.js",
     "start:micro": "docker compose -f docker-compose.microservices.yml up --build",
     "micro:down": "docker compose -f docker-compose.microservices.yml down",
     "deploy:k8s": "bash scripts/k8s-deploy.sh",

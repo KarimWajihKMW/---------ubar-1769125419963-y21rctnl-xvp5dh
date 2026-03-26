@@ -46,12 +46,14 @@ async function main() {
   const payments = start(process.execPath, ['services/payments-service/server.js']);
   const ops = start(process.execPath, ['services/ops-service/server.js']);
   const ai = start(process.execPath, ['services/ai-service/server.js']);
+  const saas = start(process.execPath, ['services/saas-service/server.js']);
   const gateway = start(process.execPath, ['gateway/server.js'], {
     GATEWAY_PORT: '8080',
     TRIPS_SERVICE_URL: 'http://localhost:4101',
     PAYMENTS_SERVICE_URL: 'http://localhost:4102',
     OPS_SERVICE_URL: 'http://localhost:4103',
     AI_SERVICE_URL: 'http://localhost:4104',
+    SAAS_SERVICE_URL: 'http://localhost:4105',
     MONOLITH_URL: 'http://localhost:3000'
   });
 
@@ -61,8 +63,9 @@ async function main() {
     const okGateway = await waitFor('http://localhost:8080/health');
     const okOps = await waitFor('http://localhost:4103/api/ops-service/health');
     const okAi = await waitFor('http://localhost:4104/api/ai-service/health');
+    const okSaas = await waitFor('http://localhost:4105/api/saas-service/health');
 
-    if (!okTrips || !okPayments || !okGateway || !okOps || !okAi) {
+    if (!okTrips || !okPayments || !okGateway || !okOps || !okAi || !okSaas) {
       throw new Error('services_not_ready');
     }
 
@@ -214,6 +217,65 @@ async function main() {
       throw new Error('ai_pricing_recommendation_failed');
     }
 
+    const tenantResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/tenants', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-role': 'super-admin'
+      },
+      body: JSON.stringify({
+        tenant_id: 'demo-tenant',
+        name: 'Demo Tenant',
+        region: 'eg-cairo-1',
+        branding: { primary: '#115e59', logo: 'demo.svg' }
+      })
+    });
+    if (!tenantResp.res.ok || !tenantResp.data?.success) {
+      throw new Error('saas_tenant_create_failed');
+    }
+
+    const subResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/subscriptions/activate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-role': 'admin'
+      },
+      body: JSON.stringify({
+        tenant_id: 'demo-tenant',
+        plan_code: 'growth',
+        metadata: { contract: 'annual' }
+      })
+    });
+    if (!subResp.res.ok || !subResp.data?.success) {
+      throw new Error('saas_subscription_activate_failed');
+    }
+
+    const usageResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/usage/record', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-role': 'system'
+      },
+      body: JSON.stringify({
+        tenant_id: 'demo-tenant',
+        metric: 'rides',
+        quantity: 1200,
+        metadata: { source: 'integration_test' }
+      })
+    });
+    if (!usageResp.res.ok || !usageResp.data?.success) {
+      throw new Error('saas_usage_record_failed');
+    }
+
+    const billingResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/saas/billing/preview/demo-tenant', {
+      headers: {
+        'x-role': 'admin'
+      }
+    });
+    if (!billingResp.res.ok || !billingResp.data?.success || !billingResp.data?.data?.charges?.total) {
+      throw new Error('saas_billing_preview_failed');
+    }
+
     console.log('✅ Gateway test passed', {
       match_strategy: rec.data.strategy,
       assigned_driver: assignResp.data.data.selected_driver.driver_id,
@@ -221,10 +283,12 @@ async function main() {
       wallet_balance_after_withdrawal: withdrawalResp.data.data.user_id ? 'ok' : 'unknown',
       ops_ticket_id: ticketResp.data.data.id,
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
-      ai_surge: pricingResp.data.data.surge_multiplier
+      ai_surge: pricingResp.data.data.surge_multiplier,
+      saas_plan: subResp.data.data.plan_code,
+      saas_billing_total: billingResp.data.data.charges.total
     });
   } finally {
-    for (const p of [gateway, trips, payments, ops, ai]) {
+    for (const p of [gateway, trips, payments, ops, ai, saas]) {
       try { p.kill('SIGTERM'); } catch (_) {}
     }
   }

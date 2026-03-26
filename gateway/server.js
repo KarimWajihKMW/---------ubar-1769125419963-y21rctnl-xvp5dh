@@ -13,6 +13,7 @@ const tripsTarget = process.env.TRIPS_SERVICE_URL || 'http://localhost:4101';
 const paymentsTarget = process.env.PAYMENTS_SERVICE_URL || 'http://localhost:4102';
 const opsTarget = process.env.OPS_SERVICE_URL || 'http://localhost:4103';
 const aiTarget = process.env.AI_SERVICE_URL || 'http://localhost:4104';
+const saasTarget = process.env.SAAS_SERVICE_URL || 'http://localhost:4105';
 const monolithTarget = process.env.MONOLITH_URL || 'http://localhost:3000';
 const metricsToken = process.env.METRICS_TOKEN || '';
 const rateLimitWindowMs = Number(process.env.GATEWAY_RATE_LIMIT_WINDOW_MS || 60 * 1000);
@@ -80,6 +81,7 @@ app.get('/health', (_req, res) => {
             payments: '/api/ms/payments/*',
             ops: '/api/ms/ops/*',
             ai: '/api/ms/ai/*',
+            saas: '/api/ms/saas/*',
             fallback: '/api/*'
         }
     });
@@ -153,6 +155,21 @@ app.use(createProxyMiddleware({
     logLevel: 'warn'
 }));
 
+app.use(createProxyMiddleware({
+    target: saasTarget,
+    changeOrigin: true,
+    pathFilter: '/api/ms/saas',
+    pathRewrite: { '^/api/ms/saas': '/api/saas-service' },
+    on: {
+        proxyReq: (proxyReq, req) => {
+            proxyReq.setHeader('x-tenant-id', String(req.headers['x-tenant-id'] || 'public'));
+            proxyReq.setHeader('x-request-id', String(req.requestId || ''));
+            proxyReq.setHeader('x-role', String(req.headers['x-role'] || 'system'));
+        }
+    },
+    logLevel: 'warn'
+}));
+
 // Backward-compatible fallback to existing monolith API.
 app.use('/api', createProxyMiddleware({
     target: monolithTarget,
@@ -171,5 +188,6 @@ app.listen(PORT, () => {
     console.log(`➡️ Payments service: ${paymentsTarget}`);
     console.log(`➡️ Ops service: ${opsTarget}`);
     console.log(`➡️ AI service: ${aiTarget}`);
+    console.log(`➡️ SaaS service: ${saasTarget}`);
     console.log(`➡️ Monolith fallback: ${monolithTarget}`);
 });

@@ -12,6 +12,7 @@ services:
       PAYMENTS_SERVICE_URL: http://payments-service:4102
       OPS_SERVICE_URL: http://ops-service:4103
       AI_SERVICE_URL: http://ai-service:4104
+      SAAS_SERVICE_URL: http://saas-service:4105
       MONOLITH_URL: http://monolith:3000
     ports:
       - "8080:8080"
@@ -23,6 +24,8 @@ services:
       ops-service:
         condition: service_started
       ai-service:
+        condition: service_started
+      saas-service:
         condition: service_started
       monolith:
         condition: service_started
@@ -71,6 +74,18 @@ services:
       AI_SERVICE_PORT: 4104
     ports:
       - "4104:4104"
+
+  saas-service:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && node services/saas-service/server.js"
+    volumes:
+      - ./:/app
+    environment:
+      SAAS_SERVICE_PORT: 4105
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ubar
+    ports:
+      - "4105:4105"
 
   monolith:
     build: .
