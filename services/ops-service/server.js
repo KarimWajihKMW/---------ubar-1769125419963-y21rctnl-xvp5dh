@@ -876,6 +876,81 @@ app.post('/api/ops-service/support/tickets/reprioritize', requireRole(['admin', 
     }
 });
 
+app.post('/api/ops-service/support/tickets/auto-close', requireRole(['admin', 'support']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const actorRole = getRole(req);
+        const olderThanMinutes = Math.max(0, Number(req.body.older_than_minutes ?? 180));
+        const includeEscalated = Boolean(req.body.include_escalated);
+
+        let updated = [];
+        if (pool) {
+            const statuses = includeEscalated ? ['in_progress', 'escalated'] : ['in_progress'];
+            const result = await pool.query(
+                `UPDATE ms_support_tickets
+                 SET status = 'closed',
+                     updated_at = NOW()
+                 WHERE tenant_id = $1
+                   AND status = ANY($2::text[])
+                   AND EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0 >= $3
+                 RETURNING id, tenant_id, status, priority, summary, updated_at`,
+                [tenantId, statuses, olderThanMinutes]
+            );
+            updated = result.rows;
+        } else {
+            const now = Date.now();
+            const allowedStatuses = includeEscalated ? new Set(['in_progress', 'escalated']) : new Set(['in_progress']);
+
+            for (const t of memTickets) {
+                if (t.tenant_id !== tenantId) continue;
+                const status = String(t.status || '').toLowerCase();
+                if (!allowedStatuses.has(status)) continue;
+
+                const createdAtMs = Date.parse(t.created_at || new Date().toISOString());
+                const ageMinutes = Math.max(0, (now - createdAtMs) / (1000 * 60));
+                if (ageMinutes >= olderThanMinutes) {
+                    t.status = 'closed';
+                    t.updated_at = new Date().toISOString();
+                    updated.push({
+                        id: t.id,
+                        tenant_id: t.tenant_id,
+                        status: t.status,
+                        priority: t.priority,
+                        summary: t.summary,
+                        updated_at: t.updated_at
+                    });
+                }
+            }
+        }
+
+        await writeAudit({
+            tenantId,
+            actorRole,
+            action: 'support_tickets_auto_closed',
+            targetType: 'ticket_batch',
+            targetId: null,
+            metadata: {
+                older_than_minutes: olderThanMinutes,
+                include_escalated: includeEscalated,
+                updated_count: updated.length
+            }
+        });
+
+        return res.json({
+            success: true,
+            data: {
+                tenant_id: tenantId,
+                older_than_minutes: olderThanMinutes,
+                include_escalated: includeEscalated,
+                updated_count: updated.length,
+                closed_tickets: updated.slice(0, 50)
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'ticket_auto_close_failed', message: error.message });
+    }
+});
+
 app.get('/api/ops-service/audit/logs', requireRole(['admin', 'compliance']), async (req, res) => {
     try {
         const tenantId = getTenantId(req);
