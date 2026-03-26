@@ -789,6 +789,93 @@ app.get('/api/ops-service/support/alerts', requireRole(['admin', 'support', 'com
     }
 });
 
+app.post('/api/ops-service/support/tickets/reprioritize', requireRole(['admin', 'support']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const actorRole = getRole(req);
+        const staleMinutes = Math.max(1, Number(req.body.stale_minutes || 30));
+        const escalationPriority = String(req.body.escalation_priority || 'critical').trim().toLowerCase();
+        const stalePriority = String(req.body.stale_priority || 'high').trim().toLowerCase();
+
+        const validPriorities = new Set(['low', 'normal', 'high', 'critical']);
+        if (!validPriorities.has(escalationPriority) || !validPriorities.has(stalePriority)) {
+            return res.status(400).json({ success: false, error: 'invalid_priority' });
+        }
+
+        let updated = [];
+        if (pool) {
+            const result = await pool.query(
+                `UPDATE ms_support_tickets
+                 SET priority = CASE
+                        WHEN status = 'escalated' THEN $3
+                        WHEN EXTRACT(EPOCH FROM (NOW() - created_at)) / 60.0 >= $2
+                             AND status IN ('open', 'in_progress') THEN $4
+                        ELSE priority
+                    END,
+                    updated_at = NOW()
+                 WHERE tenant_id = $1
+                   AND status IN ('open', 'in_progress', 'escalated')
+                 RETURNING id, tenant_id, status, priority, summary, updated_at`,
+                [tenantId, staleMinutes, escalationPriority, stalePriority]
+            );
+            updated = result.rows.filter((x) => {
+                if (String(x.status) === 'escalated') return String(x.priority) === escalationPriority;
+                return ['open', 'in_progress'].includes(String(x.status)) && String(x.priority) === stalePriority;
+            });
+        } else {
+            const now = Date.now();
+            for (const t of memTickets) {
+                if (t.tenant_id !== tenantId) continue;
+                const status = String(t.status || '').toLowerCase();
+                if (!['open', 'in_progress', 'escalated'].includes(status)) continue;
+
+                if (status === 'escalated') {
+                    t.priority = escalationPriority;
+                    t.updated_at = new Date().toISOString();
+                    updated.push({ id: t.id, tenant_id: t.tenant_id, status: t.status, priority: t.priority, summary: t.summary, updated_at: t.updated_at });
+                    continue;
+                }
+
+                const createdAtMs = Date.parse(t.created_at || new Date().toISOString());
+                const ageMinutes = Math.max(0, (now - createdAtMs) / (1000 * 60));
+                if (ageMinutes >= staleMinutes) {
+                    t.priority = stalePriority;
+                    t.updated_at = new Date().toISOString();
+                    updated.push({ id: t.id, tenant_id: t.tenant_id, status: t.status, priority: t.priority, summary: t.summary, updated_at: t.updated_at });
+                }
+            }
+        }
+
+        await writeAudit({
+            tenantId,
+            actorRole,
+            action: 'support_tickets_reprioritized',
+            targetType: 'ticket_batch',
+            targetId: null,
+            metadata: {
+                stale_minutes: staleMinutes,
+                escalation_priority: escalationPriority,
+                stale_priority: stalePriority,
+                updated_count: updated.length
+            }
+        });
+
+        return res.json({
+            success: true,
+            data: {
+                tenant_id: tenantId,
+                stale_minutes: staleMinutes,
+                escalation_priority: escalationPriority,
+                stale_priority: stalePriority,
+                updated_count: updated.length,
+                updated_tickets: updated.slice(0, 50)
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'ticket_reprioritize_failed', message: error.message });
+    }
+});
+
 app.get('/api/ops-service/audit/logs', requireRole(['admin', 'compliance']), async (req, res) => {
     try {
         const tenantId = getTenantId(req);

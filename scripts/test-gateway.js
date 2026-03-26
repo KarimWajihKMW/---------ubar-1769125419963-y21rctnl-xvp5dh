@@ -352,6 +352,23 @@ async function main() {
       throw new Error('ops_support_alerts_failed');
     }
 
+    const reprioritizeResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/tickets/reprioritize', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      },
+      body: JSON.stringify({
+        stale_minutes: 0,
+        escalation_priority: 'critical',
+        stale_priority: 'high'
+      })
+    });
+    if (!reprioritizeResp.res.ok || !reprioritizeResp.data?.success || reprioritizeResp.data?.data?.updated_count < 1) {
+      throw new Error('ops_ticket_reprioritize_failed');
+    }
+
     const fraudScoreResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ai/fraud/score', {
       method: 'POST',
       headers: {
@@ -545,6 +562,7 @@ async function main() {
       ops_sla_breach_count: slaBreachesResp.data.data.breach_count,
       ops_escalated_tickets: supportKpisResp.data.data.escalated_tickets,
       ops_alerts_count: supportAlertsResp.data.data.alerts.length,
+      ops_reprioritized_count: reprioritizeResp.data.data.updated_count,
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
       ai_surge: pricingResp.data.data.surge_multiplier,
       saas_plan: subResp.data.data.plan_code,
