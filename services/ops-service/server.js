@@ -19,6 +19,7 @@ const requestCounter = new promClient.Counter({
 const memTickets = [];
 const memAudit = [];
 const memAssignments = [];
+const memEscalations = [];
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -84,6 +85,18 @@ async function ensureSchema() {
             target_type TEXT,
             target_id TEXT,
             metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS ms_ticket_escalations (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            ticket_id TEXT NOT NULL,
+            escalated_by_role TEXT NOT NULL,
+            level TEXT NOT NULL DEFAULT 'high',
+            reason TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     `);
@@ -352,6 +365,117 @@ app.patch('/api/ops-service/support/tickets/:id', requireRole(['admin', 'support
         return res.json({ success: true, data: ticket });
     } catch (error) {
         return res.status(500).json({ success: false, error: 'ticket_update_failed', message: error.message });
+    }
+});
+
+app.post('/api/ops-service/support/tickets/:id/escalate', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const actorRole = getRole(req);
+        const id = String(req.params.id || '').trim();
+        const level = String(req.body.level || 'high').trim().toLowerCase();
+        const reason = String(req.body.reason || '').trim();
+
+        if (!reason) {
+            return res.status(400).json({ success: false, error: 'reason_required' });
+        }
+
+        let ticket = null;
+        if (pool) {
+            const ticketResult = await pool.query(
+                `SELECT id, tenant_id, rider_id, driver_id, category, priority, status, summary, details, created_by_role, assignee, created_at, updated_at
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1 AND id::text = $2`,
+                [tenantId, id]
+            );
+            ticket = ticketResult.rows[0] || null;
+        } else {
+            ticket = memTickets.find((x) => x.tenant_id === tenantId && String(x.id) === id) || null;
+        }
+
+        if (!ticket) {
+            return res.status(404).json({ success: false, error: 'ticket_not_found' });
+        }
+
+        let escalation;
+        if (pool) {
+            const escalationResult = await pool.query(
+                `INSERT INTO ms_ticket_escalations (tenant_id, ticket_id, escalated_by_role, level, reason)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING id, tenant_id, ticket_id, escalated_by_role, level, reason, created_at`,
+                [tenantId, id, actorRole, level, reason]
+            );
+            escalation = escalationResult.rows[0];
+
+            const ticketUpdate = await pool.query(
+                `UPDATE ms_support_tickets
+                 SET priority = 'critical',
+                     status = CASE WHEN status = 'closed' THEN status ELSE 'escalated' END,
+                     updated_at = NOW()
+                 WHERE tenant_id = $1 AND id::text = $2
+                 RETURNING id, tenant_id, rider_id, driver_id, category, priority, status, summary, details, created_by_role, assignee, created_at, updated_at`,
+                [tenantId, id]
+            );
+            ticket = ticketUpdate.rows[0] || ticket;
+        } else {
+            escalation = {
+                id: `esc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                tenant_id: tenantId,
+                ticket_id: id,
+                escalated_by_role: actorRole,
+                level,
+                reason,
+                created_at: new Date().toISOString()
+            };
+            memEscalations.push(escalation);
+
+            const idx = memTickets.findIndex((x) => x.tenant_id === tenantId && String(x.id) === id);
+            if (idx >= 0) {
+                memTickets[idx].priority = 'critical';
+                if (memTickets[idx].status !== 'closed') {
+                    memTickets[idx].status = 'escalated';
+                }
+                memTickets[idx].updated_at = new Date().toISOString();
+                ticket = memTickets[idx];
+            }
+        }
+
+        await writeAudit({
+            tenantId,
+            actorRole,
+            action: 'support_ticket_escalated',
+            targetType: 'ticket',
+            targetId: id,
+            metadata: { level, reason }
+        });
+
+        return res.json({ success: true, data: { escalation, ticket } });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'ticket_escalation_failed', message: error.message });
+    }
+});
+
+app.get('/api/ops-service/support/escalations', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+
+        if (pool) {
+            const result = await pool.query(
+                `SELECT id, tenant_id, ticket_id, escalated_by_role, level, reason, created_at
+                 FROM ms_ticket_escalations
+                 WHERE tenant_id = $1
+                 ORDER BY id DESC
+                 LIMIT $2`,
+                [tenantId, limit]
+            );
+            return res.json({ success: true, data: result.rows });
+        }
+
+        const items = memEscalations.filter((x) => x.tenant_id === tenantId).slice(-limit).reverse();
+        return res.json({ success: true, data: items });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'escalation_list_failed', message: error.message });
     }
 });
 

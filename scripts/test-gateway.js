@@ -296,6 +296,32 @@ async function main() {
       throw new Error('ops_ticket_create_failed');
     }
 
+    const escalationResp = await fetchJsonWithTimeout(`http://localhost:8080/api/ms/ops/support/tickets/${ticketResp.data.data.id}/escalate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      },
+      body: JSON.stringify({
+        level: 'critical',
+        reason: 'multiple customer complaints and safety concern'
+      })
+    });
+    if (!escalationResp.res.ok || !escalationResp.data?.success || escalationResp.data?.data?.ticket?.status !== 'escalated') {
+      throw new Error('ops_ticket_escalation_failed');
+    }
+
+    const escalationListResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/escalations?limit=5', {
+      headers: {
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      }
+    });
+    if (!escalationListResp.res.ok || !escalationListResp.data?.success || !Array.isArray(escalationListResp.data?.data) || !escalationListResp.data.data.length) {
+      throw new Error('ops_escalation_list_failed');
+    }
+
     const fraudScoreResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ai/fraud/score', {
       method: 'POST',
       headers: {
@@ -485,6 +511,7 @@ async function main() {
       payment_checkout_provider: onlineCheckoutResp.data.data.provider,
       wallet_balance_after_withdrawal: withdrawalResp.data.data.user_id ? 'ok' : 'unknown',
       ops_ticket_id: ticketResp.data.data.id,
+      ops_escalation_status: escalationResp.data.data.ticket.status,
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
       ai_surge: pricingResp.data.data.surge_multiplier,
       saas_plan: subResp.data.data.plan_code,
