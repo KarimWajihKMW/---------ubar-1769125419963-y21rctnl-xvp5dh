@@ -20,7 +20,11 @@ const selectRoleImpl = function(role) {
     }
 
     if (role === 'passenger') {
-        syncRolePath('passenger');
+        try {
+            syncRolePath('passenger');
+        } catch (e) {
+            // can happen if called before routing constants initialize
+        }
         console.log('🧑 Passenger selected');
         // Check for existing session (Auto Login)
         if (typeof DB !== 'undefined' && DB.hasSession()) {
@@ -48,7 +52,11 @@ const selectRoleImpl = function(role) {
             }
         }
     } else if (role === 'driver' || role === 'admin') {
-        syncRolePath(role);
+        try {
+            syncRolePath(role);
+        } catch (e) {
+            // can happen if called before routing constants initialize
+        }
         console.log('🚗/📊 Driver or Admin selected:', role);
         if (typeof openRoleLoginModal === 'function') {
             openRoleLoginModal(role);
@@ -9332,6 +9340,19 @@ function initPassengerMode() {
     restorePassengerActiveTrip().catch((error) => {
         console.warn('Failed to restore active passenger trip:', error?.message || error);
     });
+
+    if (pendingPassengerSectionFromPath && pendingPassengerSectionFromPath !== 'destination') {
+        const targetSection = pendingPassengerSectionFromPath;
+        pendingPassengerSectionFromPath = null;
+        suppressPathSync = true;
+        try {
+            window.switchSection(targetSection);
+        } finally {
+            suppressPathSync = false;
+        }
+    } else {
+        pendingPassengerSectionFromPath = null;
+    }
 }
 
 window.switchToPassengerMode = function() {
