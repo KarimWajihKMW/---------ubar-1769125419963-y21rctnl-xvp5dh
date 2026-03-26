@@ -20,6 +20,7 @@
     "release:gate": "bash scripts/release-gate.sh",
     "precheck:prod:github": "bash scripts/precheck-production-github-access.sh",
     "trigger:prod:gate": "bash scripts/trigger-production-release-gate.sh",
+    "go-live:prod": "bash scripts/go-live-production.sh",
     "backup:db": "bash scripts/backup-postgres.sh",
     "restore:db": "bash scripts/restore-postgres.sh",
     "test": "node test-runner.js",

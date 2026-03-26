@@ -55,6 +55,12 @@ Trigger with live smoke against deployed gateway:
 RUN_LIVE_SMOKE=1 GATEWAY_BASE_URL=https://<gateway-host> npm run trigger:prod:gate
 ```
 
+One-command go-live verification:
+
+```bash
+GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod
+```
+
 ## 2) Deploy
 
 ```bash

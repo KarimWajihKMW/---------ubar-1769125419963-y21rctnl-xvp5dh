@@ -193,6 +193,7 @@ Useful scripts:
 - `npm run release:gate`
 - `npm run precheck:prod:github`
 - `npm run trigger:prod:gate`
+- `npm run go-live:prod`
 
 Production preflight validates required runtime secrets and can optionally verify deployed service health if `GATEWAY_BASE_URL` is set.
 
@@ -222,6 +223,11 @@ Trigger production release gate workflow from terminal (requires GitHub CLI auth
 - Script: `scripts/trigger-production-release-gate.sh`
 - Command: `npm run trigger:prod:gate`
 - Optional envs: `RUN_LIVE_SMOKE=1`, `GATEWAY_BASE_URL`, `SMOKE_TENANT_ID`, `SMOKE_ROLE`, `REF_BRANCH`
+
+One-command go-live verification (precheck + trigger + live smoke):
+
+- Script: `scripts/go-live-production.sh`
+- Command: `GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod`
 
 Kubernetes secret sync helper:
 
