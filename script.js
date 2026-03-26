@@ -292,6 +292,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.addEventListener('focus', () => {
+    if (lastDriverMapFocusRefreshAt && Date.now() - lastDriverMapFocusRefreshAt < 3000) return;
+    lastDriverMapFocusRefreshAt = Date.now();
     if (currentUserRole === 'driver') {
         void ensureMapReadyForCaptainContext('window-focus-driver');
         startLocationTracking();
@@ -3088,8 +3090,12 @@ let mapInitPromise = null;
 let mapAutoRetryTimer = null;
 let mapAutoRetryAttempts = 0;
 let mapSearchInputsBound = false;
+let lastDriverMapFocusRefreshAt = 0;
 const MAP_AUTO_RETRY_MAX_ATTEMPTS = 3;
 const MAP_AUTO_RETRY_DELAY_MS = 2500;
+const MAP_PERMISSION_DENIED_MSG = 'تم رفض إذن الموقع. فعّل إذن الموقع من إعدادات المتصفح، وسنستمر بعرض الخريطة.';
+const MAP_LOCATION_TEMP_UNAVAILABLE_MSG = 'يتعذر تحديد الموقع الآن. سنعيد المحاولة تلقائيًا مع إبقاء الخريطة متاحة.';
+const MAP_GEOLOCATION_UNSUPPORTED_MSG = 'الموقع غير مدعوم في هذا المتصفح. يمكن متابعة استخدام الخريطة بدون GPS.';
 const GOOGLE_MAPS_KEY_STORAGE_KEY = 'akwadra_google_maps_key';
 const LEAFLET_CSS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
 const LEAFLET_JS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -3135,34 +3141,29 @@ function scheduleMapAutoRetry(reason = '') {
             trigger: `auto-retry-${mapAutoRetryAttempts}`,
             reason
         }).catch(() => {
-            // handled in initLeafletMap
+            console.warn('Map auto-retry failed');
         });
     }, MAP_AUTO_RETRY_DELAY_MS);
+}
+
+function safeRemoveMapLayer(layer) {
+    if (!layer || typeof layer.remove !== 'function') return;
+    try { layer.remove(); } catch (e) { /* ignore cleanup errors */ }
 }
 
 function destroyLeafletMapInstance() {
     clearMapAutoRetry();
 
-    if (pickupMarkerL) {
-        try { pickupMarkerL.remove(); } catch (e) {}
-        pickupMarkerL = null;
-    }
-    if (destMarkerL) {
-        try { destMarkerL.remove(); } catch (e) {}
-        destMarkerL = null;
-    }
-    if (driverMarkerL) {
-        try { driverMarkerL.remove(); } catch (e) {}
-        driverMarkerL = null;
-    }
-    if (passengerMarkerL) {
-        try { passengerMarkerL.remove(); } catch (e) {}
-        passengerMarkerL = null;
-    }
-    if (routePolyline) {
-        try { routePolyline.remove(); } catch (e) {}
-        routePolyline = null;
-    }
+    safeRemoveMapLayer(pickupMarkerL);
+    safeRemoveMapLayer(destMarkerL);
+    safeRemoveMapLayer(driverMarkerL);
+    safeRemoveMapLayer(passengerMarkerL);
+    safeRemoveMapLayer(routePolyline);
+    pickupMarkerL = null;
+    destMarkerL = null;
+    driverMarkerL = null;
+    passengerMarkerL = null;
+    routePolyline = null;
 
     if (leafletMap) {
         try {
@@ -3170,9 +3171,6 @@ function destroyLeafletMapInstance() {
                 leafletMap.remove();
             } else if (typeof leafletMap.off === 'function') {
                 leafletMap.off();
-            }
-            if (leafletMap._map && window.google?.maps?.event) {
-                window.google.maps.event.clearInstanceListeners(leafletMap._map);
             }
         } catch (e) {
             // ignore cleanup errors
@@ -5374,7 +5372,7 @@ async function initLeafletMap(options = {}) {
                 showToast('تم تشغيل الخريطة الاحتياطية (OpenStreetMap)');
             } catch (leafletError) {
                 console.error('Failed to initialize Leaflet fallback:', leafletError);
-                setMapFallbackMode(true, 'تعذر تحميل الخريطة الآن. سيتم إعادة المحاولة تلقائيًا.');
+                setMapFallbackMode(true, 'تعذر تحميل الخريطة الآن. سيتمّ إعادة المحاولة تلقائيًا.');
                 showToast('تعذر تحميل الخريطة الآن، جاري إعادة المحاولة');
                 scheduleMapAutoRetry(opts.reason || opts.trigger || 'init_failed');
                 return null;
@@ -5941,17 +5939,18 @@ function updateDriverRealTripProgress(coords) {
 }
 
 function handleGeoError(error) {
-    if (error && error.code === 1) {
+    const permissionDenied = !!(error && error.code === 1);
+    if (permissionDenied) {
         geoPermissionDenied = true;
-        setMapFallbackMode(true, 'تم رفض إذن الموقع. فعّل GPS لعرض موقعك الحالي، وسنستمر بعرض الخريطة.');
+        setMapFallbackMode(true, MAP_PERMISSION_DENIED_MSG);
         scheduleMapAutoRetry('geo_permission_denied');
-        showToast('تم رفض إذن الموقع. فعّل الموقع من إعدادات المتصفح.');
+        showToast(MAP_PERMISSION_DENIED_MSG);
     } else {
-        setMapFallbackMode(true, 'يتعذر تحديد الموقع الآن. سنعيد المحاولة تلقائيًا مع إبقاء الخريطة متاحة.');
+        setMapFallbackMode(true, MAP_LOCATION_TEMP_UNAVAILABLE_MSG);
         scheduleMapAutoRetry('geo_temporarily_unavailable');
     }
 
-    if (shouldShowGeoToast() && !(error && error.code === 1)) {
+    if (shouldShowGeoToast() && !permissionDenied) {
         showToast('⚠️ يرجى تفعيل الموقع لاستخدام الخريطة بدقة');
     }
 
@@ -5967,7 +5966,7 @@ function handleGeoError(error) {
 
 function startLocationTracking() {
     if (!canUseGeolocation()) {
-        setMapFallbackMode(true, 'الموقع غير مدعوم في هذا المتصفح. يمكن متابعة استخدام الخريطة بدون GPS.');
+        setMapFallbackMode(true, MAP_GEOLOCATION_UNSUPPORTED_MSG);
         handleGeoError();
         return;
     }
@@ -6007,7 +6006,7 @@ function requestSingleLocationFix() {
         return;
     }
     if (!canUseGeolocation()) {
-        setMapFallbackMode(true, 'الموقع غير مدعوم في هذا المتصفح. يمكن متابعة استخدام الخريطة بدون GPS.');
+        setMapFallbackMode(true, MAP_GEOLOCATION_UNSUPPORTED_MSG);
         handleGeoError();
         return;
     }
