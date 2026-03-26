@@ -76,6 +76,7 @@ GATEWAY_BASE_URL=https://<gateway-host> npm run go-live:prod
 Assistant flow (loads `.env.go-live` if present and runs readiness + go-live):
 
 ```bash
+cp .env.go-live.example .env.go-live
 npm run go-live:assistant
 ```
 

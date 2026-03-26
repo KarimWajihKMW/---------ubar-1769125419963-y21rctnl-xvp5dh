@@ -240,6 +240,8 @@ Go-live assistant (loads env from file if present, then runs readiness + go-live
 - Script: `scripts/go-live-assistant.sh`
 - Command: `npm run go-live:assistant`
 - Optional env file path: `GO_LIVE_ENV_FILE=.env.go-live`
+- Template file: `.env.go-live.example`
+- Create local file: `cp .env.go-live.example .env.go-live`
 - Default env file format:
   - `GATEWAY_BASE_URL=https://<gateway-host>`
   - `GH_PAT=<token-with-repo-and-workflow-scopes>`

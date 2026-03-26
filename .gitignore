@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.go-live
 *.log
 .DS_Store
 
