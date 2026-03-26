@@ -22,6 +22,7 @@
     "trigger:prod:gate": "bash scripts/trigger-production-release-gate.sh",
     "go-live:prod": "bash scripts/go-live-production.sh",
     "readiness:100": "bash scripts/readiness-100.sh",
+    "readiness:live": "bash scripts/readiness-live.sh",
     "backup:db": "bash scripts/backup-postgres.sh",
     "restore:db": "bash scripts/restore-postgres.sh",
     "test": "node test-runner.js",

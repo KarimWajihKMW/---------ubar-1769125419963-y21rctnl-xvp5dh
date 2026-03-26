@@ -43,6 +43,12 @@ Run readiness score check (must reach 100% before final go-live signoff):
 npm run readiness:100
 ```
 
+Run live readiness precheck before go-live dispatch:
+
+```bash
+GH_PAT=<token-with-repo-and-workflow-scopes> GATEWAY_BASE_URL=https://<gateway-host> npm run readiness:live
+```
+
 Trigger GitHub production release gate workflow from terminal:
 
 ```bash

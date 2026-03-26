@@ -195,6 +195,7 @@ Useful scripts:
 - `npm run trigger:prod:gate`
 - `npm run go-live:prod`
 - `npm run readiness:100`
+- `npm run readiness:live`
 
 Production preflight validates required runtime secrets and can optionally verify deployed service health if `GATEWAY_BASE_URL` is set.
 
@@ -237,6 +238,11 @@ Readiness score command (returns 100% only when integration test, build, and Git
 
 - Script: `scripts/readiness-100.sh`
 - Command: `npm run readiness:100`
+
+Live readiness command (checks deployed gateway health and GH_PAT scopes before go-live):
+
+- Script: `scripts/readiness-live.sh`
+- Command: `GH_PAT=<token-with-repo-and-workflow-scopes> GATEWAY_BASE_URL=https://<gateway-host> npm run readiness:live`
 
 Kubernetes secret sync helper:
 
