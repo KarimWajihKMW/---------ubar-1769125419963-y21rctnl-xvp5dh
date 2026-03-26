@@ -64,6 +64,42 @@ async function main() {
     const rec = recResp.data;
     if (!recResp.res.ok || !rec?.success) throw new Error('gateway_trips_proxy_failed');
 
+    const assignResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/trips/match/assign', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        ride: { ride_id: 'ride-101' },
+        demand: 0.9,
+        surge_multiplier: 1.5,
+        drivers: [
+          { driver_id: 'd1', distance_km: 2.1, rating: 4.8, acceptance_rate: 0.94, cancellation_rate: 0.04, eta_min: 6 },
+          { driver_id: 'd2', distance_km: 0.9, rating: 4.3, acceptance_rate: 0.88, cancellation_rate: 0.09, eta_min: 4 }
+        ]
+      })
+    });
+    if (!assignResp.res.ok || !assignResp.data?.success || !assignResp.data?.data?.selected_driver?.driver_id) {
+      throw new Error('gateway_trips_assignment_failed');
+    }
+
+    const lifecycleResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/trips/lifecycle/advance', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        trip_id: 'trip-700',
+        current_state: 'started',
+        action: 'complete_trip'
+      })
+    });
+    if (!lifecycleResp.res.ok || lifecycleResp.data?.data?.next_state !== 'completed') {
+      throw new Error('gateway_trips_lifecycle_advance_failed');
+    }
+
     const fareResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/fare/calculate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -72,9 +108,42 @@ async function main() {
     const fare = fareResp.data;
     if (!fareResp.res.ok || !fare?.success || !fare?.data?.total) throw new Error('gateway_payments_proxy_failed');
 
+    const topupResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/wallet/topup', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        user_id: 'driver-1',
+        role: 'driver',
+        amount: 100,
+        source: 'test'
+      })
+    });
+    if (!topupResp.res.ok || !topupResp.data?.success) throw new Error('wallet_topup_failed');
+
+    const withdrawalResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/payments/wallet/withdrawals/request', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        user_id: 'driver-1',
+        amount: 30,
+        method: 'bank_transfer'
+      })
+    });
+    if (!withdrawalResp.res.ok || withdrawalResp.data?.data?.status !== 'pending') {
+      throw new Error('wallet_withdrawal_request_failed');
+    }
+
     console.log('✅ Gateway test passed', {
       match_strategy: rec.data.strategy,
-      fare_total: fare.data.total
+      assigned_driver: assignResp.data.data.selected_driver.driver_id,
+      fare_total: fare.data.total,
+      wallet_balance_after_withdrawal: withdrawalResp.data.data.user_id ? 'ok' : 'unknown'
     });
   } finally {
     for (const p of [gateway, trips, payments]) {

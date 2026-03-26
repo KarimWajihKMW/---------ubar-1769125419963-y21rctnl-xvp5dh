@@ -97,6 +97,26 @@ Gateway routes:
 - `GET|POST /api/ms/payments/*` -> Payments service
 - `* /api/*` -> fallback to monolith backend
 
+New production-focused capabilities added in microservices:
+
+- Tenant-aware routing via `x-tenant-id` header (defaults to `public`)
+- Request trace propagation via `x-request-id`
+- Smart driver assignment scoring endpoint:
+  - `POST /api/ms/trips/match/assign`
+- Resilient lifecycle transition endpoint (includes optional rating skip signal):
+  - `POST /api/ms/trips/lifecycle/advance`
+- Wallet and withdrawal endpoints:
+  - `GET /api/ms/payments/wallet/:userId`
+  - `POST /api/ms/payments/wallet/topup`
+  - `POST /api/ms/payments/wallet/charge`
+  - `POST /api/ms/payments/wallet/withdrawals/request`
+  - `GET /api/ms/payments/wallet/transactions/:userId`
+
+Payments service persistence mode:
+
+- If `DATABASE_URL` is set: data is persisted in PostgreSQL tables (`ms_wallet_accounts`, `ms_wallet_transactions`, `ms_withdrawal_requests`).
+- If `DATABASE_URL` is not set: service falls back to in-memory mode (useful for quick local smoke tests).
+
 Useful scripts:
 
 - `npm run start:gateway`
