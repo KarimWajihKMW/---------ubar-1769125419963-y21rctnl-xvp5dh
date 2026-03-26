@@ -88,6 +88,8 @@ The repository now includes a modular microservices-ready architecture:
 - `gateway/server.js` (API gateway + proxy routing)
 - `services/trips-service/server.js`
 - `services/payments-service/server.js`
+- `services/ops-service/server.js`
+- `services/ai-service/server.js`
 - `docker-compose.microservices.yml`
 
 Gateway routes:
@@ -95,6 +97,8 @@ Gateway routes:
 - `GET /health`
 - `GET|POST /api/ms/trips/*` -> Trips service
 - `GET|POST /api/ms/payments/*` -> Payments service
+- `GET|POST /api/ms/ops/*` -> Ops service
+- `GET|POST /api/ms/ai/*` -> AI service
 - `* /api/*` -> fallback to monolith backend
 
 New production-focused capabilities added in microservices:
@@ -111,6 +115,19 @@ New production-focused capabilities added in microservices:
   - `POST /api/ms/payments/wallet/charge`
   - `POST /api/ms/payments/wallet/withdrawals/request`
   - `GET /api/ms/payments/wallet/transactions/:userId`
+- Dispatcher and support operations endpoints:
+  - `GET /api/ms/ops/dispatch/queue`
+  - `POST /api/ms/ops/dispatch/manual-assign`
+  - `POST /api/ms/ops/support/tickets`
+  - `GET /api/ms/ops/support/tickets`
+  - `PATCH /api/ms/ops/support/tickets/:id`
+  - `GET /api/ms/ops/audit/logs`
+- AI endpoints:
+  - `POST /api/ms/ai/fraud/score`
+  - `POST /api/ms/ai/demand/forecast`
+  - `POST /api/ms/ai/pricing/recommendation`
+  - `POST /api/ms/ai/support/summarize-ticket`
+  - `POST /api/ms/ai/business/insights`
 
 Payments service persistence mode:
 
@@ -122,6 +139,8 @@ Useful scripts:
 - `npm run start:gateway`
 - `npm run start:trips-service`
 - `npm run start:payments-service`
+- `npm run start:ops-service`
+- `npm run start:ai-service`
 - `npm run start:micro`
 - `npm run micro:down`
 - `npm run test:gateway`
@@ -134,6 +153,8 @@ Prometheus-compatible metrics endpoints are available on:
 - API gateway: `GET /metrics`
 - Trips service: `GET /metrics`
 - Payments service: `GET /metrics`
+- Ops service: `GET /metrics`
+- AI service: `GET /metrics`
 
 Core metrics include request totals, latency histograms (monolith), and default Node.js process/runtime metrics.
 

@@ -11,6 +11,8 @@ const PORT = Number(process.env.GATEWAY_PORT || 8080);
 
 const tripsTarget = process.env.TRIPS_SERVICE_URL || 'http://localhost:4101';
 const paymentsTarget = process.env.PAYMENTS_SERVICE_URL || 'http://localhost:4102';
+const opsTarget = process.env.OPS_SERVICE_URL || 'http://localhost:4103';
+const aiTarget = process.env.AI_SERVICE_URL || 'http://localhost:4104';
 const monolithTarget = process.env.MONOLITH_URL || 'http://localhost:3000';
 const metricsToken = process.env.METRICS_TOKEN || '';
 const rateLimitWindowMs = Number(process.env.GATEWAY_RATE_LIMIT_WINDOW_MS || 60 * 1000);
@@ -76,6 +78,8 @@ app.get('/health', (_req, res) => {
         routes: {
             trips: '/api/ms/trips/*',
             payments: '/api/ms/payments/*',
+            ops: '/api/ms/ops/*',
+            ai: '/api/ms/ai/*',
             fallback: '/api/*'
         }
     });
@@ -120,6 +124,35 @@ app.use(createProxyMiddleware({
     logLevel: 'warn'
 }));
 
+app.use(createProxyMiddleware({
+    target: opsTarget,
+    changeOrigin: true,
+    pathFilter: '/api/ms/ops',
+    pathRewrite: { '^/api/ms/ops': '/api/ops-service' },
+    on: {
+        proxyReq: (proxyReq, req) => {
+            proxyReq.setHeader('x-tenant-id', String(req.headers['x-tenant-id'] || 'public'));
+            proxyReq.setHeader('x-request-id', String(req.requestId || ''));
+            proxyReq.setHeader('x-role', String(req.headers['x-role'] || 'system'));
+        }
+    },
+    logLevel: 'warn'
+}));
+
+app.use(createProxyMiddleware({
+    target: aiTarget,
+    changeOrigin: true,
+    pathFilter: '/api/ms/ai',
+    pathRewrite: { '^/api/ms/ai': '/api/ai-service' },
+    on: {
+        proxyReq: (proxyReq, req) => {
+            proxyReq.setHeader('x-tenant-id', String(req.headers['x-tenant-id'] || 'public'));
+            proxyReq.setHeader('x-request-id', String(req.requestId || ''));
+        }
+    },
+    logLevel: 'warn'
+}));
+
 // Backward-compatible fallback to existing monolith API.
 app.use('/api', createProxyMiddleware({
     target: monolithTarget,
@@ -136,5 +169,7 @@ app.listen(PORT, () => {
     console.log(`🌐 API Gateway listening on ${PORT}`);
     console.log(`➡️ Trips service: ${tripsTarget}`);
     console.log(`➡️ Payments service: ${paymentsTarget}`);
+    console.log(`➡️ Ops service: ${opsTarget}`);
+    console.log(`➡️ AI service: ${aiTarget}`);
     console.log(`➡️ Monolith fallback: ${monolithTarget}`);
 });

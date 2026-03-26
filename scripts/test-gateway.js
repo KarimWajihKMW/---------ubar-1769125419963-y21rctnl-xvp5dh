@@ -44,10 +44,14 @@ function start(cmd, args, env = {}) {
 async function main() {
   const trips = start(process.execPath, ['services/trips-service/server.js']);
   const payments = start(process.execPath, ['services/payments-service/server.js']);
+  const ops = start(process.execPath, ['services/ops-service/server.js']);
+  const ai = start(process.execPath, ['services/ai-service/server.js']);
   const gateway = start(process.execPath, ['gateway/server.js'], {
     GATEWAY_PORT: '8080',
     TRIPS_SERVICE_URL: 'http://localhost:4101',
     PAYMENTS_SERVICE_URL: 'http://localhost:4102',
+    OPS_SERVICE_URL: 'http://localhost:4103',
+    AI_SERVICE_URL: 'http://localhost:4104',
     MONOLITH_URL: 'http://localhost:3000'
   });
 
@@ -55,8 +59,10 @@ async function main() {
     const okTrips = await waitFor('http://localhost:4101/api/trips-service/health');
     const okPayments = await waitFor('http://localhost:4102/api/payments-service/health');
     const okGateway = await waitFor('http://localhost:8080/health');
+    const okOps = await waitFor('http://localhost:4103/api/ops-service/health');
+    const okAi = await waitFor('http://localhost:4104/api/ai-service/health');
 
-    if (!okTrips || !okPayments || !okGateway) {
+    if (!okTrips || !okPayments || !okGateway || !okOps || !okAi) {
       throw new Error('services_not_ready');
     }
 
@@ -139,14 +145,86 @@ async function main() {
       throw new Error('wallet_withdrawal_request_failed');
     }
 
+    const manualAssignResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/dispatch/manual-assign', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'dispatcher'
+      },
+      body: JSON.stringify({
+        trip_id: 'trip-900',
+        driver_id: 'driver-9',
+        reason: 'vip_reassignment'
+      })
+    });
+    if (!manualAssignResp.res.ok || !manualAssignResp.data?.success) {
+      throw new Error('ops_manual_assign_failed');
+    }
+
+    const ticketResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/tickets', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      },
+      body: JSON.stringify({
+        rider_id: 'rider-1',
+        category: 'trip_issue',
+        priority: 'high',
+        summary: 'Driver took wrong route and ride was delayed',
+        details: 'Customer requesting partial refund'
+      })
+    });
+    if (!ticketResp.res.ok || !ticketResp.data?.success || !ticketResp.data?.data?.id) {
+      throw new Error('ops_ticket_create_failed');
+    }
+
+    const fraudScoreResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ai/fraud/score', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        account_age_days: 10,
+        cancellation_rate: 0.5,
+        payment_failures: 2,
+        rapid_requests_last_hour: 3
+      })
+    });
+    if (!fraudScoreResp.res.ok || !fraudScoreResp.data?.success || typeof fraudScoreResp.data?.data?.fraud_score !== 'number') {
+      throw new Error('ai_fraud_score_failed');
+    }
+
+    const pricingResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ai/pricing/recommendation', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': 'demo-tenant'
+      },
+      body: JSON.stringify({
+        demand_index: 1.8,
+        supply_index: 1.2,
+        weather_risk: 0.3
+      })
+    });
+    if (!pricingResp.res.ok || !pricingResp.data?.success || !pricingResp.data?.data?.surge_multiplier) {
+      throw new Error('ai_pricing_recommendation_failed');
+    }
+
     console.log('✅ Gateway test passed', {
       match_strategy: rec.data.strategy,
       assigned_driver: assignResp.data.data.selected_driver.driver_id,
       fare_total: fare.data.total,
-      wallet_balance_after_withdrawal: withdrawalResp.data.data.user_id ? 'ok' : 'unknown'
+      wallet_balance_after_withdrawal: withdrawalResp.data.data.user_id ? 'ok' : 'unknown',
+      ops_ticket_id: ticketResp.data.data.id,
+      ai_fraud_score: fraudScoreResp.data.data.fraud_score,
+      ai_surge: pricingResp.data.data.surge_multiplier
     });
   } finally {
-    for (const p of [gateway, trips, payments]) {
+    for (const p of [gateway, trips, payments, ops, ai]) {
       try { p.kill('SIGTERM'); } catch (_) {}
     }
   }

@@ -10,6 +10,8 @@ services:
       GATEWAY_PORT: 8080
       TRIPS_SERVICE_URL: http://trips-service:4101
       PAYMENTS_SERVICE_URL: http://payments-service:4102
+      OPS_SERVICE_URL: http://ops-service:4103
+      AI_SERVICE_URL: http://ai-service:4104
       MONOLITH_URL: http://monolith:3000
     ports:
       - "8080:8080"
@@ -17,6 +19,10 @@ services:
       trips-service:
         condition: service_started
       payments-service:
+        condition: service_started
+      ops-service:
+        condition: service_started
+      ai-service:
         condition: service_started
       monolith:
         condition: service_started
@@ -42,6 +48,29 @@ services:
       PAYMENTS_SERVICE_PORT: 4102
     ports:
       - "4102:4102"
+
+  ops-service:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && node services/ops-service/server.js"
+    volumes:
+      - ./:/app
+    environment:
+      OPS_SERVICE_PORT: 4103
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ubar
+    ports:
+      - "4103:4103"
+
+  ai-service:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && node services/ai-service/server.js"
+    volumes:
+      - ./:/app
+    environment:
+      AI_SERVICE_PORT: 4104
+    ports:
+      - "4104:4104"
 
   monolith:
     build: .

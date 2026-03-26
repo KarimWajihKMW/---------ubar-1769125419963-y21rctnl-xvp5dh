@@ -1,0 +1,392 @@
+const express = require('express');
+const promClient = require('prom-client');
+const { Pool } = require('pg');
+
+const app = express();
+const PORT = Number(process.env.OPS_SERVICE_PORT || 4103);
+const useDatabase = Boolean(process.env.DATABASE_URL);
+const pool = useDatabase ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+
+const metricsRegistry = new promClient.Registry();
+promClient.collectDefaultMetrics({ register: metricsRegistry, prefix: 'ubar_ops_service_' });
+const requestCounter = new promClient.Counter({
+    name: 'ubar_ops_service_http_requests_total',
+    help: 'Total HTTP requests handled by ops service',
+    labelNames: ['method', 'route', 'status_code'],
+    registers: [metricsRegistry]
+});
+
+const memTickets = [];
+const memAudit = [];
+const memAssignments = [];
+
+app.use(express.json({ limit: '1mb' }));
+
+function getTenantId(req) {
+    const tenantId = String(req.headers['x-tenant-id'] || 'public').trim();
+    return tenantId || 'public';
+}
+
+function getRole(req) {
+    return String(req.headers['x-role'] || 'system').trim().toLowerCase();
+}
+
+function requireRole(allowedRoles) {
+    const normalized = new Set(allowedRoles.map((r) => String(r).toLowerCase()));
+    return (req, res, next) => {
+        const role = getRole(req);
+        if (!normalized.has(role)) {
+            return res.status(403).json({ success: false, error: 'forbidden', required_roles: Array.from(normalized) });
+        }
+        next();
+    };
+}
+
+async function ensureSchema() {
+    if (!pool) return;
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS ms_support_tickets (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            rider_id TEXT,
+            driver_id TEXT,
+            category TEXT NOT NULL,
+            priority TEXT NOT NULL DEFAULT 'normal',
+            status TEXT NOT NULL DEFAULT 'open',
+            summary TEXT NOT NULL,
+            details TEXT,
+            created_by_role TEXT NOT NULL DEFAULT 'system',
+            assignee TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS ms_dispatch_assignments (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            trip_id TEXT NOT NULL,
+            driver_id TEXT NOT NULL,
+            assigned_by TEXT NOT NULL,
+            reason TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS ms_audit_logs (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            actor_role TEXT NOT NULL,
+            action TEXT NOT NULL,
+            target_type TEXT,
+            target_id TEXT,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+}
+
+async function writeAudit({ tenantId, actorRole, action, targetType, targetId, metadata }) {
+    if (!pool) {
+        memAudit.push({
+            id: `audit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            tenant_id: tenantId,
+            actor_role: actorRole,
+            action,
+            target_type: targetType || null,
+            target_id: targetId || null,
+            metadata: metadata || {},
+            created_at: new Date().toISOString()
+        });
+        return;
+    }
+
+    await pool.query(
+        `INSERT INTO ms_audit_logs (tenant_id, actor_role, action, target_type, target_id, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [tenantId, actorRole, action, targetType || null, targetId || null, metadata || {}]
+    );
+}
+
+app.use((req, res, next) => {
+    res.on('finish', () => {
+        const route = req.route && req.route.path ? String(req.route.path) : String(req.path || req.url || 'unknown');
+        requestCounter.inc({ method: req.method, route, status_code: String(res.statusCode || 0) });
+    });
+    next();
+});
+
+app.get('/api/ops-service/health', (_req, res) => {
+    return res.json({ success: true, service: 'ops-service', status: 'ok', database_mode: useDatabase ? 'postgres' : 'memory' });
+});
+
+app.get('/metrics', async (_req, res) => {
+    res.set('Content-Type', metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
+});
+
+app.get('/api/ops-service/dispatch/queue', async (req, res) => {
+    const tenantId = getTenantId(req);
+    const queueCounts = {
+        waiting_requests: Math.floor(Math.random() * 20),
+        nearby_available_drivers: Math.floor(Math.random() * 60) + 20,
+        delayed_requests: Math.floor(Math.random() * 4)
+    };
+
+    let latestAssignments = [];
+    if (pool) {
+        const result = await pool.query(
+            `SELECT id, tenant_id, trip_id, driver_id, assigned_by, reason, created_at
+             FROM ms_dispatch_assignments
+             WHERE tenant_id = $1
+             ORDER BY id DESC
+             LIMIT 10`,
+            [tenantId]
+        );
+        latestAssignments = result.rows;
+    } else {
+        latestAssignments = memAssignments.filter((x) => x.tenant_id === tenantId).slice(-10).reverse();
+    }
+
+    return res.json({
+        success: true,
+        data: {
+            tenant_id: tenantId,
+            queue: queueCounts,
+            latest_assignments: latestAssignments
+        }
+    });
+});
+
+app.post('/api/ops-service/dispatch/manual-assign', requireRole(['admin', 'dispatcher']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const actorRole = getRole(req);
+        const tripId = String(req.body.trip_id || '').trim();
+        const driverId = String(req.body.driver_id || '').trim();
+        const reason = String(req.body.reason || 'manual_intervention').trim();
+
+        if (!tripId || !driverId) {
+            return res.status(400).json({ success: false, error: 'trip_id_and_driver_id_required' });
+        }
+
+        let assignment;
+        if (pool) {
+            const result = await pool.query(
+                `INSERT INTO ms_dispatch_assignments (tenant_id, trip_id, driver_id, assigned_by, reason)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING id, tenant_id, trip_id, driver_id, assigned_by, reason, created_at`,
+                [tenantId, tripId, driverId, actorRole, reason]
+            );
+            assignment = result.rows[0];
+        } else {
+            assignment = {
+                id: `assign-${Date.now()}`,
+                tenant_id: tenantId,
+                trip_id: tripId,
+                driver_id: driverId,
+                assigned_by: actorRole,
+                reason,
+                created_at: new Date().toISOString()
+            };
+            memAssignments.push(assignment);
+        }
+
+        await writeAudit({
+            tenantId,
+            actorRole,
+            action: 'dispatcher_manual_assign',
+            targetType: 'trip',
+            targetId: tripId,
+            metadata: { driver_id: driverId, reason }
+        });
+
+        return res.json({ success: true, data: assignment });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'manual_assign_failed', message: error.message });
+    }
+});
+
+app.post('/api/ops-service/support/tickets', async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const actorRole = getRole(req);
+        const payload = {
+            rider_id: req.body.rider_id ? String(req.body.rider_id).trim() : null,
+            driver_id: req.body.driver_id ? String(req.body.driver_id).trim() : null,
+            category: String(req.body.category || '').trim(),
+            priority: String(req.body.priority || 'normal').trim().toLowerCase(),
+            summary: String(req.body.summary || '').trim(),
+            details: String(req.body.details || '').trim(),
+            assignee: req.body.assignee ? String(req.body.assignee).trim() : null
+        };
+
+        if (!payload.category || !payload.summary) {
+            return res.status(400).json({ success: false, error: 'category_and_summary_required' });
+        }
+
+        let ticket;
+        if (pool) {
+            const result = await pool.query(
+                `INSERT INTO ms_support_tickets (tenant_id, rider_id, driver_id, category, priority, summary, details, created_by_role, assignee)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 RETURNING id, tenant_id, rider_id, driver_id, category, priority, status, summary, details, created_by_role, assignee, created_at, updated_at`,
+                [tenantId, payload.rider_id, payload.driver_id, payload.category, payload.priority, payload.summary, payload.details, actorRole, payload.assignee]
+            );
+            ticket = result.rows[0];
+        } else {
+            ticket = {
+                id: `ticket-${Date.now()}`,
+                tenant_id: tenantId,
+                rider_id: payload.rider_id,
+                driver_id: payload.driver_id,
+                category: payload.category,
+                priority: payload.priority,
+                status: 'open',
+                summary: payload.summary,
+                details: payload.details,
+                created_by_role: actorRole,
+                assignee: payload.assignee,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+            memTickets.push(ticket);
+        }
+
+        await writeAudit({
+            tenantId,
+            actorRole,
+            action: 'support_ticket_created',
+            targetType: 'ticket',
+            targetId: String(ticket.id),
+            metadata: { category: payload.category, priority: payload.priority }
+        });
+
+        return res.json({ success: true, data: ticket });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'ticket_create_failed', message: error.message });
+    }
+});
+
+app.get('/api/ops-service/support/tickets', async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const status = req.query.status ? String(req.query.status).trim().toLowerCase() : null;
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+
+        if (pool) {
+            const values = [tenantId, limit];
+            let query = `
+                SELECT id, tenant_id, rider_id, driver_id, category, priority, status, summary, details, created_by_role, assignee, created_at, updated_at
+                FROM ms_support_tickets
+                WHERE tenant_id = $1
+            `;
+            if (status) {
+                query += ' AND status = $3';
+                values.push(status);
+            }
+            query += ' ORDER BY id DESC LIMIT $2';
+
+            const result = await pool.query(query, values);
+            return res.json({ success: true, data: result.rows });
+        }
+
+        let items = memTickets.filter((x) => x.tenant_id === tenantId);
+        if (status) items = items.filter((x) => x.status === status);
+        return res.json({ success: true, data: items.slice(-limit).reverse() });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'ticket_list_failed', message: error.message });
+    }
+});
+
+app.patch('/api/ops-service/support/tickets/:id', requireRole(['admin', 'support', 'dispatcher']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const actorRole = getRole(req);
+        const id = String(req.params.id || '').trim();
+        const status = req.body.status ? String(req.body.status).trim().toLowerCase() : null;
+        const assignee = req.body.assignee ? String(req.body.assignee).trim() : null;
+
+        if (!status && !assignee) {
+            return res.status(400).json({ success: false, error: 'status_or_assignee_required' });
+        }
+
+        let ticket;
+        if (pool) {
+            const result = await pool.query(
+                `UPDATE ms_support_tickets
+                 SET status = COALESCE($3, status),
+                     assignee = COALESCE($4, assignee),
+                     updated_at = NOW()
+                 WHERE tenant_id = $1 AND id::text = $2
+                 RETURNING id, tenant_id, rider_id, driver_id, category, priority, status, summary, details, created_by_role, assignee, created_at, updated_at`,
+                [tenantId, id, status, assignee]
+            );
+            ticket = result.rows[0];
+        } else {
+            const idx = memTickets.findIndex((x) => x.tenant_id === tenantId && String(x.id) === id);
+            if (idx >= 0) {
+                if (status) memTickets[idx].status = status;
+                if (assignee) memTickets[idx].assignee = assignee;
+                memTickets[idx].updated_at = new Date().toISOString();
+                ticket = memTickets[idx];
+            }
+        }
+
+        if (!ticket) {
+            return res.status(404).json({ success: false, error: 'ticket_not_found' });
+        }
+
+        await writeAudit({
+            tenantId,
+            actorRole,
+            action: 'support_ticket_updated',
+            targetType: 'ticket',
+            targetId: String(ticket.id),
+            metadata: { status, assignee }
+        });
+
+        return res.json({ success: true, data: ticket });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'ticket_update_failed', message: error.message });
+    }
+});
+
+app.get('/api/ops-service/audit/logs', requireRole(['admin', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
+
+        if (pool) {
+            const result = await pool.query(
+                `SELECT id, tenant_id, actor_role, action, target_type, target_id, metadata, created_at
+                 FROM ms_audit_logs
+                 WHERE tenant_id = $1
+                 ORDER BY id DESC
+                 LIMIT $2`,
+                [tenantId, limit]
+            );
+            return res.json({ success: true, data: result.rows });
+        }
+
+        return res.json({
+            success: true,
+            data: memAudit.filter((x) => x.tenant_id === tenantId).slice(-limit).reverse()
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'audit_list_failed', message: error.message });
+    }
+});
+
+ensureSchema()
+    .catch((error) => {
+        console.error('⚠️ Ops schema init failed, service will continue:', error.message);
+    })
+    .finally(() => {
+        app.listen(PORT, () => {
+            console.log(`🛠️ Ops service listening on ${PORT}`);
+        });
+    });
