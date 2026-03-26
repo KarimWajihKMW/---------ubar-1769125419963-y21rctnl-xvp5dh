@@ -138,6 +138,7 @@ New production-focused capabilities added in microservices:
   - `GET /api/ms/ops/support/alerts`
   - `POST /api/ms/ops/support/tickets/reprioritize`
   - `POST /api/ms/ops/support/tickets/auto-close`
+  - `GET /api/ms/ops/support/handoff/summary`
   - `GET /api/ms/ops/audit/logs`
 - AI endpoints:
   - `POST /api/ms/ai/fraud/score`

@@ -385,6 +385,16 @@ async function main() {
       throw new Error('ops_ticket_auto_close_failed');
     }
 
+    const handoffSummaryResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/handoff/summary?limit=5&escalation_window_minutes=1440', {
+      headers: {
+        'x-tenant-id': 'demo-tenant',
+        'x-role': 'support'
+      }
+    });
+    if (!handoffSummaryResp.res.ok || !handoffSummaryResp.data?.success || typeof handoffSummaryResp.data?.data?.totals?.escalated_open !== 'number') {
+      throw new Error('ops_handoff_summary_failed');
+    }
+
     const fraudScoreResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ai/fraud/score', {
       method: 'POST',
       headers: {
@@ -580,6 +590,7 @@ async function main() {
       ops_alerts_count: supportAlertsResp.data.data.alerts.length,
       ops_reprioritized_count: reprioritizeResp.data.data.updated_count,
       ops_auto_closed_count: autoCloseResp.data.data.updated_count,
+      ops_handoff_escalated_open: handoffSummaryResp.data.data.totals.escalated_open,
       ai_fraud_score: fraudScoreResp.data.data.fraud_score,
       ai_surge: pricingResp.data.data.surge_multiplier,
       saas_plan: subResp.data.data.plan_code,

@@ -951,6 +951,112 @@ app.post('/api/ops-service/support/tickets/auto-close', requireRole(['admin', 's
     }
 });
 
+app.get('/api/ops-service/support/handoff/summary', requireRole(['admin', 'support', 'compliance']), async (req, res) => {
+    try {
+        const tenantId = getTenantId(req);
+        const limit = Math.max(1, Math.min(50, Number(req.query.limit || 10)));
+        const escalationWindowMinutes = Math.max(1, Math.min(7 * 24 * 60, Number(req.query.escalation_window_minutes || 720)));
+
+        if (pool) {
+            const totalsRes = await pool.query(
+                `SELECT
+                    COUNT(*)::int AS total_open,
+                    COUNT(*) FILTER (WHERE priority = 'critical')::int AS critical_open,
+                    COUNT(*) FILTER (WHERE status = 'escalated')::int AS escalated_open
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1
+                   AND status IN ('open', 'in_progress', 'escalated')`,
+                [tenantId]
+            );
+
+            const topTicketsRes = await pool.query(
+                `SELECT id, tenant_id, status, priority, category, summary, assignee, created_at, updated_at
+                 FROM ms_support_tickets
+                 WHERE tenant_id = $1
+                   AND status IN ('open', 'in_progress', 'escalated')
+                 ORDER BY
+                    CASE priority
+                        WHEN 'critical' THEN 1
+                        WHEN 'high' THEN 2
+                        WHEN 'normal' THEN 3
+                        ELSE 4
+                    END,
+                    created_at ASC
+                 LIMIT $2`,
+                [tenantId, limit]
+            );
+
+            const escalationsRes = await pool.query(
+                `SELECT id, ticket_id, escalated_by_role, level, reason, created_at
+                 FROM ms_ticket_escalations
+                 WHERE tenant_id = $1
+                   AND created_at >= NOW() - ($2::text || ' minutes')::interval
+                 ORDER BY created_at DESC
+                 LIMIT $3`,
+                [tenantId, escalationWindowMinutes, limit]
+            );
+
+            const totals = totalsRes.rows[0] || {};
+            return res.json({
+                success: true,
+                data: {
+                    tenant_id: tenantId,
+                    generated_at: new Date().toISOString(),
+                    escalation_window_minutes: escalationWindowMinutes,
+                    totals: {
+                        total_open: Number(totals.total_open || 0),
+                        critical_open: Number(totals.critical_open || 0),
+                        escalated_open: Number(totals.escalated_open || 0)
+                    },
+                    top_open_tickets: topTicketsRes.rows,
+                    recent_escalations: escalationsRes.rows
+                }
+            });
+        }
+
+        const openStatuses = new Set(['open', 'in_progress', 'escalated']);
+        const ticketSet = memTickets
+            .filter((x) => x.tenant_id === tenantId)
+            .filter((x) => openStatuses.has(String(x.status || '').toLowerCase()));
+
+        const priorityRank = { critical: 1, high: 2, normal: 3, low: 4 };
+        const topOpenTickets = [...ticketSet]
+            .sort((a, b) => {
+                const pa = priorityRank[String(a.priority || 'low').toLowerCase()] || 5;
+                const pb = priorityRank[String(b.priority || 'low').toLowerCase()] || 5;
+                if (pa !== pb) return pa - pb;
+                return Date.parse(a.created_at || new Date().toISOString()) - Date.parse(b.created_at || new Date().toISOString());
+            })
+            .slice(0, limit);
+
+        const now = Date.now();
+        const windowMs = escalationWindowMinutes * 60 * 1000;
+        const recentEscalations = memEscalations
+            .filter((x) => x.tenant_id === tenantId)
+            .filter((x) => now - Date.parse(x.created_at || new Date().toISOString()) <= windowMs)
+            .sort((a, b) => Date.parse(b.created_at || new Date().toISOString()) - Date.parse(a.created_at || new Date().toISOString()))
+            .slice(0, limit);
+
+        return res.json({
+            success: true,
+            data: {
+                tenant_id: tenantId,
+                generated_at: new Date().toISOString(),
+                escalation_window_minutes: escalationWindowMinutes,
+                totals: {
+                    total_open: ticketSet.length,
+                    critical_open: ticketSet.filter((x) => String(x.priority || '').toLowerCase() === 'critical').length,
+                    escalated_open: ticketSet.filter((x) => String(x.status || '').toLowerCase() === 'escalated').length
+                },
+                top_open_tickets: topOpenTickets,
+                recent_escalations: recentEscalations
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: 'support_handoff_summary_failed', message: error.message });
+    }
+});
+
 app.get('/api/ops-service/audit/logs', requireRole(['admin', 'compliance']), async (req, res) => {
     try {
         const tenantId = getTenantId(req);
