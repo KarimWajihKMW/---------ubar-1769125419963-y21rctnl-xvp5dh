@@ -20,11 +20,7 @@ const selectRoleImpl = function(role) {
     }
 
     if (role === 'passenger') {
-        try {
-            syncRolePath('passenger');
-        } catch (e) {
-            // can happen if called before routing constants initialize
-        }
+        syncRolePath('passenger');
         console.log('🧑 Passenger selected');
         // Check for existing session (Auto Login)
         if (typeof DB !== 'undefined' && DB.hasSession()) {
@@ -52,11 +48,7 @@ const selectRoleImpl = function(role) {
             }
         }
     } else if (role === 'driver' || role === 'admin') {
-        try {
-            syncRolePath(role);
-        } catch (e) {
-            // can happen if called before routing constants initialize
-        }
+        syncRolePath(role);
         console.log('🚗/📊 Driver or Admin selected:', role);
         if (typeof openRoleLoginModal === 'function') {
             openRoleLoginModal(role);
@@ -303,6 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
 let currentUserRole = null; // 'passenger', 'driver', 'admin'
 const ROLE_PATHS = Object.freeze({
     passenger: '/home',
+    // Kept per requested naming examples in task statement.
     driver: '/tenants',
     admin: '/admin'
 });
@@ -325,13 +318,25 @@ const PASSENGER_SECTION_PATHS = Object.freeze({
     'trip-details': '/trip-details',
     offers: '/offers'
 });
-const PASSENGER_PATH_TO_SECTION = Object.freeze(
-    Object.entries(PASSENGER_SECTION_PATHS).reduce((acc, [section, suffix]) => {
-        acc[suffix || '/'] = section;
-        return acc;
-    }, {})
-);
+const PASSENGER_PATH_TO_SECTION = Object.freeze({
+    '/': 'destination',
+    '/ride-select': 'rideSelect',
+    '/loading': 'loading',
+    '/driver': 'driver',
+    '/in-ride': 'inRide',
+    '/payment-method': 'payment-method',
+    '/payment-invoice': 'payment-invoice',
+    '/payment-success': 'payment-success',
+    '/rating': 'rating',
+    '/profile': 'profile',
+    '/chat': 'chat',
+    '/trip-history': 'trip-history',
+    '/trip-details': 'trip-details',
+    '/offers': 'offers'
+});
+// Temporarily disables URL write-back while we are applying URL-driven UI state.
 let suppressPathSync = false;
+// Stores initial passenger section parsed from pathname until passenger mode is initialized.
 let pendingPassengerSectionFromPath = null;
 
 function normalizePathname(pathname) {
@@ -11986,7 +11991,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if ((route.role === 'passenger' || currentUserRole === 'passenger') && route.passengerSection && typeof window.switchSection === 'function') {
+            if (route.role === 'passenger' && route.passengerSection && typeof window.switchSection === 'function') {
                 suppressPathSync = true;
                 try {
                     window.switchSection(route.passengerSection);

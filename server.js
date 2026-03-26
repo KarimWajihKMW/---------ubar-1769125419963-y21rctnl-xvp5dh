@@ -1322,7 +1322,7 @@ app.get([
     '/admin',
     '/admin/*'
 ], (req, res) => {
-    return res.sendFile(spaIndexFile);
+    res.sendFile(spaIndexFile);
 });
 
 // Protect /uploads from public access to sensitive files
