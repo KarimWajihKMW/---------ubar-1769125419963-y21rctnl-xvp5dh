@@ -25,6 +25,14 @@ spec:
               value: http://trips-service:4101
             - name: PAYMENTS_SERVICE_URL
               value: http://payments-service:4102
+            - name: OPS_SERVICE_URL
+              value: http://ops-service:4103
+            - name: AI_SERVICE_URL
+              value: http://ai-service:4104
+            - name: SAAS_SERVICE_URL
+              value: http://saas-service:4105
+            - name: EVENTS_SERVICE_URL
+              value: http://events-service:4106
             - name: MONOLITH_URL
               value: http://monolith:3000
           ports:

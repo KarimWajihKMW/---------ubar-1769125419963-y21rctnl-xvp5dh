@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ops-service
+  namespace: ubar
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ops-service
+  template:
+    metadata:
+      labels:
+        app: ops-service
+    spec:
+      containers:
+        - name: ops-service
+          image: ghcr.io/karimwajihkmw/ubar-monolith:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "services/ops-service/server.js"]
+          envFrom:
+            - configMapRef:
+                name: ubar-config
+            - secretRef:
+                name: ubar-secrets
+          ports:
+            - containerPort: 4103
+          readinessProbe:
+            httpGet:
+              path: /api/ops-service/health
+              port: 4103
+            initialDelaySeconds: 8
+            periodSeconds: 8
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ops-service
+  namespace: ubar
+  labels:
+    app: ops-service
+spec:
+  selector:
+    app: ops-service
+  ports:
+    - name: http
+      port: 4103
+      targetPort: 4103

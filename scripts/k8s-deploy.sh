@@ -8,6 +8,10 @@ kubectl apply -f infra/k8s/postgres.yaml
 kubectl apply -f infra/k8s/monolith.yaml
 kubectl apply -f infra/k8s/trips-service.yaml
 kubectl apply -f infra/k8s/payments-service.yaml
+kubectl apply -f infra/k8s/ops-service.yaml
+kubectl apply -f infra/k8s/ai-service.yaml
+kubectl apply -f infra/k8s/saas-service.yaml
+kubectl apply -f infra/k8s/events-service.yaml
 kubectl apply -f infra/k8s/gateway.yaml
 kubectl apply -f infra/k8s/ingress.yaml
 

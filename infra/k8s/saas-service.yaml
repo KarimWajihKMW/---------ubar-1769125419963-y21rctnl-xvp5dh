@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saas-service
+  namespace: ubar
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: saas-service
+  template:
+    metadata:
+      labels:
+        app: saas-service
+    spec:
+      containers:
+        - name: saas-service
+          image: ghcr.io/karimwajihkmw/ubar-monolith:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "services/saas-service/server.js"]
+          envFrom:
+            - configMapRef:
+                name: ubar-config
+            - secretRef:
+                name: ubar-secrets
+          env:
+            - name: BILLING_PROVIDER
+              value: mockpay
+            - name: MOCKPAY_CHECKOUT_BASE_URL
+              value: https://mockpay.local
+            - name: SAAS_BILLING_AUTOCYCLE_ENABLED
+              value: "false"
+            - name: SAAS_RECONCILIATION_ENABLED
+              value: "false"
+          ports:
+            - containerPort: 4105
+          readinessProbe:
+            httpGet:
+              path: /api/saas-service/health
+              port: 4105
+            initialDelaySeconds: 8
+            periodSeconds: 8
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: saas-service
+  namespace: ubar
+  labels:
+    app: saas-service
+spec:
+  selector:
+    app: saas-service
+  ports:
+    - name: http
+      port: 4105
+      targetPort: 4105

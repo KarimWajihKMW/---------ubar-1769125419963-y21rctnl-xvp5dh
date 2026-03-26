@@ -61,3 +61,67 @@ spec:
     - port: http
       path: /metrics
       interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ops-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: ops-service
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ai-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: ai-service
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: saas-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: saas-service
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: events-metrics
+  namespace: ubar
+spec:
+  selector:
+    matchLabels:
+      app: events-service
+  namespaceSelector:
+    matchNames: [ubar]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
