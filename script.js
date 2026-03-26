@@ -2552,6 +2552,7 @@ function showPassengerTripSummaryAndRating(tripId, details = {}) {
     // Stop tracking (polling + socket) but keep last marker position
     stopPassengerLiveTripTracking();
     passengerRealtimeActive = false;
+    passengerLastTripStatus = 'idle';
 
     // Stop receiving live location updates for this trip
     unsubscribeTripRealtime(tripId);
@@ -2599,6 +2600,8 @@ function showPassengerTripSummaryAndRating(tripId, details = {}) {
     } else if (typeof window.switchSection === 'function') {
         window.switchSection('destination');
     }
+    forceRestoreHomeMapAfterTripCompletion();
+    resetPassengerMapVisualState({ resetCamera: true, zoom: 14 });
     clearPassengerRatingInputs();
     openTripCompletionRatingModal();
 
@@ -5246,6 +5249,38 @@ function moveLeafletMapToContainer(containerId) {
     }
 }
 
+function resetPassengerMapVisualState(options = {}) {
+    if (!leafletMap) return;
+
+    const opts = {
+        resetCamera: true,
+        zoom: 14,
+        ...options
+    };
+
+    if (driverMarkerL) {
+        driverMarkerL.remove();
+        driverMarkerL = null;
+    }
+
+    if (routePolyline) {
+        routePolyline.remove();
+        routePolyline = null;
+    }
+
+    passengerTripCenteredOnce = false;
+
+    if (opts.resetCamera) {
+        const fallbackCenter = { lat: 31.2001, lng: 29.9187 };
+        const focus = currentPickup || lastGeoCoords || fallbackCenter;
+        const lat = Number(focus?.lat);
+        const lng = Number(focus?.lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            leafletMap.setView([lat, lng], Number(opts.zoom) || 14);
+        }
+    }
+}
+
 function setPickup(coords, label, options = {}) {
     const keepHub = !!options.keepHub;
     if (!keepHub) {
@@ -6762,8 +6797,14 @@ function formatETA(seconds) {
 
 function stopDriverTrackingLive() {
     if (etaCountdown) clearInterval(etaCountdown);
-    if (driverMarkerL) driverMarkerL.remove();
-    if (routePolyline) routePolyline.remove();
+    if (driverMarkerL) {
+        driverMarkerL.remove();
+        driverMarkerL = null;
+    }
+    if (routePolyline) {
+        routePolyline.remove();
+        routePolyline = null;
+    }
     stopPassengerLiveTripTracking();
 }
 
@@ -8901,6 +8942,11 @@ async function handlePassengerAssignedTrip(trip) {
 }
 
 window.requestRide = async function() {
+    if (!leafletMap) {
+        await initLeafletMap();
+    }
+    forceRestoreHomeMapAfterTripCompletion();
+
     if (!currentPickup) {
         const picked = ensurePickupFallback();
         if (!picked) {
@@ -12161,26 +12207,6 @@ function forceRestoreHomeMapAfterTripCompletion() {
         mapEl.style.height = '100%';
     }
 
-    const shouldHardRemount = !leafletMap || !mapEl || !mapContainer || mapEl.parentElement !== mapContainer;
-    if (shouldHardRemount && mapContainer) {
-        if (mapEl) {
-            mapEl.remove();
-        }
-        const freshMap = document.createElement('div');
-        freshMap.id = 'leaflet-map';
-        freshMap.className = 'absolute inset-0';
-        mapContainer.appendChild(freshMap);
-
-        // Force a full map re-initialization on a fresh DOM node.
-        leafletMap = null;
-        pickupMarkerL = null;
-        destMarkerL = null;
-        driverMarkerL = null;
-        passengerMarkerL = null;
-        routePolyline = null;
-        initLeafletMap();
-    }
-
     if (!leafletMap) {
         initLeafletMap();
     }
@@ -12210,7 +12236,7 @@ function resetPassengerTripStateAfterCompletion(completedTripId = null) {
 
     passengerRealtimeActive = false;
     passengerTripCenteredOnce = false;
-    passengerLastTripStatus = null;
+    passengerLastTripStatus = 'idle';
     passengerTripStartedAt = null;
     activePassengerTripId = null;
     activeDriverTripId = null;
@@ -12240,6 +12266,7 @@ function resetPassengerTripStateAfterCompletion(completedTripId = null) {
     }
 
     forceRestoreHomeMapAfterTripCompletion();
+    resetPassengerMapVisualState({ resetCamera: true, zoom: 14 });
 
     // Keep location services alive for immediate next-trip readiness.
     startLocationTracking();
