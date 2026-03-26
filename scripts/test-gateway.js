@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { createHmac } = require('node:crypto');
+const billingWebhookSecret = process.env.BILLING_WEBHOOK_SECRET || 'billing-webhook-dev-secret';
+const paymentWebhookSecret = process.env.PAYMENT_WEBHOOK_SECRET || 'payment-webhook-dev-secret';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,16 +25,35 @@ async function waitFor(url, tries = 40) {
   return false;
 }
 
-async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 2000) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    const data = await res.json().catch(() => ({}));
-    return { res, data };
-  } finally {
-    clearTimeout(t);
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 4000, retries = 2) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status >= 500 && attempt < retries) {
+        await sleep(200 + (attempt * 150));
+        continue;
+      }
+
+      return { res, data };
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) {
+        await sleep(200 + (attempt * 150));
+        continue;
+      }
+      throw error;
+    } finally {
+      clearTimeout(t);
+    }
   }
+
+  throw lastError || new Error('request_failed');
 }
 
 function start(cmd, args, env = {}) {
@@ -42,13 +63,25 @@ function start(cmd, args, env = {}) {
   });
 }
 
+function freePort(port) {
+  spawnSync('bash', ['-lc', `lsof -ti tcp:${port} | xargs -r kill -9`], {
+    stdio: 'ignore'
+  });
+}
+
+const memoryModeEnv = { DATABASE_URL: '' };
+
 async function main() {
-  const trips = start(process.execPath, ['services/trips-service/server.js']);
-  const payments = start(process.execPath, ['services/payments-service/server.js']);
-  const ops = start(process.execPath, ['services/ops-service/server.js']);
-  const ai = start(process.execPath, ['services/ai-service/server.js']);
-  const saas = start(process.execPath, ['services/saas-service/server.js']);
-  const events = start(process.execPath, ['services/events-service/server.js']);
+  for (const port of [4101, 4102, 4103, 4104, 4105, 4106, 8080]) {
+    freePort(port);
+  }
+
+  const trips = start(process.execPath, ['services/trips-service/server.js'], memoryModeEnv);
+  const payments = start(process.execPath, ['services/payments-service/server.js'], memoryModeEnv);
+  const ops = start(process.execPath, ['services/ops-service/server.js'], memoryModeEnv);
+  const ai = start(process.execPath, ['services/ai-service/server.js'], memoryModeEnv);
+  const saas = start(process.execPath, ['services/saas-service/server.js'], memoryModeEnv);
+  const events = start(process.execPath, ['services/events-service/server.js'], memoryModeEnv);
   const gateway = start(process.execPath, ['gateway/server.js'], {
     GATEWAY_PORT: '8080',
     TRIPS_SERVICE_URL: 'http://localhost:4101',
@@ -165,7 +198,7 @@ async function main() {
       payment_id: String(onlineIntentResp.data.data.id),
       provider_reference: `pay_ref_${Date.now()}`
     };
-    const paymentWebhookSignature = createHmac('sha256', 'payment-webhook-dev-secret')
+    const paymentWebhookSignatureFixed = createHmac('sha256', paymentWebhookSecret)
       .update(JSON.stringify(paymentWebhookPayload))
       .digest('hex');
 
@@ -173,7 +206,7 @@ async function main() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-payment-signature': paymentWebhookSignature
+        'x-payment-signature': paymentWebhookSignatureFixed
       },
       body: JSON.stringify(paymentWebhookPayload)
     });
@@ -217,38 +250,48 @@ async function main() {
       throw new Error('wallet_withdrawal_request_failed');
     }
 
-    const manualAssignResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/dispatch/manual-assign', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': 'demo-tenant',
-        'x-role': 'dispatcher'
-      },
-      body: JSON.stringify({
-        trip_id: 'trip-900',
-        driver_id: 'driver-9',
-        reason: 'vip_reassignment'
-      })
-    });
+    let manualAssignResp;
+    for (let i = 0; i < 3; i++) {
+      manualAssignResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/dispatch/manual-assign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': 'demo-tenant',
+          'x-role': 'dispatcher'
+        },
+        body: JSON.stringify({
+          trip_id: 'trip-900',
+          driver_id: 'driver-9',
+          reason: 'vip_reassignment'
+        })
+      });
+      if (manualAssignResp.res.ok && manualAssignResp.data?.success) break;
+      await sleep(200 + (i * 150));
+    }
     if (!manualAssignResp.res.ok || !manualAssignResp.data?.success) {
       throw new Error('ops_manual_assign_failed');
     }
 
-    const ticketResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/tickets', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-id': 'demo-tenant',
-        'x-role': 'support'
-      },
-      body: JSON.stringify({
-        rider_id: 'rider-1',
-        category: 'trip_issue',
-        priority: 'high',
-        summary: 'Driver took wrong route and ride was delayed',
-        details: 'Customer requesting partial refund'
-      })
-    });
+    let ticketResp;
+    for (let i = 0; i < 3; i++) {
+      ticketResp = await fetchJsonWithTimeout('http://localhost:8080/api/ms/ops/support/tickets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': 'demo-tenant',
+          'x-role': 'support'
+        },
+        body: JSON.stringify({
+          rider_id: 'rider-1',
+          category: 'trip_issue',
+          priority: 'high',
+          summary: 'Driver took wrong route and ride was delayed',
+          details: 'Customer requesting partial refund'
+        })
+      });
+      if (ticketResp.res.ok && ticketResp.data?.success) break;
+      await sleep(200 + (i * 150));
+    }
     if (!ticketResp.res.ok || !ticketResp.data?.success || !ticketResp.data?.data?.id) {
       throw new Error('ops_ticket_create_failed');
     }
@@ -409,7 +452,7 @@ async function main() {
       invoice_id: String(issueInvoiceResp.data.data.id),
       provider_reference: `paid_ref_${Date.now()}`
     };
-    const webhookSignature = createHmac('sha256', 'billing-webhook-dev-secret')
+    const webhookSignature = createHmac('sha256', billingWebhookSecret)
       .update(JSON.stringify(webhookPayload))
       .digest('hex');
 

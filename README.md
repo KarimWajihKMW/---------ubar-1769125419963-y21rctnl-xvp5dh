@@ -178,11 +178,23 @@ Useful scripts:
 - `npm run micro:down`
 - `npm run test:gateway`
 - `npm run preflight:prod`
+- `npm run sync:secrets:k8s`
+- `npm run release:gate`
 
 Production preflight validates required runtime secrets and can optionally verify deployed service health if `GATEWAY_BASE_URL` is set.
 
 - Script: `scripts/preflight-production.js`
 - CI workflow (manual trigger): `.github/workflows/production-preflight.yml`
+
+Release gate runs full local launch checks in one command:
+
+- Script: `scripts/release-gate.sh`
+- Command: `npm run release:gate`
+
+Kubernetes secret sync helper:
+
+- Script: `scripts/k8s-sync-secrets.sh`
+- Command: `npm run sync:secrets:k8s`
 
 ## Monitoring and metrics
 

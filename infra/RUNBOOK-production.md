@@ -25,6 +25,18 @@ Run preflight locally (or in GitHub Actions manual workflow):
 npm run preflight:prod
 ```
 
+Sync Kubernetes secrets from environment values:
+
+```bash
+npm run sync:secrets:k8s
+```
+
+Run full local release gate:
+
+```bash
+npm run release:gate
+```
+
 ## 2) Deploy
 
 ```bash

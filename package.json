@@ -16,6 +16,8 @@
     "start:micro": "docker compose -f docker-compose.microservices.yml up --build",
     "micro:down": "docker compose -f docker-compose.microservices.yml down",
     "deploy:k8s": "bash scripts/k8s-deploy.sh",
+    "sync:secrets:k8s": "bash scripts/k8s-sync-secrets.sh",
+    "release:gate": "bash scripts/release-gate.sh",
     "backup:db": "bash scripts/backup-postgres.sh",
     "restore:db": "bash scripts/restore-postgres.sh",
     "test": "node test-runner.js",
