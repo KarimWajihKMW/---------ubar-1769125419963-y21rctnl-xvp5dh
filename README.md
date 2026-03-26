@@ -218,6 +218,7 @@ Optional live production smoke checks (read-only) can be included in release gat
 Trigger production release gate workflow from terminal (requires GitHub CLI auth):
 
 - Precheck permissions first: `npm run precheck:prod:github`
+- Required token scopes for dispatch: `repo`, `workflow`
 - Script: `scripts/trigger-production-release-gate.sh`
 - Command: `npm run trigger:prod:gate`
 - Optional envs: `RUN_LIVE_SMOKE=1`, `GATEWAY_BASE_URL`, `SMOKE_TENANT_ID`, `SMOKE_ROLE`, `REF_BRANCH`

@@ -44,6 +44,11 @@ npm run precheck:prod:github
 npm run trigger:prod:gate
 ```
 
+GitHub token/user needs workflow dispatch capability with scopes:
+
+- `repo`
+- `workflow`
+
 Trigger with live smoke against deployed gateway:
 
 ```bash
