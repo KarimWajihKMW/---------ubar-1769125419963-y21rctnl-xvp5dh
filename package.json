@@ -18,6 +18,7 @@
     "deploy:k8s": "bash scripts/k8s-deploy.sh",
     "sync:secrets:k8s": "bash scripts/k8s-sync-secrets.sh",
     "release:gate": "bash scripts/release-gate.sh",
+    "precheck:prod:github": "bash scripts/precheck-production-github-access.sh",
     "trigger:prod:gate": "bash scripts/trigger-production-release-gate.sh",
     "backup:db": "bash scripts/backup-postgres.sh",
     "restore:db": "bash scripts/restore-postgres.sh",

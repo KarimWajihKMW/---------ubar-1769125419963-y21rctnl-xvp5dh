@@ -40,6 +40,7 @@ npm run release:gate
 Trigger GitHub production release gate workflow from terminal:
 
 ```bash
+npm run precheck:prod:github
 npm run trigger:prod:gate
 ```
 
