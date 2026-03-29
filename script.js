@@ -9023,12 +9023,10 @@ async function restorePassengerActiveTrip() {
     const status = String(trip.status || '').toLowerCase();
 
     if (status === 'pending' && !trip.driver_id) {
-        switchSection('loading');
-        resetMatchTimelineUI();
-        startPassengerPickupLiveUpdates(activePassengerTripId);
-        startPassengerMatchPolling(activePassengerTripId);
-        showToast('🔄 رجعناك للرحلة الحالية');
-        return true;
+        if (typeof window.switchSection === 'function') {
+            window.switchSection('destination');
+        }
+        return false;
     }
 
     if (status !== 'accepted' && status !== 'assigned' && status !== 'ongoing') {
