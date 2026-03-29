@@ -12201,7 +12201,11 @@ app.get('/api/trips', requireAuth, async (req, res) => {
         
         if (effectiveUserId) {
             paramCount++;
-            query += ` AND user_id = $${paramCount}`;
+            if (authRole === 'passenger') {
+                query += ` AND (rider_id = $${paramCount} OR user_id = $${paramCount})`;
+            } else {
+                query += ` AND user_id = $${paramCount}`;
+            }
             params.push(effectiveUserId);
         }
 
@@ -12242,7 +12246,11 @@ app.get('/api/trips', requireAuth, async (req, res) => {
         
         if (effectiveUserId) {
             countParamIndex++;
-            countQuery += ` AND user_id = $${countParamIndex}`;
+            if (authRole === 'passenger') {
+                countQuery += ` AND (rider_id = $${countParamIndex} OR user_id = $${countParamIndex})`;
+            } else {
+                countQuery += ` AND user_id = $${countParamIndex}`;
+            }
             countParams.push(effectiveUserId);
         }
 
@@ -12297,7 +12305,11 @@ app.get('/api/trips/completed', requireAuth, async (req, res) => {
         const params = [];
         
         if (effectiveUserId) {
-            query += ' AND user_id = $1';
+            if (authRole === 'passenger') {
+                query += ' AND (rider_id = $1 OR user_id = $1)';
+            } else {
+                query += ' AND user_id = $1';
+            }
             params.push(effectiveUserId);
         }
 
@@ -13553,6 +13565,7 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
                     cost,
                     driver_id,
                     user_id,
+                    rider_id,
                     pickup_verified_at,
                     pickup_verified_by,
                     pickup_code_expires_at
@@ -13578,7 +13591,15 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
         }
 
         if (authRole === 'passenger') {
-            if (String(beforeTripRow.user_id) !== String(authUserId)) {
+            const ownerUserId = beforeTripRow.user_id !== undefined && beforeTripRow.user_id !== null
+                ? String(beforeTripRow.user_id)
+                : null;
+            const ownerRiderId = beforeTripRow.rider_id !== undefined && beforeTripRow.rider_id !== null
+                ? String(beforeTripRow.rider_id)
+                : null;
+            const authUid = authUserId !== undefined && authUserId !== null ? String(authUserId) : null;
+
+            if (!authUid || (ownerUserId !== authUid && ownerRiderId !== authUid)) {
                 return res.status(403).json({ success: false, error: 'Forbidden' });
             }
 
@@ -15360,7 +15381,11 @@ app.get('/api/trips/stats/summary', requireAuth, async (req, res) => {
         const params = [];
         
         if (effectiveUserId) {
-            whereClause = 'WHERE user_id = $1';
+            if (authRole === 'passenger') {
+                whereClause = 'WHERE (rider_id = $1 OR user_id = $1)';
+            } else {
+                whereClause = 'WHERE user_id = $1';
+            }
             params.push(effectiveUserId);
         }
 
@@ -15388,6 +15413,11 @@ app.get('/api/trips/stats/summary', requireAuth, async (req, res) => {
             ${whereClause}
         `, params);
         
+        console.log('📊 rider_stats_summary', {
+            rider_id: effectiveUserId ? String(effectiveUserId) : null,
+            completed_trips: Number(result.rows?.[0]?.completed_trips || 0)
+        });
+
         res.json({
             success: true,
             data: result.rows[0]

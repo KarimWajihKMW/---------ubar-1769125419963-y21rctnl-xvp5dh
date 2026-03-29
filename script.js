@@ -2629,6 +2629,10 @@ function handleTripCompletedRealtime(payload) {
             duration: payload?.duration,
             price: payload?.price
         });
+        // Force immediate stats refresh from API after completion
+        setTimeout(() => {
+            refreshPassengerTripStats().catch(() => {});
+        }, 300);
         return;
     }
 
@@ -13004,8 +13008,8 @@ window.loadAllTrips = function() {
     
     container.innerHTML = filteredTrips.map(trip => createTripCard(trip, true)).join('');
     
-    // Update stats
-    updateTripStats(trips);
+    // Update stats (direct API source of truth)
+    updateTripStats();
 };
 
 function createTripCard(trip, showDetailsButton = false) {
@@ -13093,17 +13097,52 @@ function createTripCard(trip, showDetailsButton = false) {
     `;
 }
 
-function updateTripStats(trips) {
-    const totalTrips = trips.length;
-    const totalSpent = trips.reduce((sum, trip) => sum + (trip.cost || 0), 0);
-    const completedTrips = trips.filter(t => t.status === 'completed');
-    const avgRating = completedTrips.length > 0 
-        ? (completedTrips.reduce((sum, trip) => sum + (trip.rating || 5), 0) / completedTrips.length).toFixed(1)
-        : 0;
-    
-    document.getElementById('total-trips-count').innerText = totalTrips;
-    document.getElementById('total-spent').innerText = totalSpent;
-    document.getElementById('avg-rating').innerText = avgRating;
+async function refreshPassengerTripStats() {
+    const totalTripsEl = document.getElementById('total-trips-count');
+    const totalSpentEl = document.getElementById('total-spent');
+    const avgRatingEl = document.getElementById('avg-rating');
+    const user = DB.getUser();
+
+    if (!totalTripsEl || !totalSpentEl || !avgRatingEl || !user || user.role !== 'passenger') return;
+
+    try {
+        const response = await ApiService.trips.getStats(user.id, 'passenger_app');
+        const stats = response?.data || {};
+        const completedTrips = Number(stats.completed_trips || 0);
+        const totalSpent = Number(stats.total_spent || 0);
+        const avgSpend = completedTrips > 0 ? (totalSpent / completedTrips) : 0;
+
+        totalTripsEl.innerText = String(completedTrips);
+        totalSpentEl.innerText = String(Math.round(totalSpent));
+        avgRatingEl.innerText = avgSpend.toFixed(1);
+
+        console.log('📊 rider_stats_frontend', {
+            rider_id: String(user.id),
+            fetched_trips_count: completedTrips
+        });
+    } catch (error) {
+        console.error('Failed to refresh rider stats from API:', error);
+        try {
+            const trips = DB.getTrips() || [];
+            const completedTrips = trips.filter(t => t.status === 'completed').length;
+            const totalSpent = trips
+                .filter(t => t.status === 'completed')
+                .reduce((sum, trip) => sum + Number(trip.cost || 0), 0);
+            const avgSpend = completedTrips > 0 ? (totalSpent / completedTrips) : 0;
+
+            totalTripsEl.innerText = String(completedTrips);
+            totalSpentEl.innerText = String(Math.round(totalSpent));
+            avgRatingEl.innerText = avgSpend.toFixed(1);
+        } catch (fallbackErr) {
+            totalTripsEl.innerText = '0';
+            totalSpentEl.innerText = '0';
+            avgRatingEl.innerText = '0.0';
+        }
+    }
+}
+
+function updateTripStats() {
+    refreshPassengerTripStats().catch(() => {});
 }
 
 window.filterTrips = function(filter) {
