@@ -1313,6 +1313,10 @@ app.use(express.static('.'));
 
 const spaIndexFile = path.join(__dirname, 'index.html');
 app.get([
+    '/passenger',
+    '/passenger/*',
+    '/driver',
+    '/driver/*',
     '/home',
     '/home/*',
     '/tenants',
@@ -12338,6 +12342,47 @@ app.get('/api/trips/completed', requireAuth, async (req, res) => {
     } catch (err) {
         console.error('Error fetching completed trips:', err);
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Get active trip for current passenger session (latest only)
+app.get('/api/trips/active', requireAuth, async (req, res) => {
+    try {
+        const authRole = String(req.auth?.role || '').toLowerCase();
+        const authUserId = req.auth?.uid;
+
+        if (authRole !== 'passenger') {
+            return res.status(403).json({ success: false, error: 'Forbidden' });
+        }
+        if (!authUserId) {
+            return res.status(401).json({ success: false, error: 'Unauthorized' });
+        }
+
+        const result = await pool.query(
+            `SELECT *
+             FROM trips
+             WHERE user_id = $1
+               AND source = 'passenger_app'
+               AND status IN ('pending', 'assigned', 'accepted', 'ongoing')
+               AND COALESCE(trip_status::text, 'pending') NOT IN ('completed', 'rated')
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [authUserId]
+        );
+
+        if (!result.rows.length) {
+            return res.json({ success: true, data: null });
+        }
+
+        const trip = { ...result.rows[0] };
+        if (String(trip.status || '').toLowerCase() === 'assigned') {
+            trip.status = 'accepted';
+        }
+
+        return res.json({ success: true, data: trip });
+    } catch (err) {
+        console.error('Error fetching active passenger trip:', err);
+        return res.status(500).json({ success: false, error: err.message });
     }
 });
 

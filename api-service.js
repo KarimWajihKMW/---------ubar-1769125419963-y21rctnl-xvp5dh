@@ -122,6 +122,11 @@ const ApiService = {
             const queryString = new URLSearchParams(params).toString();
             return ApiService.request(`/trips?${queryString}`);
         },
+
+        // Get latest active passenger trip from server source of truth
+        async getActive() {
+            return ApiService.request('/trips/active');
+        },
         
         // Get completed trips
         async getCompleted(userId = null, source = null) {
