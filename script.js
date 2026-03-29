@@ -206,7 +206,6 @@ function maybeAutoAcceptIncomingTrip(trip) {
 
 // --- Dark Mode ---
 const DARK_MODE_KEY = 'akwadra_dark_mode';
-const PICKUP_HUBS_COLLAPSE_KEY = 'akwadra_pickup_hubs_collapsed';
 const PASSENGER_DRIVER_DETAILS_COLLAPSE_KEY = 'akwadra_passenger_driver_details_collapsed';
 const DRIVER_TRIP_DETAILS_COLLAPSE_KEY = 'akwadra_driver_trip_details_collapsed';
 const PASSENGER_EXTRA_OPTIONS_COLLAPSE_KEY = 'akwadra_passenger_extra_options_collapsed';
@@ -270,19 +269,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Realtime trip sync (Socket.io) - no manual refresh
     initRealtimeSocket();
 
-    // Pickup hub preference -> refresh suggestions
-    const pref = document.getElementById('pickup-hub-preference');
-    if (pref) {
-        pref.addEventListener('change', () => {
-            try { refreshPickupHubSuggestions(); } catch (e) {}
-        });
-    }
-
-    pickupHubSuggestionsCollapsed = SafeStorage.getItem(PICKUP_HUBS_COLLAPSE_KEY) === '1';
     passengerDriverDetailsCollapsed = SafeStorage.getItem(PASSENGER_DRIVER_DETAILS_COLLAPSE_KEY) === '1';
     driverTripDetailsCollapsed = SafeStorage.getItem(DRIVER_TRIP_DETAILS_COLLAPSE_KEY) === '1';
     passengerExtraOptionsCollapsed = SafeStorage.getItem(PASSENGER_EXTRA_OPTIONS_COLLAPSE_KEY) === '1';
-    updatePickupHubSuggestionsCollapseUI();
     updatePassengerDriverDetailsCollapseUI();
     updateDriverTripDetailsCollapseUI();
     updateRideExtraOptionsCollapseUI();
@@ -328,7 +317,6 @@ let passengerTripStartedAt = null;
 let driverTripStartedAt = null;
 let lastDriverLocationUpdateAt = 0;
 let nearestDriverPreview = null;
-let pickupHubSuggestionsCollapsed = false;
 let passengerDriverDetailsCollapsed = false;
 let driverTripDetailsCollapsed = false;
 let passengerExtraOptionsCollapsed = false;
@@ -2953,7 +2941,6 @@ let driverIncomingTripUpdateInterval = null;
 let passengerLiveEtaTicker = null;
 let passengerLiveEtaState = { target: null, seconds: 0 };
 
-let pickupHubSuggestRequestAt = 0;
 let destinationSuggestTimer = null;
 let destinationSuggestAbortController = null;
 let destinationSuggestRequestSeq = 0;
@@ -3656,26 +3643,6 @@ function clearSelectedPickupHub() {
     currentPickupHubId = null;
 }
 
-function updatePickupHubSuggestionsCollapseUI() {
-    const content = document.getElementById('pickup-hubs-content');
-    const icon = document.getElementById('pickup-hubs-toggle-icon');
-    const toggleBtn = document.getElementById('pickup-hubs-toggle-btn');
-    if (!content || !icon || !toggleBtn) return;
-
-    content.classList.toggle('hidden', pickupHubSuggestionsCollapsed);
-    icon.classList.toggle('fa-chevron-up', !pickupHubSuggestionsCollapsed);
-    icon.classList.toggle('fa-chevron-down', pickupHubSuggestionsCollapsed);
-    toggleBtn.setAttribute('aria-expanded', pickupHubSuggestionsCollapsed ? 'false' : 'true');
-}
-
-function togglePickupHubSuggestions() {
-    pickupHubSuggestionsCollapsed = !pickupHubSuggestionsCollapsed;
-    SafeStorage.setItem(PICKUP_HUBS_COLLAPSE_KEY, pickupHubSuggestionsCollapsed ? '1' : '0');
-    updatePickupHubSuggestionsCollapseUI();
-}
-
-window.togglePickupHubSuggestions = togglePickupHubSuggestions;
-
 function updatePassengerDriverDetailsCollapseUI() {
     const content = document.getElementById('passenger-driver-details-content');
     const icon = document.getElementById('passenger-driver-details-toggle-icon');
@@ -3724,46 +3691,6 @@ window.passengerStartTripShortcut = function() {
     }
     showToast('بانتظار الكابتن يبدأ الرحلة بعد تأكيد الاستلام');
 };
-
-function renderPickupHubSuggestions(hubs) {
-    const box = document.getElementById('pickup-hubs-suggestions');
-    const list = document.getElementById('pickup-hubs-list');
-    if (!box || !list) return;
-
-    const rows = Array.isArray(hubs) ? hubs : [];
-    if (!rows.length) {
-        box.classList.add('hidden');
-        list.innerHTML = '';
-        return;
-    }
-
-    list.innerHTML = rows.map((h) => {
-        const title = (h.title || '').toString();
-        const category = (h.category || '').toString();
-        const dist = Number.isFinite(Number(h.distance_km)) ? `${Number(h.distance_km).toFixed(1)} كم` : '';
-        const sub = [category, dist].filter(Boolean).join(' • ');
-        return `
-            <button type="button" data-hub-id="${String(h.id)}" class="w-full text-right px-3 py-2 rounded-xl bg-gray-50 hover:bg-indigo-50 border border-gray-100 hover:border-indigo-100 transition-colors">
-                <div class="font-extrabold text-gray-800 text-sm">${escapeHtml(title)}</div>
-                ${sub ? `<div class="text-xs font-bold text-gray-500 mt-0.5">${escapeHtml(sub)}</div>` : ''}
-            </button>
-        `;
-    }).join('');
-
-    box.classList.remove('hidden');
-    updatePickupHubSuggestionsCollapseUI();
-
-    list.querySelectorAll('button[data-hub-id]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const hubId = Number(btn.getAttribute('data-hub-id'));
-            const hub = rows.find((h) => Number(h.id) === hubId);
-            if (!hub) return;
-            setSelectedPickupHub(hub);
-            setPickup({ lat: Number(hub.lat), lng: Number(hub.lng) }, hub.title || 'نقطة تجمع', { keepHub: true });
-            showToast('✅ تم اختيار نقطة تجمع');
-        });
-    });
-}
 
 function escapeHtml(str) {
     return String(str || '')
@@ -4892,27 +4819,6 @@ window.setAccessibilityFeedback = function(respected) {
     }
 };
 
-async function refreshPickupHubSuggestions() {
-    if (currentUserRole !== 'passenger') return;
-    if (!currentPickup || !Number.isFinite(currentPickup.lat) || !Number.isFinite(currentPickup.lng)) return;
-    if (!window.ApiService || !ApiService.pickupHubs || typeof ApiService.pickupHubs.suggest !== 'function') return;
-
-    const now = Date.now();
-    if (now - pickupHubSuggestRequestAt < 1500) return;
-    pickupHubSuggestRequestAt = now;
-
-    try {
-        const prefEl = document.getElementById('pickup-hub-preference');
-        const preference = prefEl && prefEl.value ? String(prefEl.value) : 'clear';
-        const accessibility = hasAccessibilityNeeds(passengerAccessibilityProfile);
-        const resp = await ApiService.pickupHubs.suggest(currentPickup.lat, currentPickup.lng, 6, preference, accessibility);
-        renderPickupHubSuggestions(resp?.data || []);
-    } catch (e) {
-        // Hide on error
-        renderPickupHubSuggestions([]);
-    }
-}
-
 function formatStreetLabel(label) {
     if (!label) return 'موقع محدد';
     const parts = label.split(',').map(part => part.trim()).filter(Boolean);
@@ -5309,11 +5215,8 @@ function setPickup(coords, label, options = {}) {
             bindStreetLabel(pickupMarkerL, address);
             updateCurrentLocationInput(address);
             showToast('تم تعديل موقع الالتقاط');
-            refreshPickupHubSuggestions();
         });
     });
-
-    refreshPickupHubSuggestions();
 }
 
 function setDestination(coords, label) {
