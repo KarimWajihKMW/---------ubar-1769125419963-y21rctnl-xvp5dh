@@ -8963,7 +8963,7 @@ function isPassengerTripResumable(trip) {
     const tripStatus = String(trip.trip_status || '').toLowerCase();
     if (status === 'cancelled' || status === 'completed') return false;
     if (tripStatus === 'completed' || tripStatus === 'rated') return false;
-    return status === 'pending' || status === 'accepted' || status === 'ongoing';
+    return status === 'pending' || status === 'accepted' || status === 'assigned' || status === 'ongoing';
 }
 
 async function getLatestPassengerActiveTrip() {
@@ -9032,7 +9032,7 @@ async function restorePassengerActiveTrip() {
         return true;
     }
 
-    if (status !== 'accepted' && status !== 'ongoing') {
+    if (status !== 'accepted' && status !== 'assigned' && status !== 'ongoing') {
         if (typeof window.switchSection === 'function') {
             window.switchSection('destination');
         }
