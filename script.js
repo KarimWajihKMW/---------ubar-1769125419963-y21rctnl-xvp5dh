@@ -8963,28 +8963,16 @@ function isPassengerTripResumable(trip) {
     const tripStatus = String(trip.trip_status || '').toLowerCase();
     if (status === 'cancelled' || status === 'completed') return false;
     if (tripStatus === 'completed' || tripStatus === 'rated') return false;
-    return status === 'pending' || status === 'assigned' || status === 'ongoing';
+    return status === 'pending' || status === 'accepted' || status === 'ongoing';
 }
 
 async function getLatestPassengerActiveTrip() {
     if (currentUserRole !== 'passenger') return null;
 
-    if (activePassengerTripId) {
-        try {
-            const byId = await ApiService.trips.getById(activePassengerTripId);
-            const tripById = byId?.data || null;
-            if (isPassengerTripResumable(tripById)) {
-                return tripById;
-            }
-        } catch (e) {
-            // ignore and continue with list query
-        }
-    }
-
     try {
-        const list = await ApiService.trips.getAll({ limit: 25, offset: 0, source: 'passenger_app' });
-        const trips = Array.isArray(list?.data) ? list.data : [];
-        return trips.find(isPassengerTripResumable) || null;
+        const response = await ApiService.trips.getActive();
+        const trip = response?.data || null;
+        return isPassengerTripResumable(trip) ? trip : null;
     } catch (e) {
         console.warn('Failed to load latest active passenger trip:', e?.message || e);
         return null;
@@ -9026,6 +9014,9 @@ async function restorePassengerActiveTrip() {
 
     const trip = await getLatestPassengerActiveTrip();
     if (!trip) {
+        if (typeof window.switchSection === 'function') {
+            window.switchSection('destination');
+        }
         return false;
     }
 
@@ -9039,6 +9030,13 @@ async function restorePassengerActiveTrip() {
         startPassengerMatchPolling(activePassengerTripId);
         showToast('🔄 رجعناك للرحلة الحالية');
         return true;
+    }
+
+    if (status !== 'accepted' && status !== 'ongoing') {
+        if (typeof window.switchSection === 'function') {
+            window.switchSection('destination');
+        }
+        return false;
     }
 
     await handlePassengerAssignedTrip(trip);
@@ -9055,6 +9053,44 @@ async function restorePassengerActiveTrip() {
     startPassengerLiveTripTracking(activePassengerTripId, trip.driver_id || null);
     showToast('🔄 رجعناك للرحلة الحالية');
     return true;
+}
+
+function clearPassengerTripStorageOnLogin() {
+    try {
+        SafeStorage.removeItem(DB.keyTrips);
+        SafeStorage.removeItem('akwadra_active_offer');
+        SafeStorage.removeItem(PASSENGER_RATING_QUEUE_KEY);
+        SafeStorage.removeItem(PASSENGER_RATE_LATER_KEY);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function resetPassengerTripRuntimeStateOnLogin() {
+    if (activePassengerTripId) {
+        unsubscribeTripRealtime(activePassengerTripId);
+    }
+    stopPassengerMatchPolling();
+    stopPassengerPickupLiveUpdates();
+    stopPassengerLiveTripTracking();
+    stopDriverTracking();
+    stopDriverTrackingLive();
+    clearDriverPassengerRoute();
+
+    activePassengerTripId = null;
+    activeDriverTripId = null;
+    currentIncomingTrip = null;
+    passengerRealtimeActive = false;
+    passengerTripCenteredOnce = false;
+    passengerLastTripStatus = 'idle';
+    passengerTripStartedAt = null;
+    nearestDriverPreview = null;
+    driverLocation = null;
+    tripDetails = {};
+    selectedPaymentMethod = null;
+
+    tripEtaCache.clear();
+    tripPickupSuggestionCache.clear();
 }
 
 async function loadAssignedDriverLocation(driverId) {
@@ -9402,6 +9438,7 @@ window.requestRide = async function() {
 
 function loginSuccess() {
     window.closeAuthModal();
+    clearPassengerTripStorageOnLogin();
     DB.saveSession(); 
     showToast('تم تسجيل الدخول بنجاح');
     setTimeout(() => {
@@ -9410,6 +9447,9 @@ function loginSuccess() {
 }
 
 function initPassengerMode() {
+    clearPassengerTripStorageOnLogin();
+    resetPassengerTripRuntimeStateOnLogin();
+
     currentUserRole = 'passenger';
     window.currentUserRole = 'passenger';
     syncRolePath('passenger');
@@ -9449,6 +9489,9 @@ function initPassengerMode() {
     if (world) world.classList.add('hidden');
     initLeafletMap();
     updateUIWithUserData();
+    if (typeof window.switchSection === 'function') {
+        window.switchSection('destination');
+    }
 
     // v2: server-backed accessibility profile (voice-first + hub ranking)
     loadPassengerAccessibilityProfile().catch(() => {});
@@ -9481,23 +9524,38 @@ function initPassengerMode() {
     startLocationTracking();
     requestSingleLocationFix();
 
-    // Restore any pending/assigned/ongoing trip so passenger can continue after refresh/navigation.
-    restorePassengerActiveTrip().catch((error) => {
-        console.warn('Failed to restore active passenger trip:', error?.message || error);
-    });
+    const pendingSection = pendingPassengerSectionFromPath;
+    pendingPassengerSectionFromPath = null;
+    const tripSections = new Set(['loading', 'driver', 'inRide']);
 
-    if (pendingPassengerSectionFromPath && pendingPassengerSectionFromPath !== 'destination') {
-        const targetSection = pendingPassengerSectionFromPath;
-        pendingPassengerSectionFromPath = null;
-        suppressPathSync = true;
-        try {
-            window.switchSection(targetSection);
-        } finally {
-            suppressPathSync = false;
-        }
-    } else {
-        pendingPassengerSectionFromPath = null;
-    }
+    // Restore active trip only after server validation.
+    restorePassengerActiveTrip()
+        .then((hasActiveTrip) => {
+            if (pendingSection && pendingSection !== 'destination') {
+                if (!hasActiveTrip && tripSections.has(pendingSection)) {
+                    if (typeof window.switchSection === 'function') {
+                        window.switchSection('destination');
+                    }
+                    return;
+                }
+                suppressPathSync = true;
+                try {
+                    window.switchSection(pendingSection);
+                } finally {
+                    suppressPathSync = false;
+                }
+                return;
+            }
+            if (!hasActiveTrip && typeof window.switchSection === 'function') {
+                window.switchSection('destination');
+            }
+        })
+        .catch((error) => {
+            console.warn('Failed to restore active passenger trip:', error?.message || error);
+            if (typeof window.switchSection === 'function') {
+                window.switchSection('destination');
+            }
+        });
 }
 
 window.switchToPassengerMode = function() {
