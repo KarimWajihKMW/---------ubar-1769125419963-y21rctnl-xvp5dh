@@ -317,7 +317,7 @@ const ROLE_PATH_ALIASES = Object.freeze({
 const PASSENGER_SECTION_PATHS = Object.freeze({
     destination: '',
     rideSelect: '/ride-select',
-    loading: '/loading',
+    loading: '',
     driver: '/driver',
     inRide: '/in-ride',
     'payment-method': '/payment-method',
@@ -333,7 +333,6 @@ const PASSENGER_SECTION_PATHS = Object.freeze({
 const PASSENGER_PATH_TO_SECTION = Object.freeze({
     '/': 'destination',
     '/ride-select': 'rideSelect',
-    '/loading': 'loading',
     '/driver': 'driver',
     '/in-ride': 'inRide',
     '/payment-method': 'payment-method',
