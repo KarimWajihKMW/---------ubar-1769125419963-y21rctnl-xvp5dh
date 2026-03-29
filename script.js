@@ -9116,6 +9116,7 @@ function initPassengerMode() {
     if (world) world.classList.add('hidden');
     initLeafletMap();
     updateUIWithUserData();
+    initPassengerStatsAutoRefresh();
 
     // v2: server-backed accessibility profile (voice-first + hub ranking)
     loadPassengerAccessibilityProfile().catch(() => {});
@@ -13110,7 +13111,7 @@ async function refreshPassengerTripStats() {
         const stats = response?.data || {};
         const completedTrips = Number(stats.completed_trips || 0);
         const totalSpent = Number(stats.total_spent || 0);
-        const avgSpend = completedTrips > 0 ? (totalSpent / completedTrips) : 0;
+        const avgSpend = Number(stats.average_fare || 0);
 
         totalTripsEl.innerText = String(completedTrips);
         totalSpentEl.innerText = String(Math.round(totalSpent));
@@ -13142,6 +13143,12 @@ async function refreshPassengerTripStats() {
 }
 
 function updateTripStats() {
+    refreshPassengerTripStats().catch(() => {});
+}
+
+function initPassengerStatsAutoRefresh() {
+    const user = DB.getUser();
+    if (!user || user.role !== 'passenger') return;
     refreshPassengerTripStats().catch(() => {});
 }
 

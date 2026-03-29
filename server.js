@@ -13733,6 +13733,7 @@ app.patch('/api/trips/:id/status', requireAuth, async (req, res) => {
         
         if (status === 'completed') {
             query += ', completed_at = CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE completed_at END';
+            query += ', rider_id = COALESCE(rider_id, user_id)';
         } else if (status === 'cancelled') {
             query += ', cancelled_at = CASE WHEN cancelled_at IS NULL THEN CURRENT_TIMESTAMP ELSE cancelled_at END';
         } else if (status === 'ongoing') {
@@ -14259,6 +14260,7 @@ async function endTripHandler(req, res) {
             `UPDATE trips
              SET status = 'completed',
                  trip_status = 'completed'::trip_status_enum,
+                 rider_id = COALESCE(rider_id, user_id),
                  completed_at = CURRENT_TIMESTAMP,
                  duration = $2,
                  duration_minutes = $2,
@@ -15406,17 +15408,49 @@ app.get('/api/trips/stats/summary', requireAuth, async (req, res) => {
                 COUNT(*) as total_trips,
                 COUNT(*) FILTER (WHERE status = 'completed') as completed_trips,
                 COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled_trips,
-                COALESCE(SUM(cost) FILTER (WHERE status = 'completed'), 0) as total_spent,
+                COALESCE(SUM(COALESCE(cost, price, 0)) FILTER (WHERE status = 'completed'), 0) as total_spent,
+                CASE
+                    WHEN COUNT(*) FILTER (WHERE status = 'completed') > 0
+                    THEN COALESCE(SUM(COALESCE(cost, price, 0)) FILTER (WHERE status = 'completed'), 0)
+                        / COUNT(*) FILTER (WHERE status = 'completed')
+                    ELSE 0
+                END as average_fare,
                 COALESCE(AVG(COALESCE(passenger_rating, rating)) FILTER (WHERE status = 'completed' AND COALESCE(passenger_rating, rating) IS NOT NULL), 0) as avg_rating,
                 COALESCE(SUM(distance) FILTER (WHERE status = 'completed'), 0) as total_distance
             FROM trips
             ${whereClause}
         `, params);
+
+        if (authRole === 'passenger' && Number(result.rows?.[0]?.completed_trips || 0) === 0 && effectiveUserId) {
+            try {
+                const diag = await pool.query(
+                    `SELECT
+                        COUNT(*) FILTER (WHERE rider_id = $1) AS rider_only_count,
+                        COUNT(*) FILTER (WHERE user_id = $1) AS user_only_count,
+                        COUNT(*) FILTER (WHERE (rider_id = $1 OR user_id = $1) AND status = 'completed') AS completed_union_count
+                     FROM trips`,
+                    [effectiveUserId]
+                );
+                const d = diag.rows?.[0] || {};
+                console.warn('⚠️ rider_stats_no_trips_diagnostic', {
+                    rider_id: String(effectiveUserId),
+                    rider_only_count: Number(d.rider_only_count || 0),
+                    user_only_count: Number(d.user_only_count || 0),
+                    completed_union_count: Number(d.completed_union_count || 0)
+                });
+            } catch (diagErr) {
+                console.warn('⚠️ rider_stats_diagnostic_failed', diagErr?.message || diagErr);
+            }
+        }
         
         console.log('📊 rider_stats_summary', {
             rider_id: effectiveUserId ? String(effectiveUserId) : null,
             completed_trips: Number(result.rows?.[0]?.completed_trips || 0)
         });
+
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
 
         res.json({
             success: true,
